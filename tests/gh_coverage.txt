@@ -1,0 +1,153 @@
+# What the gh_cli tests exercise; `cargo run --example gh_coverage -- update` rewrites it.
+# gh version 2.101.0 (2026-09-15)
+command api
+command auth setup-git
+command auth status
+command auth token
+command release create
+command release delete
+command release delete-asset
+command release download
+command release edit
+command release upload
+command release view
+command repo clone
+command repo create
+command repo delete
+command repo edit
+command repo list
+command repo rename
+command repo view
+flag api --field
+flag api --header
+flag api --include
+flag api --input
+flag api --jq
+flag api --method
+flag api --paginate
+flag api --raw-field
+flag api --silent
+flag api --template
+flag auth setup-git --hostname
+flag auth status --active
+flag auth status --hostname
+flag auth status --json
+flag auth status --show-token
+flag release create --notes
+flag release create --prerelease
+flag release create --repo
+flag release create --title
+flag release delete --repo
+flag release delete --yes
+flag release delete-asset --repo
+flag release delete-asset --yes
+flag release download --dir
+flag release download --output
+flag release download --pattern
+flag release download --repo
+flag release edit --notes
+flag release edit --repo
+flag release edit --title
+flag release upload --clobber
+flag release upload --repo
+flag release view --json
+flag release view --repo
+flag repo create --add-readme
+flag repo create --private
+flag repo create --public
+flag repo create --push
+flag repo create --source
+flag repo delete --yes
+flag repo edit --accept-visibility-change-consequences
+flag repo edit --default-branch
+flag repo edit --delete-branch-on-merge
+flag repo edit --description
+flag repo edit --enable-issues
+flag repo edit --enable-rebase-merge
+flag repo edit --enable-squash-merge
+flag repo edit --enable-wiki
+flag repo edit --homepage
+flag repo edit --visibility
+flag repo list --json
+flag repo list --limit
+flag repo list --visibility
+flag repo rename --repo
+flag repo rename --yes
+flag repo view --jq
+flag repo view --json
+git git-receive-pack
+git git-upload-pack
+git info/refs
+graphql CreateRepositoryPayload.repository
+graphql Mutation.createRepository
+graphql Organization.login
+graphql PageInfo.endCursor
+graphql PageInfo.hasNextPage
+graphql Query.repository
+graphql Query.repositoryOwner
+graphql Query.viewer
+graphql Ref.name
+graphql Repository.databaseId
+graphql Repository.defaultBranchRef
+graphql Repository.description
+graphql Repository.hasIssuesEnabled
+graphql Repository.hasWikiEnabled
+graphql Repository.id
+graphql Repository.isPrivate
+graphql Repository.mergeCommitAllowed
+graphql Repository.name
+graphql Repository.nameWithOwner
+graphql Repository.owner
+graphql Repository.parent
+graphql Repository.rebaseMergeAllowed
+graphql Repository.release
+graphql Repository.squashMergeAllowed
+graphql Repository.sshUrl
+graphql Repository.url
+graphql Repository.viewerPermission
+graphql Repository.visibility
+graphql RepositoryConnection.nodes
+graphql RepositoryConnection.pageInfo
+graphql RepositoryConnection.totalCount
+graphql User.login
+graphql User.repositories
+rest git/get-ref
+rest git/list-matching-refs
+rest meta/get-zen
+rest meta/root
+rest orgs/get
+rest rate-limit/get
+rest repos/create-for-authenticated-user
+rest repos/create-in-org
+rest repos/create-or-update-file-contents
+rest repos/create-release
+rest repos/create-webhook
+rest repos/delete
+rest repos/delete-release
+rest repos/delete-release-asset
+rest repos/delete-webhook
+rest repos/get
+rest repos/get-branch
+rest repos/get-commit
+rest repos/get-content
+rest repos/get-latest-release
+rest repos/get-release
+rest repos/get-release-asset
+rest repos/get-release-by-tag
+rest repos/get-webhook
+rest repos/list-branches
+rest repos/list-for-authenticated-user
+rest repos/list-for-org
+rest repos/list-for-user
+rest repos/list-release-assets
+rest repos/list-releases
+rest repos/list-webhook-deliveries
+rest repos/list-webhooks
+rest repos/ping-webhook
+rest repos/transfer
+rest repos/update
+rest repos/update-release
+rest repos/update-webhook
+rest repos/upload-release-asset
+rest users/get-authenticated
+rest users/get-by-username

@@ -1,0 +1,23 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "ninot-github"
+requires-python = ">=3.9"
+dynamic = ["version"]
+description = "In-memory fake of the GitHub REST API and git hosting for end-to-end tests"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "Pol Feliu Cuberes"}]
+classifiers = ["License :: OSI Approved :: MIT License"]
+
+[project.entry-points.pytest11]
+ninot_github = "ninot_github.pytest_plugin"
+
+[dependency-groups]
+release = ["setuptools-scm>=8"]
+
+[tool.maturin]
+module-name = "ninot_github._native"
+python-source = "src"

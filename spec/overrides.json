@@ -1,0 +1,9 @@
+[
+  {
+    "schema": "validation-error",
+    "path": "",
+    "properties": { "status": { "type": "string" } },
+    "required": ["status"],
+    "reason": "GitHub 422 bodies carry the status as a string, as basic-error's status does: GET https://api.github.com/search/repositories?q= answered {\"message\": \"Validation Failed\", ..., \"status\": \"422\"} on 2026-09-30"
+  }
+]
