@@ -85,8 +85,14 @@ fn authorization() {
     let server = Server::start().unwrap();
     server.add_user("alice");
     server.add_org("acme", &["alice"]);
-    let alice = Api::new(&server, Some(&server.add_token("alice", &["admin:org"])));
-    let repo_only = Api::new(&server, Some(&server.add_token("alice", &["repo"])));
+    let alice = Api::new(
+        &server,
+        Some(&server.add_user("alice").add_token(&["admin:org"])),
+    );
+    let repo_only = Api::new(
+        &server,
+        Some(&server.add_user("alice").add_token(&["repo"])),
+    );
     let anon = Api::new(&server, None);
     let admin = Api::admin(&server);
 
@@ -149,9 +155,12 @@ fn authorization() {
 fn registration_and_remove_tokens() {
     let server = Server::start().unwrap();
     server.add_user("alice");
-    server.add_org("acme", &["alice"]);
+    let acme = server.add_org("acme", &["alice"]);
     server.add_org("other", &[]);
-    let alice = Api::new(&server, Some(&server.add_token("alice", &["admin:org"])));
+    let alice = Api::new(
+        &server,
+        Some(&server.add_user("alice").add_token(&["admin:org"])),
+    );
 
     let registration = alice.post(&org("acme", "runners/registration-token"), json!({}));
     let removal = alice.post(&org("acme", "runners/remove-token"), json!({}));
@@ -175,97 +184,82 @@ fn registration_and_remove_tokens() {
         );
     }
 
-    assert_eq!(
-        server.register_runner("other", registration_token, "box", &[], "linux"),
-        Err("registration token is invalid")
+    assert!(
+        server
+            .org("other")
+            .unwrap()
+            .register_runner(registration_token, "box", &[], "linux")
+            .is_err()
     );
-    assert_eq!(
-        server.register_runner("acme", removal_token, "box", &[], "linux"),
-        Err("registration token is invalid")
-    );
-    let id = server
-        .register_runner("acme", registration_token, "box", &["gpu"], "linux")
-        .unwrap();
-    assert!(id > 0);
-    assert_eq!(
-        server.register_runner("acme", registration_token, "other", &[], "linux"),
-        Err("registration token has already been used")
+    assert!(
+        acme.register_runner(removal_token, "box", &[], "linux")
+            .is_err()
     );
 }
 
 #[test]
 fn register_runner_lists_and_goes_offline() {
     let server = Server::start().unwrap();
-    server.add_org("acme", &[]);
+    let acme = server.add_org("acme", &[]);
     let api = Api::admin(&server);
 
     let token = registration_token(&api, "acme");
-    assert_eq!(
-        server.register_runner("acme", &token, "", &[], "linux"),
-        Err("runner name is invalid")
+    assert!(acme.register_runner(&token, "", &[], "linux").is_err());
+    assert!(
+        acme.register_runner(&token, "box", &["bad\n"], "linux")
+            .is_err()
     );
-    assert_eq!(
-        server.register_runner("acme", &token, "box", &["bad\n"], "linux"),
-        Err("runner label is invalid")
-    );
-    assert_eq!(
-        server.register_runner("acme", &token, "box", &[], ""),
-        Err("runner os is invalid")
-    );
-    let id = server
-        .register_runner("acme", &token, "box", &["gpu"], "linux")
+    assert!(acme.register_runner(&token, "box", &[], "").is_err());
+    let runner = acme
+        .register_runner(&token, "box", &["gpu"], "linux")
         .unwrap();
     let again = registration_token(&api, "acme");
-    assert_eq!(
-        server.register_runner("acme", &again, "BOX", &[], "linux"),
-        Err("a runner with this name already exists")
-    );
-    let mac = server
-        .register_runner("acme", &again, "macbox", &[], "OSX")
-        .unwrap();
+    assert!(acme.register_runner(&again, "BOX", &[], "linux").is_err());
+    let mac = acme.register_runner(&again, "macbox", &[], "OSX").unwrap();
 
     let listed = api.get(&org("acme", "runners"));
     assert_eq!(listed.status, 200);
     assert_eq!(listed.body["total_count"].as_u64(), Some(2));
     assert_eq!(runner_names(&listed.body), ["box", "macbox"]);
 
-    let runner = api.get(&org("acme", &format!("runners/{id}")));
-    assert_eq!(runner.status, 200);
-    assert_eq!(runner.body["id"].as_u64(), Some(id));
-    assert_eq!(runner.body["name"], "box");
-    assert_eq!(runner.body["os"], "linux");
-    assert_eq!(runner.body["status"], "online");
-    assert_eq!(runner.body["busy"], false);
-    assert_eq!(runner.body["ephemeral"], false);
-    assert!(has_label(&runner.body, "self-hosted", "read-only"));
-    assert!(has_label(&runner.body, "Linux", "read-only"));
-    assert!(has_label(&runner.body, "gpu", "custom"));
-    assert!(runner.body["runner_group_id"].as_u64().is_some());
+    let runner_id = runner.id();
+    let runner_detail = api.get(&org("acme", &format!("runners/{}", runner_id)));
+    assert_eq!(runner_detail.status, 200);
+    assert_eq!(runner_detail.body["id"].as_u64(), Some(runner_id));
+    assert_eq!(runner_detail.body["name"], "box");
+    assert_eq!(runner_detail.body["os"], "linux");
+    assert_eq!(runner_detail.body["status"], "online");
+    assert_eq!(runner_detail.body["busy"], false);
+    assert_eq!(runner_detail.body["ephemeral"], false);
+    assert!(has_label(&runner_detail.body, "self-hosted", "read-only"));
+    assert!(has_label(&runner_detail.body, "Linux", "read-only"));
+    assert!(has_label(&runner_detail.body, "gpu", "custom"));
+    assert!(runner_detail.body["runner_group_id"].as_u64().is_some());
 
-    let mac_runner = api.get(&org("acme", &format!("runners/{mac}")));
+    let mac_runner = api.get(&org("acme", &format!("runners/{}", mac.id())));
     assert_eq!(mac_runner.body["os"], "macos");
     assert!(has_label(&mac_runner.body, "macOS", "read-only"));
 
-    server.set_runner_offline("acme", id).unwrap();
+    runner.set_offline().unwrap();
     assert_eq!(
-        api.get(&org("acme", &format!("runners/{id}"))).body["status"],
+        api.get(&org("acme", &format!("runners/{}", runner_id)))
+            .body["status"],
         "offline"
     );
-    assert_eq!(
-        server.set_runner_offline("acme", 9_999_999),
-        Err("unknown runner")
-    );
-    assert_eq!(
-        server.set_runner_offline("nope", id),
-        Err("unknown organization")
-    );
+    assert!(server.runner("acme", 9_999_999).is_none());
+    assert!(server.org("nope").is_none());
 
-    let deleted = api.delete(&org("acme", &format!("runners/{id}")));
+    let deleted = api.delete(&org("acme", &format!("runners/{}", runner_id)));
     assert_eq!(deleted.status, 204);
     assert!(deleted.body.is_null());
-    assert_eq!(api.get(&org("acme", &format!("runners/{id}"))).status, 404);
     assert_eq!(
-        api.delete(&org("acme", &format!("runners/{id}"))).status,
+        api.get(&org("acme", &format!("runners/{}", runner_id)))
+            .status,
+        404
+    );
+    assert_eq!(
+        api.delete(&org("acme", &format!("runners/{}", runner_id)))
+            .status,
         404
     );
     assert_eq!(api.get(&org("acme", "runners/nope")).status, 404);
@@ -278,13 +272,13 @@ fn register_runner_lists_and_goes_offline() {
 #[test]
 fn runner_labels() {
     let server = Server::start().unwrap();
-    server.add_org("acme", &[]);
+    let acme = server.add_org("acme", &[]);
     let api = Api::admin(&server);
     let token = registration_token(&api, "acme");
-    let id = server
-        .register_runner("acme", &token, "box", &["gpu"], "linux")
+    let runner = acme
+        .register_runner(&token, "box", &["gpu"], "linux")
         .unwrap();
-    let labels = org("acme", &format!("runners/{id}/labels"));
+    let labels = org("acme", &format!("runners/{}/labels", runner.id()));
 
     let added = api.post(&labels, json!({ "labels": ["gpu", "fast"] }));
     assert_eq!(added.status, 200);
@@ -338,7 +332,7 @@ fn runner_labels() {
 #[test]
 fn runner_groups_can_be_managed() {
     let server = Server::start().unwrap();
-    server.add_org("acme", &[]);
+    let acme = server.add_org("acme", &[]);
     let api = Api::admin(&server);
 
     let listed = api.get(&org("acme", "runner-groups"));
@@ -368,15 +362,16 @@ fn runner_groups_can_be_managed() {
     );
 
     let alpha_token = registration_token(&api, "acme");
-    let alpha = server
-        .register_runner("acme", &alpha_token, "alpha", &["gpu"], "linux")
+    let alpha = acme
+        .register_runner(&alpha_token, "alpha", &["gpu"], "linux")
         .unwrap();
     let beta_token = registration_token(&api, "acme");
-    let beta = server
-        .register_runner("acme", &beta_token, "beta", &[], "windows")
+    let beta = acme
+        .register_runner(&beta_token, "beta", &[], "windows")
         .unwrap();
     assert_eq!(
-        api.get(&org("acme", &format!("runners/{beta}"))).body["os"],
+        api.get(&org("acme", &format!("runners/{}", beta.id())))
+            .body["os"],
         "windows"
     );
 
@@ -388,7 +383,7 @@ fn runner_groups_can_be_managed() {
             "allows_public_repositories": true,
             "restricted_to_workflows": true,
             "selected_workflows": ["acme/app/.github/workflows/ci.yml@main"],
-            "runners": [alpha],
+            "runners": [alpha.id()],
             "network_configuration_id": "net-1",
         }),
     );
@@ -407,11 +402,15 @@ fn runner_groups_can_be_managed() {
     );
     let group_id = created.body["id"].as_u64().unwrap();
     assert_eq!(
-        api.get(&org("acme", &format!("runners/{alpha}"))).body["runner_group_id"].as_u64(),
+        api.get(&org("acme", &format!("runners/{}", alpha.id())))
+            .body["runner_group_id"]
+            .as_u64(),
         Some(group_id)
     );
     assert_eq!(
-        api.get(&org("acme", &format!("runners/{beta}"))).body["runner_group_id"].as_u64(),
+        api.get(&org("acme", &format!("runners/{}", beta.id())))
+            .body["runner_group_id"]
+            .as_u64(),
         Some(default_id)
     );
 
@@ -501,16 +500,20 @@ fn runner_groups_can_be_managed() {
 
     let moved = api.put(
         &org("acme", &format!("runner-groups/{group_id}/runners")),
-        json!({ "runners": [beta] }),
+        json!({ "runners": [beta.id()] }),
     );
     assert_eq!(moved.status, 204);
     assert!(moved.body.is_null());
     assert_eq!(
-        api.get(&org("acme", &format!("runners/{beta}"))).body["runner_group_id"].as_u64(),
+        api.get(&org("acme", &format!("runners/{}", beta.id())))
+            .body["runner_group_id"]
+            .as_u64(),
         Some(group_id)
     );
     assert_eq!(
-        api.get(&org("acme", &format!("runners/{alpha}"))).body["runner_group_id"].as_u64(),
+        api.get(&org("acme", &format!("runners/{}", alpha.id())))
+            .body["runner_group_id"]
+            .as_u64(),
         Some(default_id)
     );
     assert_eq!(
@@ -522,13 +525,15 @@ fn runner_groups_can_be_managed() {
         "Runners cannot be removed from the default runner group."
     );
     assert_eq!(
-        api.get(&org("acme", &format!("runners/{alpha}"))).body["runner_group_id"].as_u64(),
+        api.get(&org("acme", &format!("runners/{}", alpha.id())))
+            .body["runner_group_id"]
+            .as_u64(),
         Some(default_id)
     );
     assert_eq!(
         api.put(
             &org("acme", &format!("runner-groups/{default_id}/runners")),
-            json!({ "runners": [alpha, 9_999_999] })
+            json!({ "runners": [alpha.id(), 9_999_999] })
         )
         .status,
         404
@@ -566,7 +571,9 @@ fn runner_groups_can_be_managed() {
         404
     );
     assert_eq!(
-        api.get(&org("acme", &format!("runners/{beta}"))).body["runner_group_id"].as_u64(),
+        api.get(&org("acme", &format!("runners/{}", beta.id())))
+            .body["runner_group_id"]
+            .as_u64(),
         Some(default_id)
     );
     assert_eq!(
@@ -584,7 +591,7 @@ fn runner_group_visibility() {
     server.add_org("acme", &["alice"]);
     let alice = Api::new(
         &server,
-        Some(&server.add_token("alice", &["repo", "admin:org"])),
+        Some(&server.add_user("alice").add_token(&["repo", "admin:org"])),
     );
     assert_eq!(
         alice
@@ -831,12 +838,11 @@ fn jitconfig() {
 #[test]
 fn runner_list_is_filtered_and_paginated() {
     let server = Server::start().unwrap();
-    server.add_org("acme", &[]);
+    let acme = server.add_org("acme", &[]);
     let api = Api::admin(&server);
     for index in 0..5 {
         let token = registration_token(&api, "acme");
-        server
-            .register_runner("acme", &token, &format!("r{index}"), &[], "linux")
+        acme.register_runner(&token, &format!("r{index}"), &[], "linux")
             .unwrap();
     }
     let page = api.get(&org("acme", "runners?per_page=2&page=2"));

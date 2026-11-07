@@ -67,7 +67,7 @@ fn create_view_and_list_repositories() {
 fn missing_repositories_are_not_found_errors() {
     let server = Server::start().unwrap();
     server.add_user("bob");
-    let bob = Api::new(&server, Some(&server.add_token("bob", &["repo"])));
+    let bob = Api::new(&server, Some(&server.add_user("bob").add_token(&["repo"])));
     Api::admin(&server).post("/user/repos", json!({ "name": "secret", "private": true }));
     let reply = query(
         &bob,

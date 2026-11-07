@@ -224,7 +224,7 @@ fn seeded_history_reads_back_through_the_timeline_in_order() {
 fn api_actions_append_their_timeline_events() {
     let server = Server::start().unwrap();
     server.add_user("bob");
-    let bob = server.add_token("bob", &["repo"]);
+    let bob = server.add_user("bob").add_token(&["repo"]);
     let repository = server
         .create_repository("admin", "project", false, None, None, "main")
         .unwrap();

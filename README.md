@@ -20,8 +20,8 @@ In Rust tests, add `ninot-github` to `[dev-dependencies]`:
 
 ```rust
 let server = ninot_github::Server::start()?;
-server.add_user("alice");
-let token = server.add_token("alice", &["repo"]);
+let alice = server.add_user("alice");
+let token = alice.add_token(&["repo"]);
 // REST at server.url() and server.url() + "/api/v3", git at server.url()/{owner}/{repo}.git
 ```
 

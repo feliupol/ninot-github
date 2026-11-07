@@ -114,7 +114,9 @@ fn sync_routes_read_git_state_and_mutate_the_same_pull_request_world() {
 
     let server = Server::start().unwrap();
     server.add_user("alice");
-    server.set_user_name("alice", Some("Alice Example".to_owned()));
+    server
+        .add_user("alice")
+        .set_name(Some("Alice Example".to_owned()));
     let repository = server
         .create_repository(
             "alice",
@@ -301,7 +303,7 @@ fn fork_comparison_and_pull_creation_resolve_owner_branch_heads() {
     let server = Server::start().unwrap();
     server.add_user("upstream");
     server.add_user("alice");
-    let alice_token = server.add_token("alice", &["repo", "public_repo"]);
+    let alice_token = server.add_user("alice").add_token(&["repo", "public_repo"]);
     let upstream = server
         .create_repository("upstream", "project", false, None, None, "main")
         .unwrap();
@@ -375,7 +377,7 @@ fn fixture_commits_are_reproducible_across_server_instances() {
 fn gist_creation_is_authenticated_and_persists_for_list_reads() {
     let server = Server::start().unwrap();
     server.add_user("alice");
-    let token = server.add_token("alice", &["gist"]);
+    let token = server.add_user("alice").add_token(&["gist"]);
     let api = common::Api::new(&server, Some(&token));
 
     let created = api.post(
@@ -606,8 +608,8 @@ fn searched_numbers(api: &common::Api, query: &str) -> Vec<u64> {
 #[test]
 fn review_requested_search_matches_requests_through_teams() {
     let server = Server::start().unwrap();
-    server.add_org("org", &["me", "alice"]);
-    server.add_team("org", "reviewers", &["me"]).unwrap();
+    let org = server.add_org("org", &["me", "alice"]);
+    org.add_team("reviewers", &["me"]).unwrap();
     let repository = server
         .create_repository("org", "project", false, None, None, "main")
         .unwrap();
@@ -641,7 +643,7 @@ fn review_requested_search_matches_requests_through_teams() {
             },
         )
         .unwrap();
-    let me = common::Api::new(&server, Some(&server.add_token("me", &["repo"])));
+    let me = common::Api::new(&server, Some(&server.add_user("me").add_token(&["repo"])));
 
     assert_eq!(
         searched_numbers(&me, "is:open is:pr review-requested:@me"),
@@ -678,8 +680,8 @@ fn review_requested_search_matches_requests_through_teams() {
 #[test]
 fn requesting_team_reviewers_resolves_the_organization_team() {
     let server = Server::start().unwrap();
-    server.add_org("org", &["admin"]);
-    server.add_team("org", "reviewers", &["admin"]).unwrap();
+    let org = server.add_org("org", &["admin"]);
+    org.add_team("reviewers", &["admin"]).unwrap();
     let repository = server
         .create_repository("org", "project", false, None, None, "main")
         .unwrap();
@@ -706,7 +708,12 @@ fn requesting_team_reviewers_resolves_the_organization_team() {
 fn teams_belong_to_organizations() {
     let server = Server::start().unwrap();
     server.add_user("alice");
-    assert!(server.add_team("alice", "reviewers", &[]).is_err());
+    assert!(
+        server
+            .add_org("alice", &[])
+            .add_team("reviewers", &[])
+            .is_err()
+    );
 }
 
 #[test]

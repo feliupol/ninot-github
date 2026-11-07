@@ -8,8 +8,9 @@ use ninot_github::faults::Rule;
 use ninot_github::fixtures;
 use ninot_github::server::{
     ActionsSecret as RustActionsSecret, Commit as RustCommit, Issue as RustIssue, Options,
-    Project as RustProject, PullRequest as RustPullRequest, Repository as RustRepository,
-    Review as RustReview, Server as RustServer, WorkflowRun as RustWorkflowRun,
+    Org as RustOrg, Project as RustProject, PullRequest as RustPullRequest,
+    Repository as RustRepository, Review as RustReview, Runner as RustRunner, Server as RustServer,
+    Team as RustTeam, User as RustUser, WorkflowRun as RustWorkflowRun,
 };
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -69,6 +70,30 @@ pub struct Project {
     inner: RustProject,
 }
 
+/// A user fixture handle.
+#[pyclass]
+pub struct User {
+    inner: RustUser,
+}
+
+/// An organization fixture handle.
+#[pyclass]
+pub struct Org {
+    inner: RustOrg,
+}
+
+/// A team fixture handle.
+#[pyclass]
+pub struct Team {
+    inner: RustTeam,
+}
+
+/// A self-hosted Actions runner fixture handle.
+#[pyclass]
+pub struct Runner {
+    inner: RustRunner,
+}
+
 #[pymethods]
 impl Server {
     /// Start a local GitHub-compatible HTTP server.
@@ -115,30 +140,24 @@ impl Server {
             .ok_or_else(|| PyRuntimeError::new_err("server was stopped"))
     }
 
-    /// Adds or updates a user account.
-    #[pyo3(signature = (login, name = None))]
-    fn add_user(&self, login: &str, name: Option<String>) -> PyResult<()> {
-        let server = self.server()?;
-        server.add_user(login);
-        if name.is_some() {
-            server.set_user_name(login, name);
-        }
-        Ok(())
+    /// Adds a user and returns a handle for seeding its fixture state.
+    fn add_user(&self, login: &str) -> PyResult<User> {
+        Ok(User {
+            inner: self.server()?.add_user(login),
+        })
     }
 
-    /// Adds an organization whose members administer its repositories.
-    fn add_org(&self, login: &str, members: Vec<String>) -> PyResult<()> {
+    /// Adds an organization whose members administer its repositories, and returns a handle.
+    fn add_org(&self, login: &str, members: Vec<String>) -> PyResult<Org> {
         let member_refs = members.iter().map(String::as_str).collect::<Vec<_>>();
-        self.server()?.add_org(login, &member_refs);
-        Ok(())
+        Ok(Org {
+            inner: self.server()?.add_org(login, &member_refs),
+        })
     }
 
-    /// Adds members to an organization's team, creating both if needed.
-    fn add_team(&self, org: &str, slug: &str, members: Vec<String>) -> PyResult<()> {
-        let member_refs = members.iter().map(String::as_str).collect::<Vec<_>>();
-        self.server()?
-            .add_team(org, slug, &member_refs)
-            .map_err(|error| PyValueError::new_err(error.to_string()))
+    /// Returns a handle for an existing organization, or `None` when it is absent.
+    fn org(&self, login: &str) -> PyResult<Option<Org>> {
+        Ok(self.server()?.org(login).map(|inner| Org { inner }))
     }
 
     /// Creates an empty repository and returns the handle that owns its fixtures.
@@ -165,12 +184,6 @@ impl Server {
             .server()?
             .repository(owner, name)
             .map(|inner| Repository { inner }))
-    }
-
-    /// Issues a token acting as an existing user.
-    fn add_token(&self, login: &str, scopes: Vec<String>) -> PyResult<String> {
-        let scope_refs = scopes.iter().map(String::as_str).collect::<Vec<_>>();
-        Ok(self.server()?.add_token(login, &scope_refs))
     }
 
     /// Installs a typed fault rule in the HTTP path.
@@ -699,10 +712,103 @@ impl Project {
     }
 }
 
+#[pymethods]
+impl User {
+    /// User login.
+    #[getter]
+    fn login(&self) -> &str {
+        self.inner.login()
+    }
+
+    /// Issues a token acting as this user.
+    fn add_token(&self, scopes: Vec<String>) -> PyResult<String> {
+        let scope_refs = scopes.iter().map(String::as_str).collect::<Vec<_>>();
+        Ok(self.inner.add_token(&scope_refs))
+    }
+
+    /// Sets the display name returned by public user endpoints.
+    #[pyo3(signature = (name=None))]
+    fn set_name(&self, name: Option<String>) {
+        self.inner.set_name(name);
+    }
+}
+
+#[pymethods]
+impl Org {
+    /// Organization login.
+    #[getter]
+    fn login(&self) -> &str {
+        self.inner.login()
+    }
+
+    /// Adds members to the team slug of this organization, creating both if needed.
+    fn add_team(&self, slug: &str, members: Vec<String>) -> PyResult<Team> {
+        let member_refs = members.iter().map(String::as_str).collect::<Vec<_>>();
+        let inner = self
+            .inner
+            .add_team(slug, &member_refs)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(Team { inner })
+    }
+
+    /// Registers a self-hosted runner as the Actions runner would, using a one-time registration
+    /// token from POST /orgs/{org}/actions/runners/registration-token.
+    fn register_runner(
+        &self,
+        registration_token: &str,
+        name: &str,
+        labels: Vec<String>,
+        os: &str,
+    ) -> PyResult<Runner> {
+        let label_refs = labels.iter().map(String::as_str).collect::<Vec<_>>();
+        let inner = self
+            .inner
+            .register_runner(registration_token, name, &label_refs, os)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(Runner { inner })
+    }
+}
+
+#[pymethods]
+impl Team {
+    /// Team slug.
+    #[getter]
+    fn slug(&self) -> &str {
+        self.inner.slug()
+    }
+
+    /// Owning organization.
+    fn org(&self) -> PyResult<Org> {
+        Ok(Org {
+            inner: self.inner.org().clone(),
+        })
+    }
+}
+
+#[pymethods]
+impl Runner {
+    /// Runner id.
+    #[getter]
+    fn id(&self) -> u64 {
+        self.inner.id()
+    }
+
+    /// Marks a runner offline, as if it had disconnected.
+    fn set_offline(&self) -> PyResult<()> {
+        self.inner
+            .set_offline()
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+}
+
 /// Python module for Ninot GitHub.
 #[pymodule]
 fn _native(module: &Bound<PyModule>) -> PyResult<()> {
     module.add_class::<Server>()?;
+    module.add_class::<User>()?;
+    module.add_class::<Org>()?;
+    module.add_class::<Team>()?;
+    module.add_class::<Runner>()?;
     module.add_class::<Repository>()?;
     module.add_class::<Issue>()?;
     module.add_class::<PullRequest>()?;

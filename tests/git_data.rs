@@ -430,7 +430,10 @@ fn putting_contents_rejects_unknown_branches_and_readers() {
     );
 
     server.add_user("reader");
-    let reader = Api::new(&server, Some(&server.add_token("reader", &["repo"])));
+    let reader = Api::new(
+        &server,
+        Some(&server.add_user("reader").add_token(&["repo"])),
+    );
     assert_eq!(
         reader
             .put("/repos/admin/tool/contents/new.txt", body)

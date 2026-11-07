@@ -88,7 +88,7 @@ fn release_creates_its_tag_and_is_found_by_tag_and_latest() {
 fn releases_need_commits_and_drafts_stay_private() {
     let server = Server::start().unwrap();
     server.add_user("bob");
-    let bob = Api::new(&server, Some(&server.add_token("bob", &["repo"])));
+    let bob = Api::new(&server, Some(&server.add_user("bob").add_token(&["repo"])));
     let admin = Api::admin(&server);
     admin.post("/user/repos", json!({ "name": "empty" }));
     assert_eq!(

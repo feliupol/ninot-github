@@ -204,6 +204,34 @@ pub struct Project {
     node_id: String,
 }
 
+/// A user fixture handle. User-owned API state is seeded through this value.
+#[derive(Clone)]
+pub struct User {
+    app: Arc<App>,
+    login: String,
+}
+
+/// An organization fixture handle. Organization-owned API state is seeded through this value.
+#[derive(Clone)]
+pub struct Org {
+    app: Arc<App>,
+    login: String,
+}
+
+/// A team fixture handle, retaining its owning organization.
+#[derive(Clone)]
+pub struct Team {
+    org: Org,
+    slug: String,
+}
+
+/// A self-hosted Actions runner fixture handle.
+#[derive(Clone)]
+pub struct Runner {
+    org: Org,
+    id: u64,
+}
+
 impl Server {
     /// Starts a fake on a free local port, validating its responses against the spec.
     pub fn start() -> io::Result<Self> {
@@ -299,38 +327,51 @@ impl Server {
         self.app.profiler.is_recording()
     }
 
-    /// Adds a user.
-    pub fn add_user(&self, login: &str) {
+    /// Adds a user and returns a handle for seeding its fixture state.
+    pub fn add_user(&self, login: &str) -> User {
         lock(&self.app.state).add_user(login);
-    }
-
-    /// Sets the display name returned by public user endpoints.
-    pub fn set_user_name(&self, login: &str, name: Option<String>) {
-        lock(&self.app.state).set_account_name(login, name);
-    }
-
-    /// Adds an organization whose members administer its repositories.
-    pub fn add_org(&self, login: &str, members: &[&str]) {
-        lock(&self.app.state).add_org(login, members);
-    }
-
-    /// Adds `members` to the team `slug` of the organization `org`, creating both if needed.
-    ///
-    /// # Errors
-    /// When `org` is a user.
-    pub fn add_team(&self, org: &str, slug: &str, members: &[&str]) -> io::Result<()> {
-        let mut state = lock(&self.app.state);
-        if state
-            .account(org)
-            .is_some_and(|account| account.kind != crate::state::AccountKind::Organization)
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("{org} is a user, not an organization"),
-            ));
+        User {
+            app: self.app.clone(),
+            login: login.to_owned(),
         }
-        state.add_team(org, slug, members);
-        Ok(())
+    }
+
+    /// Returns a handle for an existing user, or `None` when it is absent.
+    pub fn user(&self, login: &str) -> Option<User> {
+        let state = lock(&self.app.state);
+        if state.account(login).is_some() {
+            Some(User {
+                app: self.app.clone(),
+                login: login.to_owned(),
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Adds an organization whose members administer its repositories, and returns a handle.
+    pub fn add_org(&self, login: &str, members: &[&str]) -> Org {
+        lock(&self.app.state).add_org(login, members);
+        Org {
+            app: self.app.clone(),
+            login: login.to_owned(),
+        }
+    }
+
+    /// Returns a handle for an existing organization, or `None` when it is absent.
+    pub fn org(&self, login: &str) -> Option<Org> {
+        let state = lock(&self.app.state);
+        if state
+            .account(login)
+            .is_some_and(|account| account.kind == crate::state::AccountKind::Organization)
+        {
+            Some(Org {
+                app: self.app.clone(),
+                login: login.to_owned(),
+            })
+        } else {
+            None
+        }
     }
 
     /// Creates a repository and returns the handle that owns its fixture operations.
@@ -395,30 +436,23 @@ impl Server {
         })
     }
 
-    /// Issues a token acting as the existing user `login`.
-    pub fn add_token(&self, login: &str, scopes: &[&str]) -> String {
-        lock(&self.app.state).add_token(login, scopes)
-    }
-
-    /// Registers a self-hosted runner as the Actions runner would, using a one-time registration
-    /// token from `POST /orgs/{org}/actions/runners/registration-token`.
-    ///
-    /// The runner comes online in the organization's default group. Reusing `registration_token`
-    /// fails, and a failed attempt leaves the token unused.
-    pub fn register_runner(
-        &self,
-        org: &str,
-        registration_token: &str,
-        name: &str,
-        labels: &[&str],
-        os: &str,
-    ) -> Result<u64, &'static str> {
-        lock(&self.app.state).register_runner(org, registration_token, name, labels, os)
-    }
-
-    /// Marks a runner offline, as if it had disconnected.
-    pub fn set_runner_offline(&self, org: &str, runner_id: u64) -> Result<(), &'static str> {
-        lock(&self.app.state).set_runner_offline(org, runner_id)
+    /// Returns a handle for a runner in an organization.
+    pub fn runner(&self, org: &str, id: u64) -> Option<Runner> {
+        let state = lock(&self.app.state);
+        if state.account(org).is_some_and(|account| {
+            account.kind == crate::state::AccountKind::Organization
+                && account.runners.contains_key(&id)
+        }) {
+            Some(Runner {
+                org: Org {
+                    app: self.app.clone(),
+                    login: org.to_owned(),
+                },
+                id,
+            })
+        } else {
+            None
+        }
     }
 
     /// Installs a fault rule, evaluated after the rules already installed.
@@ -480,6 +514,101 @@ impl Server {
     /// Blocks until the server stops.
     pub fn wait(mut self) {
         self.harness.wait();
+    }
+}
+
+impl User {
+    /// User login.
+    pub fn login(&self) -> &str {
+        &self.login
+    }
+
+    /// Issues a token acting as this user.
+    pub fn add_token(&self, scopes: &[&str]) -> String {
+        lock(&self.app.state).add_token(&self.login, scopes)
+    }
+
+    /// Sets the display name returned by public user endpoints.
+    pub fn set_name(&self, name: Option<String>) {
+        lock(&self.app.state).set_account_name(&self.login, name);
+    }
+}
+
+impl Org {
+    /// Organization login.
+    pub fn login(&self) -> &str {
+        &self.login
+    }
+
+    /// Adds `members` to the team `slug` of this organization, creating both if needed.
+    ///
+    /// # Errors
+    /// When the organization key conflicts with a user login.
+    pub fn add_team(&self, slug: &str, members: &[&str]) -> io::Result<Team> {
+        let mut state = lock(&self.app.state);
+        if state
+            .account(&self.login)
+            .is_some_and(|account| account.kind != crate::state::AccountKind::Organization)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{} is a user, not an organization", self.login),
+            ));
+        }
+        state.add_team(&self.login, slug, members);
+        Ok(Team {
+            org: self.clone(),
+            slug: slug.to_owned(),
+        })
+    }
+
+    /// Registers a self-hosted runner as the Actions runner would, using a one-time registration
+    /// token from `POST /orgs/{org}/actions/runners/registration-token`.
+    ///
+    /// The runner comes online in the organization's default group. Reusing `registration_token`
+    /// fails, and a failed attempt leaves the token unused.
+    pub fn register_runner(
+        &self,
+        registration_token: &str,
+        name: &str,
+        labels: &[&str],
+        os: &str,
+    ) -> Result<Runner, &'static str> {
+        let id = lock(&self.app.state).register_runner(
+            &self.login,
+            registration_token,
+            name,
+            labels,
+            os,
+        )?;
+        Ok(Runner {
+            org: self.clone(),
+            id,
+        })
+    }
+}
+
+impl Team {
+    /// Team slug.
+    pub fn slug(&self) -> &str {
+        &self.slug
+    }
+
+    /// Owning organization.
+    pub fn org(&self) -> &Org {
+        &self.org
+    }
+}
+
+impl Runner {
+    /// Runner id.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// Marks a runner offline, as if it had disconnected.
+    pub fn set_offline(&self) -> Result<(), &'static str> {
+        lock(&self.org.app.state).set_runner_offline(&self.org.login, self.id)
     }
 }
 
@@ -2511,8 +2640,7 @@ mod tests {
         .unwrap_err();
         assert!(server.app.state.is_poisoned());
         assert!(lock(&server.app.state).account(ADMIN_LOGIN).is_some());
-        server.add_user("alice");
-        let token = server.add_token("alice", &[]);
+        let token = server.add_user("alice").add_token(&[]);
         let response = reqwest::blocking::Client::new()
             .get(format!("{}/user", server.url()))
             .header("Authorization", format!("token {token}"))

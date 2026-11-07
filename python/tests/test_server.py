@@ -32,9 +32,9 @@ def test_authenticated_request() -> None:
     """Test user authentication and token creation."""
     server = Server()
     login = "testuser"
-    server.add_user(login)
+    user = server.add_user(login)
     scopes = ["repo", "gist"]
-    token = server.add_token(login, scopes)
+    token = user.add_token(scopes)
 
     request = urllib.request.Request(
         f"{server.url}/user",
@@ -155,8 +155,8 @@ def test_git_and_workflow_fixture_apis_serve_real_http_state() -> None:
     """Git commits, fork refs, and Actions fixture rows are visible over REST."""
     with Server() as server:
         server.add_user("upstream")
-        server.add_user("alice")
-        token = server.add_token("alice", ["repo", "public_repo"])
+        alice = server.add_user("alice")
+        token = alice.add_token(["repo", "public_repo"])
         upstream = server.create_repository(
             "upstream", "project", description="upstream", language="Rust"
         )
@@ -205,19 +205,17 @@ def test_team_review_requests_are_searchable_by_member() -> None:
     """A pull request requesting a team appears in its members' review-requested search."""
     with Server() as server:
         server.add_user("me")
-        server.add_org("org", ["me"])
-        server.add_team("org", "reviewers", ["me"])
+        org = server.add_org("org", ["me"])
+        org.add_team("reviewers", ["me"])
         repository = server.create_repository("org", "project")
         repository.create_pull_request(
             1, PullRequestSeed(requested_teams=[TeamSeed(slug="reviewers")])
         )
-        token = server.add_token("me", ["repo"])
+        me = server.add_user("me")
+        token = me.add_token(["repo"])
         request = urllib.request.Request(
             f"{server.url}/search/issues?q=is%3Apr+review-requested%3A%40me",
             headers={"Authorization": f"token {token}"},
         )
         found = json.loads(urllib.request.urlopen(request).read())
         assert [item["number"] for item in found["items"]] == [1]
-        server.add_user("alice")
-        with pytest.raises(ValueError, match="not an organization"):
-            server.add_team("alice", "reviewers", [])

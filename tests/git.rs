@@ -63,7 +63,7 @@ fn public_repositories_clone_anonymously_but_refuse_anonymous_pushes() {
 fn private_repositories_need_access() {
     let server = Server::start().unwrap();
     server.add_user("bob");
-    let bob = server.add_token("bob", &["repo"]);
+    let bob = server.add_user("bob").add_token(&["repo"]);
     let admin = Api::admin(&server);
     admin.post(
         "/user/repos",
@@ -100,7 +100,7 @@ fn private_repositories_need_access() {
 fn readers_cannot_push() {
     let server = Server::start().unwrap();
     server.add_user("bob");
-    let bob = server.add_token("bob", &["repo"]);
+    let bob = server.add_user("bob").add_token(&["repo"]);
     Api::admin(&server).post("/user/repos", json!({ "name": "open", "auto_init": true }));
     let work = TempDir::new();
     git_ok(

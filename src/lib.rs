@@ -72,6 +72,9 @@ pub(crate) mod webhooks;
 pub use graphql::fields as graphql_fields;
 pub use handlers::IMPLEMENTED;
 pub use operation::{Method, OPERATIONS, Operation, OperationInfo, ops};
-pub use server::{Commit, Issue, Project, PullRequest, Repository, Review, Server, WorkflowRun};
+pub use server::{
+    Commit, Issue, Org, Project, PullRequest, Repository, Review, Runner, Server, Team, User,
+    WorkflowRun,
+};
 pub use state::{Delivery, State};
 pub use webhooks::DeliveryHeaders;

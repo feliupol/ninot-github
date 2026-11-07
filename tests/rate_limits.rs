@@ -103,7 +103,7 @@ fn exhausted_core_window_resets_through_the_test_clock() {
         0
     );
 
-    let other = Api::new(&server, Some(&server.add_token("admin", &[])));
+    let other = Api::new(&server, Some(&server.add_user("admin").add_token(&[])));
     assert_window(&other.get("/user"), "core", 2, 1);
 
     let anonymous = Api::new(&server, None);

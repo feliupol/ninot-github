@@ -23,9 +23,9 @@ maturin develop
 from ninot_github import Server
 
 with Server() as server:
-    server.add_user("alice")
+    alice = server.add_user("alice")
     project = server.create_repository("alice", "project")
-    token = server.add_token("alice", ["repo"])
+    token = alice.add_token(["repo"])
     print(server.url)
 ```
 

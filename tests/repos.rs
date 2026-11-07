@@ -21,7 +21,10 @@ fn authenticated_user_and_profiles() {
     let server = Server::start().unwrap();
     server.add_user("alice");
     server.add_org("acme", &["alice"]);
-    let alice = Api::new(&server, Some(&server.add_token("alice", &["repo"])));
+    let alice = Api::new(
+        &server,
+        Some(&server.add_user("alice").add_token(&["repo"])),
+    );
     let me = alice.get("/user");
     assert_eq!(me.status, 200);
     assert_eq!(me.body["login"], "alice");
@@ -39,8 +42,11 @@ fn create_get_and_list_repositories() {
     server.add_user("alice");
     server.add_user("bob");
     server.add_org("acme", &["alice"]);
-    let alice = Api::new(&server, Some(&server.add_token("alice", &["repo"])));
-    let bob = Api::new(&server, Some(&server.add_token("bob", &["repo"])));
+    let alice = Api::new(
+        &server,
+        Some(&server.add_user("alice").add_token(&["repo"])),
+    );
+    let bob = Api::new(&server, Some(&server.add_user("bob").add_token(&["repo"])));
 
     let created = alice.post("/user/repos", json!({ "name": "tool", "description": "d" }));
     assert_eq!(created.status, 201);
@@ -142,7 +148,10 @@ fn list_is_paginated() {
 fn scopes_limit_what_a_token_may_do() {
     let server = Server::start().unwrap();
     server.add_user("alice");
-    let public_only = Api::new(&server, Some(&server.add_token("alice", &["public_repo"])));
+    let public_only = Api::new(
+        &server,
+        Some(&server.add_user("alice").add_token(&["public_repo"])),
+    );
     assert_eq!(
         public_only
             .post("/user/repos", json!({ "name": "open" }))
@@ -155,7 +164,10 @@ fn scopes_limit_what_a_token_may_do() {
             .status,
         403
     );
-    let repo_only = Api::new(&server, Some(&server.add_token("alice", &["repo"])));
+    let repo_only = Api::new(
+        &server,
+        Some(&server.add_user("alice").add_token(&["repo"])),
+    );
     let refused = repo_only.delete("/repos/alice/open");
     assert_eq!(refused.status, 403);
     assert_eq!(
@@ -164,7 +176,7 @@ fn scopes_limit_what_a_token_may_do() {
     );
     let deleter = Api::new(
         &server,
-        Some(&server.add_token("alice", &["repo", "delete_repo"])),
+        Some(&server.add_user("alice").add_token(&["repo", "delete_repo"])),
     );
     assert_eq!(deleter.delete("/repos/alice/open").status, 204);
     assert_eq!(deleter.get("/repos/alice/open").status, 404);
@@ -176,8 +188,11 @@ fn rename_and_transfer_redirect_old_locations() {
     server.add_user("alice");
     server.add_user("bob");
     server.add_org("acme", &["alice"]);
-    let alice = Api::new(&server, Some(&server.add_token("alice", &["repo"])));
-    let bob = Api::new(&server, Some(&server.add_token("bob", &["repo"])));
+    let alice = Api::new(
+        &server,
+        Some(&server.add_user("alice").add_token(&["repo"])),
+    );
+    let bob = Api::new(&server, Some(&server.add_user("bob").add_token(&["repo"])));
     alice.post("/user/repos", json!({ "name": "tool" }));
     assert_eq!(
         bob.patch("/repos/alice/tool", json!({ "private": true }))
@@ -389,7 +404,10 @@ fn repository_search_resolves_user_me_to_the_caller() {
             .create_repository(owner, "match", false, None, None, "main")
             .unwrap();
     }
-    let octocat = Api::new(&server, Some(&server.add_token("octocat", &["repo"])));
+    let octocat = Api::new(
+        &server,
+        Some(&server.add_user("octocat").add_token(&["repo"])),
+    );
     let found = octocat.get("/search/repositories?q=match+in%3Aname%2Cdescription+user%3A%40me");
     assert_eq!(found.status, 200, "{}", found.body);
     let names: Vec<&str> = found.body["items"]

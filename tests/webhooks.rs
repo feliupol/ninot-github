@@ -252,7 +252,7 @@ fn form_hooks_and_failed_deliveries_are_recorded() {
 fn hooks_need_admin() {
     let server = Server::start().unwrap();
     server.add_user("bob");
-    let bob = Api::new(&server, Some(&server.add_token("bob", &["repo"])));
+    let bob = Api::new(&server, Some(&server.add_user("bob").add_token(&["repo"])));
     Api::admin(&server).post("/user/repos", json!({ "name": "tool" }));
     assert_eq!(bob.get("/repos/admin/tool/hooks").status, 404);
     assert_eq!(
