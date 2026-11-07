@@ -92,14 +92,22 @@ impl Handler for ops::ChecksCreate {
             status: phase.status,
             url: format!("{api}/check-runs/{id}"),
         };
-        let repo = repo_mut(&mut state, &found);
-        cap_same_name(repo, suite_id, &run.name);
-        repo.check_annotations.insert(id, stored);
-        repo.check_runs
-            .entry(head_sha)
-            .or_default()
-            .push(run.clone());
-        touch_suite(repo, suite_id);
+        {
+            let repo = repo_mut(&mut state, &found);
+            cap_same_name(repo, suite_id, &run.name);
+            repo.check_annotations.insert(id, stored);
+            repo.check_runs
+                .entry(head_sha)
+                .or_default()
+                .push(run.clone());
+            touch_suite(repo, suite_id);
+        }
+        let mut ctx =
+            crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
+        crate::webhooks::events::check_run::created(&mut ctx, &run);
+        if run.status.to_string() == "completed" {
+            crate::webhooks::events::check_run::completed(&mut ctx, &run);
+        }
         Ok(ApiResponse::typed(201, &types::ChecksCreateResponse(run)))
     }
 }
@@ -123,42 +131,51 @@ impl Handler for ops::ChecksUpdate {
             .iter()
             .map(|item| annotation(item, &web, &current.head_sha))
             .collect::<Vec<_>>();
-        let repo = repo_mut(&mut state, &found);
-        let count = {
-            let stored = repo.check_annotations.entry(id).or_default();
-            stored.extend(appended);
-            i64::try_from(stored.len()).unwrap_or(i64::MAX)
+        let was_completed = current.status.to_string() == "completed";
+        let updated = {
+            let repo = repo_mut(&mut state, &found);
+            let count = {
+                let stored = repo.check_annotations.entry(id).or_default();
+                stored.extend(appended);
+                i64::try_from(stored.len()).unwrap_or(i64::MAX)
+            };
+            let run = find_run_mut(repo, id).expect("check run exists");
+            if let Some(name) = body.name.clone() {
+                run.name = name;
+            }
+            if let Some(details_url) = body.details_url.clone() {
+                run.details_url = Some(details_url);
+            }
+            if let Some(external_id) = body.external_id.clone() {
+                run.external_id = Some(external_id);
+            }
+            if let Some(started_at) = body.started_at {
+                run.started_at = Some(started_at);
+            }
+            run.status = phase.status;
+            run.conclusion = phase.conclusion;
+            run.completed_at = phase.completed_at;
+            if let Some(output) = body.output.as_ref() {
+                if let Some(title) = output.title.clone() {
+                    run.output.title = Some(title);
+                }
+                run.output.summary = Some(String::from(output.summary.clone()));
+                if let Some(text) = output.text.clone() {
+                    run.output.text = Some(String::from(text));
+                }
+                run.output.annotations_count = count;
+            }
+            let suite_id = run.check_suite.as_ref().map(|suite| suite.id);
+            let updated = run.clone();
+            if let Some(suite_id) = suite_id {
+                touch_suite(repo, suite_id);
+            }
+            updated
         };
-        let run = find_run_mut(repo, id).expect("check run exists");
-        if let Some(name) = body.name.clone() {
-            run.name = name;
-        }
-        if let Some(details_url) = body.details_url.clone() {
-            run.details_url = Some(details_url);
-        }
-        if let Some(external_id) = body.external_id.clone() {
-            run.external_id = Some(external_id);
-        }
-        if let Some(started_at) = body.started_at {
-            run.started_at = Some(started_at);
-        }
-        run.status = phase.status;
-        run.conclusion = phase.conclusion;
-        run.completed_at = phase.completed_at;
-        if let Some(output) = body.output.as_ref() {
-            if let Some(title) = output.title.clone() {
-                run.output.title = Some(title);
-            }
-            run.output.summary = Some(String::from(output.summary.clone()));
-            if let Some(text) = output.text.clone() {
-                run.output.text = Some(String::from(text));
-            }
-            run.output.annotations_count = count;
-        }
-        let suite_id = run.check_suite.as_ref().map(|suite| suite.id);
-        let updated = run.clone();
-        if let Some(suite_id) = suite_id {
-            touch_suite(repo, suite_id);
+        if !was_completed && updated.status.to_string() == "completed" {
+            let mut ctx =
+                crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
+            crate::webhooks::events::check_run::completed(&mut ctx, &updated);
         }
         Ok(ApiResponse::typed(
             200,
@@ -194,10 +211,15 @@ impl Handler for ops::ChecksRerequestRun {
         let Some(suite_id) = run.check_suite.as_ref().map(|suite| suite.id) else {
             return Err(not_rerequestable());
         };
-        let repo = repo_mut(&mut state, &found);
-        if !checks_model::mark_rerequested(repo, suite_id) {
-            return Err(not_rerequestable());
+        {
+            let repo = repo_mut(&mut state, &found);
+            if !checks_model::mark_rerequested(repo, suite_id) {
+                return Err(not_rerequestable());
+            }
         }
+        let mut ctx =
+            crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
+        crate::webhooks::events::check_run::rerequested(&mut ctx, &run);
         Ok(ApiResponse::typed(
             201,
             &types::ChecksRerequestRunResponse(types::EmptyObject {}),

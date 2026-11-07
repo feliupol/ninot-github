@@ -13,12 +13,13 @@ use crate::handlers::repos::find_repo;
 use crate::operation::ops;
 use crate::state::{Repo, State, lock};
 use crate::types;
+use crate::webhooks::events;
 
 const REASONS: [&str; 4] = ["off-topic", "too heated", "resolved", "spam"];
 
 impl Handler for ops::IssuesLock {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
-        request.require_scope(&["repo", "public_repo"])?;
+        let caller = request.require_scope(&["repo", "public_repo"])?;
         let body = super::json_body(request)?;
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
@@ -26,30 +27,45 @@ impl Handler for ops::IssuesLock {
         ensure_subject(super::repo(&state, &found), number)?;
         super::require_push(&found)?;
         let reason = lock_reason(&body)?;
+        let actor = super::caller_user(&state, request, &caller.login)?;
         super::with_subject(
             super::repo_mut(&mut state, &found),
             number,
             |issue| lock_issue(issue, reason.clone()),
             |pull| lock_pull(pull, reason.clone()),
         )?;
+        super::record::record_locked(&mut state, &found, number, actor, reason);
+        if let Some(issue) = super::stored_issue(super::repo(&state, &found), number) {
+            let mut ctx = super::webhook_ctx(&mut state, request, &found);
+            events::issues::locked(&mut ctx, &issue);
+        }
         Ok(ApiResponse::no_content())
     }
 }
 
 impl Handler for ops::IssuesUnlock {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
-        request.require_scope(&["repo", "public_repo"])?;
+        let caller = request.require_scope(&["repo", "public_repo"])?;
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         let number = super::issue_number(request)?;
         ensure_subject(super::repo(&state, &found), number)?;
         super::require_push(&found)?;
+        let was_locked = super::record::snapshot(super::repo(&state, &found), number)?.locked;
+        let actor = super::caller_user(&state, request, &caller.login)?;
         super::with_subject(
             super::repo_mut(&mut state, &found),
             number,
             unlock_issue,
             unlock_pull,
         )?;
+        if was_locked {
+            super::record::record_unlocked(&mut state, &found, number, actor);
+            if let Some(issue) = super::stored_issue(super::repo(&state, &found), number) {
+                let mut ctx = super::webhook_ctx(&mut state, request, &found);
+                events::issues::unlocked(&mut ctx, &issue);
+            }
+        }
         Ok(ApiResponse::no_content())
     }
 }

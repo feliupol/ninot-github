@@ -7,6 +7,20 @@ use crate::types;
 
 /// Queues `check_run` `created`.
 pub(crate) fn created(ctx: &mut Ctx, check: &types::CheckRun) {
+    deliver(ctx, "created", check);
+}
+
+/// Queues `check_run` `completed`.
+pub(crate) fn completed(ctx: &mut Ctx, check: &types::CheckRun) {
+    deliver(ctx, "completed", check);
+}
+
+/// Queues `check_run` `rerequested`.
+pub(crate) fn rerequested(ctx: &mut Ctx, check: &types::CheckRun) {
+    deliver(ctx, "rerequested", check);
+}
+
+fn deliver(ctx: &mut Ctx, action: &str, check: &types::CheckRun) {
     if !ctx.wants("check_run") {
         return;
     }
@@ -19,9 +33,9 @@ pub(crate) fn created(ctx: &mut Ctx, check: &types::CheckRun) {
     let now = crate::time::now();
     ctx.enqueue(
         "check_run",
-        "check_run-created",
+        &format!("check_run-{action}"),
         json!({
-            "action": "created",
+            "action": action,
             "check_run": prepare(check, &repository, &sender, &now),
             "repository": repository,
             "sender": sender,
@@ -92,6 +106,9 @@ fn prepare(check: &types::CheckRun, repository: &Value, sender: &Value, now: &st
         object.insert("html_url".to_owned(), url);
     }
     super::fill_null(object, "started_at", Value::from(now));
+    if object.get("status").and_then(Value::as_str) == Some("completed") {
+        super::fill_null(object, "completed_at", Value::from(now));
+    }
     object.insert("app".to_owned(), app);
     object.insert("check_suite".to_owned(), suite);
     if object

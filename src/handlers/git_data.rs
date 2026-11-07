@@ -939,7 +939,8 @@ impl Handler for ops::GitUpdateRef {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let caller = request.require_scope(&["repo", "public_repo"])?.clone();
         let body: types::GitUpdateRefRequest = request.json_as()?;
-        let state = lock(state);
+        let mutex = state;
+        let mut state = lock(mutex);
         let found = find_repo(&state, request)?;
         if !found.permission.push {
             return Err(ApiResponse::error(
@@ -989,7 +990,6 @@ impl Handler for ops::GitUpdateRef {
                 .account(&caller.login)
                 .map(|account| render::simple_user(request, account))
                 .expect("authenticated callers have accounts");
-            let mut state = state;
             crate::handlers::timeline::branch_moved(
                 &mut state,
                 &located.found.owner,
@@ -1006,10 +1006,24 @@ impl Handler for ops::GitUpdateRef {
             .into_iter()
             .find(|found| found.name == reference)
             .ok_or_else(|| ApiResponse::error(500, "updated reference could not be read"))?;
-        Ok(ApiResponse::typed(
+        let response = ApiResponse::typed(
             200,
             &types::GitUpdateRefResponse(render_ref(request, &located, &updated)),
-        ))
+        );
+        let owner = located.found.owner.clone();
+        let name = located.found.name.clone();
+        let old_sha = current.sha.clone();
+        drop(state);
+        crate::webhooks::events::push::enqueue_ref_push(
+            mutex,
+            request,
+            (&owner, &name),
+            &git_dir,
+            &reference,
+            &old_sha,
+            &new_sha,
+        );
+        Ok(response)
     }
 }
 

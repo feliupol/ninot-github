@@ -14,7 +14,9 @@ use crate::handlers::repos::find_repo;
 use crate::operation::ops;
 use crate::state::{Repo, State, lock};
 use crate::types;
+use crate::webhooks::events;
 
+#[derive(Clone, Copy)]
 enum Place {
     Issue { number: u64, index: usize },
     Pull { number: u64, index: usize },
@@ -51,8 +53,14 @@ impl Handler for ops::IssuesUpdateComment {
                 "Must have admin rights to Repository.",
             ));
         }
-        let repo = super::repo_mut(&mut state, &found);
-        let comment = write_body(repo, &place, text);
+        let number = place_number(&place);
+        let old_body = comment_at(super::repo(&state, &found), &place)
+            .body
+            .clone()
+            .unwrap_or_default();
+        let comment = write_body(super::repo_mut(&mut state, &found), &place, text);
+        let mut ctx = super::webhook_ctx(&mut state, request, &found);
+        events::issue_comment::edited(&mut ctx, number, &comment, &old_body);
         Ok(ApiResponse::typed(200, &comment))
     }
 }
@@ -74,7 +82,11 @@ impl Handler for ops::IssuesDeleteComment {
                 "Must have admin rights to Repository.",
             ));
         }
+        let number = place_number(&place);
+        let comment = comment_at(super::repo(&state, &found), &place).clone();
         remove_comment(super::repo_mut(&mut state, &found), &place);
+        let mut ctx = super::webhook_ctx(&mut state, request, &found);
+        events::issue_comment::deleted(&mut ctx, number, &comment);
         Ok(ApiResponse::no_content())
     }
 }
@@ -138,6 +150,12 @@ fn locate(repo: &Repo, id: i64) -> Option<Place> {
         }
     }
     None
+}
+
+fn place_number(place: &Place) -> u64 {
+    match place {
+        Place::Issue { number, .. } | Place::Pull { number, .. } => *number,
+    }
 }
 
 fn comment_at<'a>(repo: &'a Repo, place: &Place) -> &'a types::IssueComment {

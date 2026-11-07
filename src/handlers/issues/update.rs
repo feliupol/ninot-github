@@ -394,29 +394,37 @@ fn apply_change(
     number: u64,
     change: Change,
 ) -> Result<types::Issue, ApiResponse> {
-    let actor = actor_for_close(state, request, login, &change)?;
-    let repo = super::repo_mut(state, found);
-    if let Some(issue) = repo.issues.get_mut(&number) {
-        apply_fields(&mut issue.data, &change, actor);
-    }
-    super::sync_milestones(repo, request, &found.owner, &found.name);
-    Ok(repo.issues.get(&number).expect("issue exists").data.clone())
-}
-
-fn actor_for_close(
-    state: &State,
-    request: &ApiRequest,
-    login: &str,
-    change: &Change,
-) -> Result<Option<types::SimpleUser>, ApiResponse> {
-    if change
+    let actor = super::caller_user(state, request, login)?;
+    let before = super::record::snapshot(super::repo(state, found), number)?;
+    let issue_before = super::repo(state, found)
+        .issues
+        .get(&number)
+        .expect("issue exists")
+        .data
+        .clone();
+    let closer = change
         .transition
         .as_ref()
-        .is_some_and(|transition| transition.closing)
+        .filter(|transition| transition.closing)
+        .map(|_| actor.clone());
     {
-        return Ok(Some(super::caller_user(state, request, login)?));
+        let repo = super::repo_mut(state, found);
+        if let Some(issue) = repo.issues.get_mut(&number) {
+            apply_fields(&mut issue.data, &change, closer);
+        }
+        super::sync_milestones(repo, request, &found.owner, &found.name);
     }
-    Ok(None)
+    let after = super::record::snapshot(super::repo(state, found), number)?;
+    super::record::record_changes(state, found, number, &actor, &before, &after);
+    let issue_after = super::repo(state, found)
+        .issues
+        .get(&number)
+        .expect("issue exists")
+        .data
+        .clone();
+    let mut ctx = crate::webhooks::events::Ctx::new(state, request, &found.owner, &found.name);
+    crate::webhooks::events::issue_changes::from_update(&mut ctx, &issue_before, &issue_after);
+    Ok(issue_after)
 }
 
 fn apply_fields(issue: &mut types::Issue, change: &Change, actor: Option<types::SimpleUser>) {

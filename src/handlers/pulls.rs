@@ -490,9 +490,12 @@ impl Handler for ops::IssuesCreate {
             type_: None,
             updated_at: crate::render::timestamp(&created),
             url: format!("{api}/issues/{number}"),
-            user: Some(user.into()),
+            user: Some(user.clone().into()),
         };
         state.add_issue(&found.owner, &found.name, number, issue.clone());
+        for label in issue.labels.iter().filter_map(issue_label) {
+            super::issues::record::record_labeled(&mut state, &found, number, user.clone(), &label);
+        }
         let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
         events::issues::opened(&mut ctx, &issue);
         for label in issue.labels.iter().filter_map(issue_label) {
@@ -758,7 +761,7 @@ impl Handler for ops::PullsCreate {
 
 impl Handler for ops::IssuesAddLabels {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
-        request.require_scope(&["repo", "public_repo"])?;
+        let caller = request.require_scope(&["repo", "public_repo"])?;
         let body: types::IssuesAddLabelsRequest = request.json_as()?;
         let requested_labels = match body {
             types::IssuesAddLabelsRequest::Variant0 { labels } => {
@@ -861,6 +864,10 @@ impl Handler for ops::IssuesAddLabels {
                 return Err(ApiResponse::not_found());
             }
         };
+        let actor = caller_user(&state, request, &caller.login)?;
+        for label in &added {
+            super::issues::record::record_labeled(&mut state, &found, number, actor.clone(), label);
+        }
         let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
         if let Some(pull) = &pull {
             for label in &added {

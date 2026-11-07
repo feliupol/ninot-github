@@ -15,7 +15,6 @@ use crate::fixtures::{self, IssueSeed, LabelSeed, PullRequestSeed, SeedField};
 use crate::render;
 use crate::state::{Hook, Permission, State};
 use crate::types;
-use crate::validate::check_webhook;
 
 #[test]
 fn every_event_payload_matches_its_schema() {
@@ -103,25 +102,20 @@ fn every_event_payload_matches_its_schema() {
         issues::opened(&mut ctx, &issue);
         for item in issues::issue_labels(&issue) {
             issues::labeled(&mut ctx, &issue, &item);
+            issues::unlabeled(&mut ctx, &issue, &item);
         }
-        for (action, payload) in [
-            (
-                "edited",
-                issues::edited_payload(&ctx, &issue, "Earlier", ""),
-            ),
-            ("closed", issues::closed_payload(&ctx, &issue)),
-            ("reopened", issues::reopened_payload(&ctx, &issue)),
-            ("assigned", issues::assigned_payload(&ctx, &issue)),
-        ] {
-            match payload {
-                Some(payload) => {
-                    if let Err(error) = check_webhook("issues", &payload) {
-                        failures.push(format!("issues {action} builder\n{error}"));
-                    }
-                }
-                None => failures.push(format!("issues {action} builder produced nothing")),
-            }
-        }
+        issues::edited(&mut ctx, &issue, Some("Earlier"), Some(""));
+        let mut closed = issue.clone();
+        closed.state = "closed".to_owned();
+        closed.closed_at = Some(render::timestamp(&crate::time::now()));
+        issues::closed(&mut ctx, &closed);
+        issues::reopened(&mut ctx, &issue);
+        issues::assigned(&mut ctx, &issue, &user);
+        issues::unassigned(&mut ctx, &issue, &user);
+        let mut locked = issue.clone();
+        locked.locked = true;
+        issues::locked(&mut ctx, &locked);
+        issues::unlocked(&mut ctx, &issue);
 
         pull_request::opened(&mut ctx, &pull);
         let mut changes = Map::new();
@@ -151,6 +145,8 @@ fn every_event_payload_matches_its_schema() {
         pull_request_review_comment::created(&mut ctx, &pull, &comment);
         let issue_note = issue_comment(&request, &user, 1);
         issue_comment::created(&mut ctx, 1, &issue_note);
+        issue_comment::edited(&mut ctx, 1, &issue_note, "old");
+        issue_comment::deleted(&mut ctx, 1, &issue_note);
         ctx.state.add_pull_request("admin", "tool", 2, pull.clone());
         issue_comment::created(&mut ctx, 2, &issue_note);
 
@@ -166,6 +162,23 @@ fn every_event_payload_matches_its_schema() {
         .unwrap();
         check_suite::requested(&mut ctx, &check);
         check_run::created(&mut ctx, &check);
+        check_run::completed(&mut ctx, &check);
+        // A rerequest follows a finished run, so its suite carries a conclusion.
+        let finished = fixtures::seeded_check_run(
+            ctx.state,
+            &request,
+            "admin",
+            "tool",
+            sha,
+            fixtures::CheckRunSeed {
+                status: fixtures::SeedField::Present("completed".to_owned()),
+                conclusion: fixtures::SeedField::Present(Some("success".to_owned())),
+                ..fixtures::CheckRunSeed::default()
+            },
+            1,
+        )
+        .unwrap();
+        check_run::rerequested(&mut ctx, &finished);
 
         let run = {
             let account = ctx.state.account("admin").unwrap();
@@ -255,8 +268,20 @@ fn every_event_payload_matches_its_schema() {
         ("pull_request_review_comment", "created"),
         ("issues", "opened"),
         ("issues", "labeled"),
+        ("issues", "unlabeled"),
+        ("issues", "edited"),
+        ("issues", "closed"),
+        ("issues", "reopened"),
+        ("issues", "assigned"),
+        ("issues", "unassigned"),
+        ("issues", "locked"),
+        ("issues", "unlocked"),
         ("issue_comment", "created"),
+        ("issue_comment", "edited"),
+        ("issue_comment", "deleted"),
         ("check_run", "created"),
+        ("check_run", "completed"),
+        ("check_run", "rerequested"),
         ("check_suite", "requested"),
         ("workflow_run", "completed"),
         ("workflow_run", "requested"),

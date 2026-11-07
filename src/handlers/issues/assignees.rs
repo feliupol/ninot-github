@@ -15,12 +15,13 @@ use crate::operation::ops;
 use crate::render;
 use crate::state::{Account, State, lock};
 use crate::types;
+use crate::webhooks::events;
 
 const MAX_ASSIGNEES: usize = 10;
 
 impl Handler for ops::IssuesAddAssignees {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
-        request.require_scope(&["repo", "public_repo"])?;
+        let caller = request.require_scope(&["repo", "public_repo"])?;
         let body = super::object_body(request)?;
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
@@ -34,6 +35,22 @@ impl Handler for ops::IssuesAddAssignees {
             None => Vec::new(),
         };
         let added = resolve_assignees(&state, request, &found.owner, &logins)?;
+        let stored = super::stored_issue(super::repo(&state, &found), number);
+        let already = stored
+            .as_ref()
+            .map(|issue| issue.assignees.clone())
+            .unwrap_or_default();
+        let newly: Vec<types::SimpleUser> = added
+            .iter()
+            .filter(|user| {
+                !already
+                    .iter()
+                    .any(|current| current.login.eq_ignore_ascii_case(&user.login))
+            })
+            .cloned()
+            .collect();
+        let before = super::record::snapshot(super::repo(&state, &found), number)?;
+        let actor = super::caller_user(&state, request, &caller.login)?;
         let issue = super::with_subject(
             super::repo_mut(&mut state, &found),
             number,
@@ -50,13 +67,21 @@ impl Handler for ops::IssuesAddAssignees {
                 Ok(render::issue_from_pull(pull))
             },
         )?;
+        if let Some(issue) = super::stored_issue(super::repo(&state, &found), number) {
+            let mut ctx = super::webhook_ctx(&mut state, request, &found);
+            for user in &newly {
+                events::issues::assigned(&mut ctx, &issue, user);
+            }
+        }
+        let after = super::record::snapshot(super::repo(&state, &found), number)?;
+        super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
         Ok(ApiResponse::typed(201, &issue))
     }
 }
 
 impl Handler for ops::IssuesRemoveAssignees {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
-        request.require_scope(&["repo", "public_repo"])?;
+        let caller = request.require_scope(&["repo", "public_repo"])?;
         let body = super::object_body(request)?;
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
@@ -69,6 +94,11 @@ impl Handler for ops::IssuesRemoveAssignees {
             Some(value) => string_logins(value)?,
             None => Vec::new(),
         };
+        let removed = super::stored_issue(super::repo(&state, &found), number)
+            .map(|issue| without_kept(&issue.assignees, &logins))
+            .unwrap_or_default();
+        let before = super::record::snapshot(super::repo(&state, &found), number)?;
+        let actor = super::caller_user(&state, request, &caller.login)?;
         let issue = super::with_subject(
             super::repo_mut(&mut state, &found),
             number,
@@ -85,6 +115,14 @@ impl Handler for ops::IssuesRemoveAssignees {
                 Ok(render::issue_from_pull(pull))
             },
         )?;
+        if let Some(issue) = super::stored_issue(super::repo(&state, &found), number) {
+            let mut ctx = super::webhook_ctx(&mut state, request, &found);
+            for user in &removed {
+                events::issues::unassigned(&mut ctx, &issue, user);
+            }
+        }
+        let after = super::record::snapshot(super::repo(&state, &found), number)?;
+        super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
         Ok(ApiResponse::typed(200, &issue))
     }
 }
@@ -261,6 +299,18 @@ fn merge_assignees(
         ));
     }
     Ok(users)
+}
+
+fn without_kept(existing: &[types::SimpleUser], logins: &[String]) -> Vec<types::SimpleUser> {
+    existing
+        .iter()
+        .filter(|user| {
+            logins
+                .iter()
+                .any(|login| user.login.eq_ignore_ascii_case(login))
+        })
+        .cloned()
+        .collect()
 }
 
 fn without_logins(existing: &[types::SimpleUser], logins: &[String]) -> Vec<types::SimpleUser> {

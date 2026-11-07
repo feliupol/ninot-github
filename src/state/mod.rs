@@ -5,6 +5,7 @@
 mod account;
 pub(crate) mod actions_service;
 mod hook;
+mod issue_event;
 mod release;
 mod repo;
 mod runner;
@@ -15,6 +16,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 pub use account::{Account, AccountKind, Team};
 pub use hook::{Delivery, Hook};
+pub use issue_event::{IssueEvent, IssueEventKind, IssueEventLabel};
 pub use release::{Asset, Release};
 pub use repo::{
     CheckSuiteRecord, Issue, Milestone, Permission, PullRequest, Repo, ReviewThread,
@@ -533,6 +535,7 @@ impl State {
             Issue {
                 data,
                 comments: Vec::new(),
+                events: Vec::new(),
             },
         );
     }

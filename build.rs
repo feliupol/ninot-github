@@ -167,17 +167,17 @@ const RESPONSE_OPERATIONS: [&str; 70] = [
 ];
 
 /// Payload schemas from octokit/webhooks, `payload-schemas/api.github.com` of the commit in
-/// `SOURCE`, trimmed to the events below and the schemas they reference.
+/// `spec/webhooks/SOURCE`. `scripts/update-webhook-schemas.sh` pins the events below, every
+/// per-action schema of the events this fake delivers, and the schemas they reference.
 const WEBHOOK_SCHEMAS: &str = "spec/webhooks";
 
-/// Events whose aggregate schema is `<event>/event.schema.json` in `spec/webhooks`.
-/// Action payloads (for example `pull_request` opened) live in `src/webhooks/schemas` and are
-/// merged into the validation bundle only; typify keeps generating types for ping and push.
-const WEBHOOK_EVENTS: [&str; 2] = ["ping", "push"];
+/// Events whose aggregate schema is `<event>/event.schema.json`. Per-action payloads, such as
+/// `pull_request/opened.schema.json`, live in the same tree and are validated only.
+const WEBHOOK_EVENTS: [&str; 5] = ["create", "delete", "ping", "push", "status"];
 
-/// Official octokit/webhooks schemas, from the same commit as `spec/webhooks/SOURCE`, for the
-/// events this fake delivers beyond ping and push.
-const EXTRA_WEBHOOK_SCHEMAS: &str = "src/webhooks/schemas";
+/// Aggregate events typify generates as Rust payload types. The other schemas in
+/// [`WEBHOOK_SCHEMAS`] are checked by `validate` and are not generated.
+const WEBHOOK_TYPED_EVENTS: [&str; 2] = ["ping", "push"];
 
 /// One correction to the component schema `schema` at the JSON pointer `path` inside it.
 #[derive(Deserialize)]
@@ -200,7 +200,6 @@ fn main() {
     println!("cargo::rerun-if-changed={SPEC}");
     println!("cargo::rerun-if-changed={OVERRIDES}");
     println!("cargo::rerun-if-changed={WEBHOOK_SCHEMAS}");
-    println!("cargo::rerun-if-changed={EXTRA_WEBHOOK_SCHEMAS}");
     let mut spec: Value =
         serde_json::from_slice(&fs::read(SPEC).expect("cannot read the pinned spec"))
             .expect("the pinned spec is not valid JSON");
@@ -208,6 +207,12 @@ fn main() {
         serde_json::from_slice(&fs::read(OVERRIDES).expect("cannot read the spec overrides"))
             .expect("the spec overrides are malformed");
     apply_overrides(&mut spec, overrides);
+    // GitHub's issues/list-events returns the issue-event object, including closed and
+    // reopened. The spec's issue-event-for-issue anyOf omits those variants.
+    spec["components"]["schemas"]["issue-event-for-issue"]["anyOf"]
+        .as_array_mut()
+        .expect("issue-event-for-issue is an anyOf")
+        .insert(0, json!({ "$ref": "#/components/schemas/issue-event" }));
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     // `validate` checks responses against this patched copy.
     fs::write(
@@ -226,11 +231,8 @@ fn main() {
     fs::write(out.join("types.rs"), prettyplease::unparse(&file))
         .expect("cannot write the generated types");
 
-    let typed = webhook_definitions(Path::new(WEBHOOK_SCHEMAS));
-    let mut definitions = typed.clone();
-    for (name, schema) in read_webhook_definitions(Path::new(EXTRA_WEBHOOK_SCHEMAS)) {
-        definitions.entry(name).or_insert(schema);
-    }
+    let definitions = webhook_definitions(Path::new(WEBHOOK_SCHEMAS));
+    let typed = webhook_type_definitions(&definitions);
     // `validate` checks payloads against this bundle.
     let bundle = json!({
         "$schema": "http://json-schema.org/draft-07/schema",
@@ -292,6 +294,31 @@ fn webhook_definitions(dir: &Path) -> BTreeMap<String, Value> {
         );
     }
     schemas
+}
+
+/// Schemas reachable from [`WEBHOOK_TYPED_EVENTS`]. Action payloads stay in the validation
+/// bundle and are not generated as Rust types.
+fn webhook_type_definitions(schemas: &BTreeMap<String, Value>) -> BTreeMap<String, Value> {
+    let mut needed = BTreeSet::new();
+    let mut pending: Vec<String> = WEBHOOK_TYPED_EVENTS
+        .iter()
+        .map(|event| format!("{event}-event"))
+        .collect();
+    while let Some(name) = pending.pop() {
+        let schema = schemas
+            .get(&name)
+            .unwrap_or_else(|| panic!("{WEBHOOK_SCHEMAS} has no schema {name}"));
+        if needed.insert(name) {
+            referenced(schema, &mut pending);
+        }
+    }
+    needed
+        .into_iter()
+        .map(|name| {
+            let schema = schemas[&name].clone();
+            (name, schema)
+        })
+        .collect()
 }
 
 /// Names the schema `push$event` `push-event` and `common/commit.schema.json` `commit`.

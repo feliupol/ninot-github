@@ -81,7 +81,8 @@ impl Handler for ops::GitCreateTag {
             ));
         }
         let now = render::timestamp(&crate::time::now());
-        let state = lock(state);
+        let mutex = state;
+        let state = lock(mutex);
         let account = state
             .account(&caller.login)
             .expect("authenticated callers have accounts");
@@ -111,6 +112,16 @@ impl Handler for ops::GitCreateTag {
             .map_err(internal)?;
         let decoded = stored.decode().map_err(internal)?;
         let url = tag_url(request, &located, &sha);
+        {
+            let mut state = lock(mutex);
+            let mut ctx = crate::webhooks::events::Ctx::new(
+                &mut state,
+                request,
+                &located.found.owner,
+                &located.found.name,
+            );
+            crate::webhooks::events::create::reference(&mut ctx, &body.tag, "tag");
+        }
         Ok(ApiResponse::typed(
             201,
             &types::GitCreateTagResponse(render_tag(request, &located, &sha, decoded)?),

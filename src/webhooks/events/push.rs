@@ -27,6 +27,26 @@ const MAX_BRANCHES_PER_PUSH: usize = 5000;
 /// page).
 const MAX_TAGS_PER_PUSH: usize = 3;
 
+/// Queues `push` for one ref that moved from `old` to `new`.
+pub(crate) fn enqueue_ref_push(
+    state: &Mutex<State>,
+    request: &ApiRequest,
+    repo: (&str, &str),
+    git_dir: &Path,
+    reference: &str,
+    old: &str,
+    new: &str,
+) {
+    if old == new {
+        return;
+    }
+    let mut before = BTreeMap::new();
+    before.insert(reference.to_owned(), old.to_owned());
+    let mut after = BTreeMap::new();
+    after.insert(reference.to_owned(), new.to_owned());
+    enqueue_push(state, request, repo.0, repo.1, git_dir, &before, &after);
+}
+
 /// Queues one `push` event per ref a push changed, sent by the caller of `request`. Reads the
 /// pushed commits with the lock released so a large push does not stall other requests, and
 /// not at all when no active hook of the repository wants `push`.

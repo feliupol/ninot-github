@@ -7,6 +7,26 @@ use crate::types;
 
 /// Queues `issue_comment` `created` for a comment on issue or pull request `number`.
 pub(crate) fn created(ctx: &mut Ctx, number: u64, comment: &types::IssueComment) {
+    deliver(ctx, "created", number, comment, json!({}));
+}
+
+/// Queues `issue_comment` `edited` with the previous body.
+pub(crate) fn edited(ctx: &mut Ctx, number: u64, comment: &types::IssueComment, from: &str) {
+    deliver(
+        ctx,
+        "edited",
+        number,
+        comment,
+        json!({ "changes": { "body": { "from": from } } }),
+    );
+}
+
+/// Queues `issue_comment` `deleted` for the comment that was just removed.
+pub(crate) fn deleted(ctx: &mut Ctx, number: u64, comment: &types::IssueComment) {
+    deliver(ctx, "deleted", number, comment, json!({}));
+}
+
+fn deliver(ctx: &mut Ctx, action: &str, number: u64, comment: &types::IssueComment, extra: Value) {
     if !ctx.wants("issue_comment") {
         return;
     }
@@ -19,17 +39,17 @@ pub(crate) fn created(ctx: &mut Ctx, number: u64, comment: &types::IssueComment)
     let Some(issue) = issue_value(ctx, number, &repository) else {
         return;
     };
-    ctx.enqueue(
-        "issue_comment",
-        "issue_comment-created",
-        json!({
-            "action": "created",
-            "issue": issue,
-            "comment": prepare_comment(comment, &sender),
-            "repository": repository,
-            "sender": sender,
-        }),
-    );
+    let mut payload = json!({
+        "action": action,
+        "issue": issue,
+        "comment": prepare_comment(comment, &sender),
+        "repository": repository,
+        "sender": sender,
+    });
+    if let (Some(object), Some(extra)) = (payload.as_object_mut(), extra.as_object()) {
+        object.extend(extra.clone());
+    }
+    ctx.enqueue("issue_comment", &format!("issue_comment-{action}"), payload);
 }
 
 fn issue_value(ctx: &Ctx, number: u64, repository: &Value) -> Option<Value> {

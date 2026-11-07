@@ -14,18 +14,44 @@ use crate::operation::ops;
 use crate::render;
 use crate::state::{Repo, State, lock};
 use crate::types;
+use crate::webhooks::events;
 
 impl Handler for ops::IssuesSetLabels {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
-        request.require_scope(&["repo", "public_repo"])?;
+        let caller = request.require_scope(&["repo", "public_repo"])?;
         let body = super::json_body(request)?;
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         let number = super::issue_number(request)?;
         let names = requested_names(&body)?;
-        let current = current_names(super::repo(&state, &found), number)?;
+        let before = super::record::snapshot(super::repo(&state, &found), number)?;
+        let current = before
+            .labels
+            .iter()
+            .map(|label| label.name.clone())
+            .collect::<Vec<_>>();
         super::require_push(&found)?;
         let labels = require_labels(super::repo(&state, &found), &names, &current)?;
+        let catalog = super::catalog(super::repo(&state, &found));
+        let added: Vec<types::Label> = labels
+            .iter()
+            .filter(|label| {
+                !current
+                    .iter()
+                    .any(|name| super::label_key(name) == super::label_key(&label.name))
+            })
+            .cloned()
+            .collect();
+        let removed: Vec<types::Label> = current
+            .iter()
+            .filter(|name| {
+                !labels
+                    .iter()
+                    .any(|label| super::label_key(&label.name) == super::label_key(name))
+            })
+            .filter_map(|name| catalog.get(&super::label_key(name)).cloned())
+            .collect();
+        let actor = super::caller_user(&state, request, &caller.login)?;
         let repo = super::repo_mut(&mut state, &found);
         super::with_subject(
             repo,
@@ -41,18 +67,32 @@ impl Handler for ops::IssuesSetLabels {
                 Ok(())
             },
         )?;
+        fire_label_diff(&mut state, request, &found, number, &added, &removed);
+        let after = super::record::snapshot(super::repo(&state, &found), number)?;
+        super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
         Ok(ApiResponse::typed(200, &labels))
     }
 }
 
 impl Handler for ops::IssuesRemoveAllLabels {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
-        request.require_scope(&["repo", "public_repo"])?;
+        let caller = request.require_scope(&["repo", "public_repo"])?;
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         let number = super::issue_number(request)?;
-        current_names(super::repo(&state, &found), number)?;
+        let before = super::record::snapshot(super::repo(&state, &found), number)?;
+        let current = before
+            .labels
+            .iter()
+            .map(|label| label.name.clone())
+            .collect::<Vec<_>>();
         super::require_push(&found)?;
+        let actor = super::caller_user(&state, request, &caller.login)?;
+        let catalog = super::catalog(super::repo(&state, &found));
+        let removed: Vec<types::Label> = current
+            .iter()
+            .filter_map(|name| catalog.get(&super::label_key(name)).cloned())
+            .collect();
         let repo = super::repo_mut(&mut state, &found);
         super::with_subject(
             repo,
@@ -68,23 +108,39 @@ impl Handler for ops::IssuesRemoveAllLabels {
                 Ok(())
             },
         )?;
+        fire_label_diff(&mut state, request, &found, number, &[], &removed);
+        let after = super::record::snapshot(super::repo(&state, &found), number)?;
+        super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
         Ok(ApiResponse::no_content())
     }
 }
 
 impl Handler for ops::IssuesRemoveLabel {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
-        request.require_scope(&["repo", "public_repo"])?;
+        let caller = request.require_scope(&["repo", "public_repo"])?;
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         let number = super::issue_number(request)?;
         let key = super::label_key(&super::decode_param(request.param("name")));
-        let current = current_names(super::repo(&state, &found), number)?;
-        if !current.iter().any(|name| super::label_key(name) == key) {
+        let before = super::record::snapshot(super::repo(&state, &found), number)?;
+        if !before
+            .labels
+            .iter()
+            .any(|label| super::label_key(&label.name) == key)
+        {
             return Err(ApiResponse::not_found());
         }
         super::require_push(&found)?;
+        let removed = super::catalog(super::repo(&state, &found))
+            .get(&key)
+            .cloned()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let actor = super::caller_user(&state, request, &caller.login)?;
         let remaining = remove_named(&mut state, &found, number, &key)?;
+        fire_label_diff(&mut state, request, &found, number, &[], &removed);
+        let after = super::record::snapshot(super::repo(&state, &found), number)?;
+        super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
         let repo = super::repo(&state, &found);
         Ok(ApiResponse::typed(200, &labels_named(repo, &remaining)))
     }
@@ -169,20 +225,6 @@ pub(super) fn trimmed_name(name: &str) -> Result<String, ApiResponse> {
     Ok(name.to_owned())
 }
 
-fn current_names(repo: &Repo, number: u64) -> Result<Vec<String>, ApiResponse> {
-    if let Some(pull) = repo.pull_requests.get(&number) {
-        let data = pull
-            .data
-            .as_ref()
-            .ok_or_else(|| ApiResponse::error(500, "Pull request REST model is not seeded"))?;
-        return Ok(data.labels.iter().map(|label| label.name.clone()).collect());
-    }
-    repo.issues
-        .get(&number)
-        .map(|issue| super::label_names(&issue.data))
-        .ok_or_else(ApiResponse::not_found)
-}
-
 /// Whether `label` is stored under the lowercase key `key`.
 pub(super) fn named(label: &types::IssueLabelsItem, key: &str) -> bool {
     super::label_from_issue_item(label).is_some_and(|label| super::label_key(&label.name) == key)
@@ -209,6 +251,32 @@ fn remove_named(
             Ok(pull.labels.iter().map(|label| label.name.clone()).collect())
         },
     )
+}
+
+fn fire_label_diff(
+    state: &mut State,
+    request: &ApiRequest,
+    found: &Found,
+    number: u64,
+    added: &[types::Label],
+    removed: &[types::Label],
+) {
+    let issue = super::stored_issue(super::repo(state, found), number);
+    let pull = super::stored_pull(super::repo(state, found), number);
+    let mut ctx = super::webhook_ctx(state, request, found);
+    if let Some(issue) = &issue {
+        for label in added {
+            events::issues::labeled(&mut ctx, issue, label);
+        }
+        for label in removed {
+            events::issues::unlabeled(&mut ctx, issue, label);
+        }
+    }
+    if let Some(pull) = &pull {
+        for label in added {
+            events::pull_request::labeled(&mut ctx, pull, label);
+        }
+    }
 }
 
 fn labels_named(repo: &Repo, names: &[String]) -> Vec<types::Label> {

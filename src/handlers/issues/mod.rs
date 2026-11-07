@@ -1,4 +1,4 @@
-//! Issues: updates, labels, assignees, milestones, comments, locks and cross-repository lists.
+//! Issues: updates, labels, assignees, milestones, comments, locks, events and lists.
 //!
 //! Pull requests share the issue routes GitHub uses for labels, assignees, comments and locks.
 //! Updating an issue edits stored issues only; pull-request edits stay on the pull-request
@@ -6,11 +6,13 @@
 
 mod assignees;
 mod comments;
+mod events;
 mod label_repo;
 mod labels;
 mod lists;
 mod locks;
 mod milestones;
+pub(crate) mod record;
 mod update;
 
 use std::collections::BTreeMap;
@@ -439,6 +441,24 @@ fn with_subject<T>(
         return on_issue(&mut issue.data);
     }
     Err(ApiResponse::not_found())
+}
+
+fn webhook_ctx<'a>(
+    state: &'a mut State,
+    request: &'a ApiRequest,
+    found: &'a Found,
+) -> crate::webhooks::events::Ctx<'a> {
+    crate::webhooks::events::Ctx::new(state, request, &found.owner, &found.name)
+}
+
+fn stored_issue(repo: &Repo, number: u64) -> Option<types::Issue> {
+    repo.issues.get(&number).map(|issue| issue.data.clone())
+}
+
+fn stored_pull(repo: &Repo, number: u64) -> Option<types::PullRequest> {
+    repo.pull_requests
+        .get(&number)
+        .and_then(|pull| pull.data.clone())
 }
 
 fn query_bool(request: &ApiRequest, name: &str) -> Result<Option<bool>, ApiResponse> {

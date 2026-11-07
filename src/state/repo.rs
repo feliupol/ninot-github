@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use super::{Hook, Release, State};
+use super::{Hook, IssueEvent, Release, State};
 use crate::api::{ApiResponse, Caller};
 use crate::time::now;
 use crate::types::{
@@ -127,6 +127,9 @@ pub struct PullRequest {
     /// Timeline events recording who changed the pull request and when, oldest first.
     /// Reviews, comments and commits are timeline events too, derived from their own lists.
     pub events: Vec<TimelineEvent>,
+    /// Label, assignee, lock and milestone events, oldest first. Close and review events live
+    /// in [`Self::events`].
+    pub issue_events: Vec<IssueEvent>,
     /// When each commit first reached the head branch, by sha; orders `committed` events.
     pub pushed_at: BTreeMap<String, DateTime<Utc>>,
     /// Files returned by `GET /pulls/{number}/files`.
@@ -342,6 +345,8 @@ pub struct Issue {
     pub data: crate::types::Issue,
     /// Comments returned by the issue comments endpoint.
     pub comments: Vec<crate::types::IssueComment>,
+    /// Issue events, oldest first, as `GET .../issues/{number}/events` lists them.
+    pub events: Vec<IssueEvent>,
 }
 
 /// A repository milestone.

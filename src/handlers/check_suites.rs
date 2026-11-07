@@ -29,6 +29,11 @@ impl Handler for ops::ChecksCreateSuite {
         let app_id = require_checks_app(request)?;
         let (suite_id, created) = open_suite(&mut state, &found, app_id, &body.head_sha);
         let suite = render_suite(&state, request, &found, suite_id)?;
+        if created {
+            let mut ctx =
+                crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
+            crate::webhooks::events::check_suite::requested_suite(&mut ctx, &suite);
+        }
         let status = if created { 201 } else { 200 };
         Ok(ApiResponse::typed(
             status,
@@ -122,11 +127,17 @@ impl Handler for ops::ChecksRerequestSuite {
         if owner_app != app_id {
             return Err(checks_forbidden(request));
         }
-        let repo = state
-            .account_mut(&found.owner)
-            .and_then(|account| account.repo_mut(&found.name))
-            .expect("repository exists");
-        mark_rerequested(repo, id);
+        {
+            let repo = state
+                .account_mut(&found.owner)
+                .and_then(|account| account.repo_mut(&found.name))
+                .expect("repository exists");
+            mark_rerequested(repo, id);
+        }
+        let suite = render_suite(&state, request, &found, id)?;
+        let mut ctx =
+            crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
+        crate::webhooks::events::check_suite::rerequested(&mut ctx, &suite);
         Ok(ApiResponse::typed(
             201,
             &types::ChecksRerequestSuiteResponse(types::EmptyObject {}),

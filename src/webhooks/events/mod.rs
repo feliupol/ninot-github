@@ -7,6 +7,7 @@ pub(crate) mod check_run;
 pub(crate) mod check_suite;
 pub(crate) mod create;
 pub(crate) mod delete;
+pub(crate) mod issue_changes;
 pub(crate) mod issue_comment;
 pub(crate) mod issues;
 pub(crate) mod project;
