@@ -8,6 +8,7 @@ use crate::api::{ApiRequest, ApiResponse, ApiResult, paginate};
 use crate::operation::ops;
 use crate::state::{State, TimelineEvent, TimelineEventKind, lock};
 use crate::types;
+use crate::webhooks::events::{self, Ctx};
 
 /// The authenticated caller as events and comments embed them.
 fn caller_user(
@@ -215,6 +216,10 @@ impl Handler for ops::PullsUpdate {
                 "invalid",
             ));
         }
+        let old_title = data.title.clone();
+        let old_body = data.body.clone();
+        let old_base_ref = data.base.ref_.clone();
+        let old_base_sha = data.base.sha.clone();
         let base_sha = body
             .base
             .as_ref()
@@ -276,6 +281,32 @@ impl Handler for ops::PullsUpdate {
             .map_err(|message| ApiResponse::error(422, &message))?;
         }
         let data = pull.data.clone().expect("checked above");
+        let mut changes = serde_json::Map::new();
+        if data.title != old_title {
+            changes.insert("title".to_owned(), serde_json::json!({ "from": old_title }));
+        }
+        if data.body != old_body {
+            changes.insert(
+                "body".to_owned(),
+                serde_json::json!({ "from": old_body.unwrap_or_default() }),
+            );
+        }
+        if data.base.ref_ != old_base_ref || data.base.sha != old_base_sha {
+            changes.insert(
+                "base".to_owned(),
+                serde_json::json!({
+                    "ref": { "from": old_base_ref },
+                    "sha": { "from": old_base_sha },
+                }),
+            );
+        }
+        let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
+        match transition {
+            Some(TimelineEventKind::Closed) => events::pull_request::closed(&mut ctx, &data),
+            Some(TimelineEventKind::Reopened) => events::pull_request::reopened(&mut ctx, &data),
+            _ => {}
+        }
+        events::pull_request::edited(&mut ctx, &data, changes);
         Ok(ApiResponse::typed(200, &types::PullsUpdateResponse(data)))
     }
 }
@@ -462,6 +493,11 @@ impl Handler for ops::IssuesCreate {
             user: Some(user.into()),
         };
         state.add_issue(&found.owner, &found.name, number, issue.clone());
+        let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
+        events::issues::opened(&mut ctx, &issue);
+        for label in issue.labels.iter().filter_map(issue_label) {
+            events::issues::labeled(&mut ctx, &issue, &label);
+        }
         Ok(ApiResponse::typed(201, &issue))
     }
 }
@@ -714,6 +750,8 @@ impl Handler for ops::PullsCreate {
             user,
         };
         state.add_pull_request(&found.owner, &found.name, number, data.clone());
+        let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
+        events::pull_request::opened(&mut ctx, &data);
         Ok(ApiResponse::typed(201, &data))
     }
 }
@@ -751,68 +789,89 @@ impl Handler for ops::IssuesAddLabels {
             .param("issue_number")
             .parse::<u64>()
             .map_err(|_| ApiResponse::not_found())?;
-        let repo = state
-            .account_mut(&found.owner)
-            .and_then(|account| account.repo_mut(&found.name))
-            .ok_or_else(ApiResponse::not_found)?;
         let api = format!("{}/repos/{}/{}", request.api_url, found.owner, found.name);
-        let labels = if let Some(pull) = repo.pull_requests.get_mut(&number) {
-            let pull = pull
-                .data
-                .as_mut()
-                .ok_or_else(|| ApiResponse::error(500, "Pull request REST model is not seeded"))?;
-            for name in requested_labels {
-                if !pull.labels.iter().any(|label| label.name == name) {
-                    let id = number
-                        .saturating_mul(100)
-                        .saturating_add(pull.labels.len() as u64 + 1);
-                    pull.labels.push(types::PullRequestLabelsItem {
-                        archived_at: serde_json::Value::Null,
-                        archived_by: None,
-                        color: "ededed".to_owned(),
-                        default: false,
-                        description: Some(String::new()),
-                        id: crate::render::id(id),
-                        name: name.clone(),
-                        node_id: format!("LA_{}_{}_{}", found.owner, found.name, id),
-                        url: format!("{api}/labels/{name}"),
-                    });
+        let (labels, pull, issue, added) = {
+            let repo = state
+                .account_mut(&found.owner)
+                .and_then(|account| account.repo_mut(&found.name))
+                .ok_or_else(ApiResponse::not_found)?;
+            let mut added = Vec::new();
+            if let Some(pull) = repo.pull_requests.get_mut(&number) {
+                let pull = pull.data.as_mut().ok_or_else(|| {
+                    ApiResponse::error(500, "Pull request REST model is not seeded")
+                })?;
+                for name in requested_labels {
+                    if !pull.labels.iter().any(|label| label.name == name) {
+                        let id = number
+                            .saturating_mul(100)
+                            .saturating_add(pull.labels.len() as u64 + 1);
+                        let item = types::PullRequestLabelsItem {
+                            archived_at: serde_json::Value::Null,
+                            archived_by: None,
+                            color: "ededed".to_owned(),
+                            default: false,
+                            description: Some(String::new()),
+                            id: crate::render::id(id),
+                            name: name.clone(),
+                            node_id: format!("LA_{}_{}_{}", found.owner, found.name, id),
+                            url: format!("{api}/labels/{name}"),
+                        };
+                        added.push(pull_label(&item));
+                        pull.labels.push(item);
+                    }
                 }
-            }
-            pull.labels.iter().map(pull_label).collect::<Vec<_>>()
-        } else if let Some(issue) = repo.issues.get_mut(&number) {
-            for name in requested_labels {
-                let found_label = issue
+                let labels = pull.labels.iter().map(pull_label).collect::<Vec<_>>();
+                (labels, Some(pull.clone()), None, added)
+            } else if let Some(issue) = repo.issues.get_mut(&number) {
+                for name in requested_labels {
+                    let found_label = issue
+                        .data
+                        .labels
+                        .iter()
+                        .filter_map(issue_label)
+                        .any(|label| label.name == name);
+                    if !found_label {
+                        let id = number
+                            .saturating_mul(100)
+                            .saturating_add(issue.data.labels.len() as u64 + 1);
+                        let item = types::IssueLabelsItem::Object {
+                            archived_by: None,
+                            color: Some("ededed".to_owned()),
+                            default: Some(false),
+                            description: Some(String::new()),
+                            id: Some(crate::render::id(id)),
+                            name: Some(name.clone()),
+                            node_id: Some(format!("LA_{}_{}_{}", found.owner, found.name, id)),
+                            url: Some(format!("{api}/labels/{name}")),
+                        };
+                        if let Some(label) = issue_label(&item) {
+                            added.push(label);
+                        }
+                        issue.data.labels.push(item);
+                    }
+                }
+                let labels = issue
                     .data
                     .labels
                     .iter()
                     .filter_map(issue_label)
-                    .any(|label| label.name == name);
-                if !found_label {
-                    let id = number
-                        .saturating_mul(100)
-                        .saturating_add(issue.data.labels.len() as u64 + 1);
-                    issue.data.labels.push(types::IssueLabelsItem::Object {
-                        archived_by: None,
-                        color: Some("ededed".to_owned()),
-                        default: Some(false),
-                        description: Some(String::new()),
-                        id: Some(crate::render::id(id)),
-                        name: Some(name.clone()),
-                        node_id: Some(format!("LA_{}_{}_{}", found.owner, found.name, id)),
-                        url: Some(format!("{api}/labels/{name}")),
-                    });
-                }
+                    .collect::<Vec<_>>();
+                (labels, None, Some(issue.data.clone()), added)
+            } else {
+                return Err(ApiResponse::not_found());
             }
-            issue
-                .data
-                .labels
-                .iter()
-                .filter_map(issue_label)
-                .collect::<Vec<_>>()
-        } else {
-            return Err(ApiResponse::not_found());
         };
+        let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
+        if let Some(pull) = &pull {
+            for label in &added {
+                events::pull_request::labeled(&mut ctx, pull, label);
+            }
+        }
+        if let Some(issue) = &issue {
+            for label in &added {
+                events::issues::labeled(&mut ctx, issue, label);
+            }
+        }
         Ok(ApiResponse::typed(200, &labels))
     }
 }
@@ -866,6 +925,8 @@ impl Handler for ops::IssuesCreateComment {
             user: Some(user.into()),
         };
         state.add_issue_comment(&found.owner, &found.name, number, comment.clone());
+        let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
+        events::issue_comment::created(&mut ctx, number, &comment);
         Ok(ApiResponse::typed(201, &comment))
     }
 }
@@ -925,6 +986,12 @@ impl Handler for ops::PullsMerge {
             })
             .map_err(|message| ApiResponse::error(405, &message))?;
         }
+        let data = pull
+            .data
+            .clone()
+            .ok_or_else(|| ApiResponse::error(500, "Pull request REST model is not seeded"))?;
+        let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
+        events::pull_request::closed(&mut ctx, &data);
         Ok(ApiResponse::typed(
             200,
             &types::PullRequestMergeResult {
@@ -1032,6 +1099,11 @@ impl Handler for ops::PullsCreateReview {
                 .retain(|reviewer| !reviewer.login.eq_ignore_ascii_case(&caller.login));
         }
         pull.reviews.push(review.clone());
+        let pull_data = pull.data.clone();
+        if let Some(pull_data) = pull_data {
+            let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
+            events::pull_request_review::submitted(&mut ctx, &pull_data, &review);
+        }
         Ok(ApiResponse::typed(200, &review))
     }
 }
@@ -1125,51 +1197,68 @@ impl Handler for ops::PullsRequestReviewers {
             .chain(resolved_teams.into_iter().map(|team| (None, Some(team))))
             .map(|(user, team)| (state.next_id(), user, team))
             .collect::<Vec<_>>();
-        let repo = state
-            .account_mut(&found.owner)
-            .and_then(|account| account.repo_mut(&found.name))
-            .ok_or_else(ApiResponse::not_found)?;
-        let pull = repo
-            .pull_requests
-            .get_mut(&number)
-            .ok_or_else(ApiResponse::not_found)?;
         let now = crate::render::timestamp(&crate::state::now());
-        for (id, user, team) in requests {
+        let (data, added_users, added_teams) = {
+            let repo = state
+                .account_mut(&found.owner)
+                .and_then(|account| account.repo_mut(&found.name))
+                .ok_or_else(ApiResponse::not_found)?;
+            let pull = repo
+                .pull_requests
+                .get_mut(&number)
+                .ok_or_else(ApiResponse::not_found)?;
+            let mut added_users = Vec::new();
+            let mut added_teams = Vec::new();
+            for (id, user, team) in requests {
+                let data = pull.data.as_ref().ok_or_else(|| {
+                    ApiResponse::error(500, "Pull request REST model is not seeded")
+                })?;
+                let requested = match (&user, &team) {
+                    (Some(user), _) => data
+                        .requested_reviewers
+                        .iter()
+                        .any(|existing| existing.login.eq_ignore_ascii_case(&user.login)),
+                    (_, Some(team)) => data
+                        .requested_teams
+                        .iter()
+                        .any(|existing| existing.slug == team.slug),
+                    (None, None) => unreachable!("each request names a user or a team"),
+                };
+                if !requested {
+                    if let Some(user) = &user {
+                        added_users.push(user.clone());
+                    }
+                    if let Some(team) = &team {
+                        added_teams.push(team.clone());
+                    }
+                    pull.apply_event(TimelineEvent {
+                        id,
+                        kind: TimelineEventKind::ReviewRequested,
+                        actor: actor.clone(),
+                        created_at: now,
+                        commit_id: None,
+                        requested_reviewer: user,
+                        requested_team: team,
+                    })
+                    .map_err(|message| ApiResponse::error(422, &message))?;
+                }
+            }
             let data = pull
                 .data
-                .as_ref()
+                .clone()
                 .ok_or_else(|| ApiResponse::error(500, "Pull request REST model is not seeded"))?;
-            let requested = match (&user, &team) {
-                (Some(user), _) => data
-                    .requested_reviewers
-                    .iter()
-                    .any(|existing| existing.login.eq_ignore_ascii_case(&user.login)),
-                (_, Some(team)) => data
-                    .requested_teams
-                    .iter()
-                    .any(|existing| existing.slug == team.slug),
-                (None, None) => unreachable!("each request names a user or a team"),
-            };
-            if !requested {
-                pull.apply_event(TimelineEvent {
-                    id,
-                    kind: TimelineEventKind::ReviewRequested,
-                    actor: actor.clone(),
-                    created_at: now,
-                    commit_id: None,
-                    requested_reviewer: user,
-                    requested_team: team,
-                })
-                .map_err(|message| ApiResponse::error(422, &message))?;
-            }
+            (data, added_users, added_teams)
+        };
+        let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
+        for user in &added_users {
+            events::pull_request::review_requested_user(&mut ctx, &data, user);
         }
-        let data = pull
-            .data
-            .as_ref()
-            .ok_or_else(|| ApiResponse::error(500, "Pull request REST model is not seeded"))?;
+        for team in &added_teams {
+            events::pull_request::review_requested_team(&mut ctx, &data, team);
+        }
         Ok(ApiResponse::typed(
             201,
-            &crate::render::pull_request_simple(data),
+            &crate::render::pull_request_simple(&data),
         ))
     }
 }

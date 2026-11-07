@@ -147,63 +147,77 @@ fn rerun_workflow(state: &Mutex<State>, request: &ApiRequest, failed_only: bool)
             "Resource not accessible by integration",
         ));
     }
-    let repo = state
-        .account_mut(&found.owner)
-        .and_then(|owner| owner.repo_mut(&found.name))
-        .expect("repository exists");
     let id = request
         .param("run_id")
         .parse::<i64>()
         .map_err(|_| ApiResponse::not_found())?;
-    let run = repo
-        .workflow_runs
-        .iter_mut()
-        .find(|run| run.id == id)
-        .ok_or_else(ApiResponse::not_found)?;
-    if run.status.as_deref() != Some("completed") {
-        return Err(ApiResponse::error(409, "Workflow run is not completed"));
-    }
-    let run_id = u64::try_from(id).map_err(|_| ApiResponse::not_found())?;
-    let jobs = repo
-        .workflow_jobs
-        .get_mut(&run_id)
-        .ok_or_else(ApiResponse::not_found)?;
-    let selected = jobs.iter_mut().filter(|job| {
-        !failed_only
-            || matches!(
-                job.conclusion,
-                Some(
-                    types::JobConclusion::Failure
-                        | types::JobConclusion::TimedOut
-                        | types::JobConclusion::ActionRequired
-                )
-            )
-    });
-    let mut rerun_count = 0;
-    for job in selected {
-        rerun_count += 1;
-        job.status = types::JobStatus::Queued;
-        job.conclusion = None;
-        job.completed_at = None;
-        job.run_attempt = Some(run.run_attempt.unwrap_or(1).saturating_add(1));
-        for step in &mut job.steps {
-            step.status = types::JobStepsItemStatus::Queued;
-            step.conclusion = None;
-            step.completed_at = None;
-            step.started_at = None;
+    let (run_snapshot, job_snapshots) = {
+        let repo = state
+            .account_mut(&found.owner)
+            .and_then(|owner| owner.repo_mut(&found.name))
+            .expect("repository exists");
+        let run = repo
+            .workflow_runs
+            .iter_mut()
+            .find(|run| run.id == id)
+            .ok_or_else(ApiResponse::not_found)?;
+        if run.status.as_deref() != Some("completed") {
+            return Err(ApiResponse::error(409, "Workflow run is not completed"));
         }
+        let run_id = u64::try_from(id).map_err(|_| ApiResponse::not_found())?;
+        let jobs = repo
+            .workflow_jobs
+            .get_mut(&run_id)
+            .ok_or_else(ApiResponse::not_found)?;
+        let selected = jobs.iter_mut().filter(|job| {
+            !failed_only
+                || matches!(
+                    job.conclusion,
+                    Some(
+                        types::JobConclusion::Failure
+                            | types::JobConclusion::TimedOut
+                            | types::JobConclusion::ActionRequired
+                    )
+                )
+        });
+        let mut rerun_ids = Vec::new();
+        for job in selected {
+            rerun_ids.push(job.id);
+            job.status = types::JobStatus::Queued;
+            job.conclusion = None;
+            job.completed_at = None;
+            job.run_attempt = Some(run.run_attempt.unwrap_or(1).saturating_add(1));
+            for step in &mut job.steps {
+                step.status = types::JobStepsItemStatus::Queued;
+                step.conclusion = None;
+                step.completed_at = None;
+                step.started_at = None;
+            }
+        }
+        if failed_only && rerun_ids.is_empty() {
+            return Err(ApiResponse::error(409, "Workflow run has no failed jobs"));
+        }
+        let next_attempt = run.run_attempt.unwrap_or(1).saturating_add(1);
+        run.run_attempt = Some(next_attempt);
+        run.status = Some("queued".to_owned());
+        run.conclusion = None;
+        run.run_started_at = None;
+        run.updated_at = DateTime::parse_from_rfc3339(&crate::state::now())
+            .expect("server timestamp is RFC 3339")
+            .with_timezone(&Utc);
+        let run_snapshot = run.clone();
+        let job_snapshots = jobs
+            .iter()
+            .filter(|job| rerun_ids.contains(&job.id))
+            .cloned()
+            .collect::<Vec<_>>();
+        (run_snapshot, job_snapshots)
+    };
+    let mut ctx = crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
+    crate::webhooks::events::workflow_run::deliver(&mut ctx, &run_snapshot);
+    for job in &job_snapshots {
+        crate::webhooks::events::workflow_job::deliver(&mut ctx, &run_snapshot, job);
     }
-    if failed_only && rerun_count == 0 {
-        return Err(ApiResponse::error(409, "Workflow run has no failed jobs"));
-    }
-    let next_attempt = run.run_attempt.unwrap_or(1).saturating_add(1);
-    run.run_attempt = Some(next_attempt);
-    run.status = Some("queued".to_owned());
-    run.conclusion = None;
-    run.run_started_at = None;
-    run.updated_at = DateTime::parse_from_rfc3339(&crate::state::now())
-        .expect("server timestamp is RFC 3339")
-        .with_timezone(&Utc);
     if failed_only {
         Ok(ApiResponse::typed(
             201,

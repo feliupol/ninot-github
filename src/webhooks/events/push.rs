@@ -114,7 +114,7 @@ fn push_context(
 
 /// The refs a push changed, as `(ref, before, after)`, without those GitHub sends no event
 /// for: every ref when too many branches were pushed, and tags when too many tags were.
-fn changed_refs<'a>(
+pub(crate) fn changed_refs<'a>(
     before: &'a BTreeMap<String, String>,
     after: &'a BTreeMap<String, String>,
 ) -> Vec<(&'a str, &'a str, &'a str)> {

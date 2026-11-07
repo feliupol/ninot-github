@@ -437,14 +437,36 @@ pub(crate) fn check_component(name: &str, body: &Value) -> Result<(), String> {
     errors(&*validator(name.to_owned(), &schema)?, name, body)
 }
 
+/// One definition from the embedded octokit/webhooks bundle, such as `push-event` or
+/// `pull_request-opened`.
+pub(crate) fn webhook_definition(name: &str) -> Option<&'static Value> {
+    webhook_schemas()["definitions"].get(name)
+}
+
+/// `"{event}-event"` when that aggregate schema exists, otherwise `"{event}-{action}"` taken
+/// from `body`. Ping, push, create, delete and status use the aggregate form; the other events
+/// are published as one schema per action.
+fn webhook_schema_name(event: &str, body: &Value) -> Option<String> {
+    let definitions = &webhook_schemas()["definitions"];
+    let event_name = format!("{event}-event");
+    if definitions.get(&event_name).is_some() {
+        return Some(event_name);
+    }
+    let action = body.get("action").and_then(Value::as_str)?;
+    let action_name = format!("{event}-{action}");
+    definitions
+        .get(&action_name)
+        .is_some()
+        .then_some(action_name)
+}
+
 /// Checks the payload `body` of `event`, such as `push`, against its octokit/webhooks schema.
 pub(crate) fn check_webhook(event: &str, body: &Value) -> Result<(), String> {
-    let name = format!("{event}-event");
-    if webhook_schemas()["definitions"].get(&name).is_none() {
+    let Some(name) = webhook_schema_name(event, body) else {
         return Err(format!("no webhook schema for {event}"));
-    }
+    };
     let what = format!("{event} event");
-    let validator = cached(what.clone(), || {
+    let validator = cached(format!("webhook {name}"), || {
         json!({
             "$schema": "http://json-schema.org/draft-07/schema#",
             "$ref": format!("{WEBHOOKS_URI}#/definitions/{name}"),

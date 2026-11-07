@@ -135,16 +135,18 @@ fn id_param(request: &ApiRequest, name: &str) -> Result<u64, ApiResponse> {
 }
 
 /// Creates `refs/tags/{tag}` at `target` unless the tag exists.
-fn ensure_tag(repo: &Repo, tag: &str, target: &str) -> Result<(), ApiResponse> {
+///
+/// Returns whether this call created the tag ref. A missing git directory creates nothing.
+fn ensure_tag(repo: &Repo, tag: &str, target: &str) -> Result<bool, ApiResponse> {
     let Some(git_dir) = &repo.git_dir else {
-        return Ok(());
+        return Ok(false);
     };
     let internal = |error: std::io::Error| ApiResponse::error(500, &error.to_string());
     if git::resolve_commit(git_dir, &format!("refs/tags/{tag}"))
         .map_err(internal)?
         .is_some()
     {
-        return Ok(());
+        return Ok(false);
     }
     if git::is_empty(git_dir).map_err(internal)? {
         return Err(ApiResponse::error(422, "Repository is empty."));
@@ -152,7 +154,8 @@ fn ensure_tag(repo: &Repo, tag: &str, target: &str) -> Result<(), ApiResponse> {
     let sha = git::resolve_commit(git_dir, target)
         .map_err(internal)?
         .ok_or_else(|| ApiResponse::validation_failed("Release", "target_commitish", "invalid"))?;
-    git::create_ref(git_dir, &format!("refs/tags/{tag}"), &sha, &super::BOT).map_err(internal)
+    git::create_ref(git_dir, &format!("refs/tags/{tag}"), &sha, &super::BOT).map_err(internal)?;
+    Ok(true)
 }
 
 impl Handler for ops::ReposCreateRelease {
@@ -186,9 +189,11 @@ impl Handler for ops::ReposCreateRelease {
         let target = body
             .target_commitish
             .unwrap_or_else(|| current.default_branch.clone());
-        if !draft {
-            ensure_tag(current, &tag_name, &target)?;
-        }
+        let created_tag = if draft {
+            false
+        } else {
+            ensure_tag(current, &tag_name, &target)?
+        };
         let id = state.next_id();
         let created = now();
         let release = Release {
@@ -205,11 +210,26 @@ impl Handler for ops::ReposCreateRelease {
             assets: Vec::new(),
         };
         repo_mut(&mut state, &found).releases.push(release);
-        let release = repo(&state, &found).releases.last().unwrap();
-        Ok(ApiResponse::typed(
-            201,
-            &render_release(&state, request, &found, release),
-        ))
+        let rendered = render_release(
+            &state,
+            request,
+            &found,
+            repo(&state, &found).releases.last().unwrap(),
+        );
+        let action = if rendered.draft {
+            "created"
+        } else if rendered.prerelease {
+            "prereleased"
+        } else {
+            "published"
+        };
+        let mut ctx =
+            crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
+        if created_tag {
+            crate::webhooks::events::create::reference(&mut ctx, &rendered.tag_name, "tag");
+        }
+        crate::webhooks::events::release::deliver(&mut ctx, action, &rendered, None);
+        Ok(ApiResponse::typed(201, &rendered))
     }
 }
 
@@ -295,6 +315,9 @@ impl Handler for ops::ReposUpdateRelease {
             .target_commitish
             .clone()
             .unwrap_or_else(|| release.target_commitish.clone());
+        let was_draft = release.draft;
+        let old_name = release.name.clone().unwrap_or_default();
+        let old_body = release.body.clone().unwrap_or_default();
         let draft = body.draft.unwrap_or(release.draft);
         if current
             .releases
@@ -307,9 +330,11 @@ impl Handler for ops::ReposUpdateRelease {
                 "already_exists",
             ));
         }
-        if !draft {
-            ensure_tag(current, &tag, &target)?;
-        }
+        let created_tag = if draft {
+            false
+        } else {
+            ensure_tag(current, &tag, &target)?
+        };
         let release = &mut repo_mut(&mut state, &found).releases[index];
         if release.draft && !draft {
             release.published_at = Some(now());
@@ -323,14 +348,49 @@ impl Handler for ops::ReposUpdateRelease {
         if let Some(name) = body.name {
             release.name = Some(name);
         }
-        if let Some(body) = body.body {
-            release.body = Some(body);
+        if let Some(text) = body.body {
+            release.body = Some(text);
         }
-        let release = &repo(&state, &found).releases[index];
-        Ok(ApiResponse::typed(
-            200,
-            &render_release(&state, request, &found, release),
-        ))
+        let rendered = render_release(
+            &state,
+            request,
+            &found,
+            &repo(&state, &found).releases[index],
+        );
+        let mut ctx =
+            crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
+        if created_tag {
+            crate::webhooks::events::create::reference(&mut ctx, &rendered.tag_name, "tag");
+        }
+        if was_draft && !rendered.draft {
+            let action = if rendered.prerelease {
+                "prereleased"
+            } else {
+                "published"
+            };
+            crate::webhooks::events::release::deliver(&mut ctx, action, &rendered, None);
+        } else if !was_draft && rendered.draft {
+            crate::webhooks::events::release::deliver(&mut ctx, "unpublished", &rendered, None);
+        } else {
+            let new_name = rendered.name.clone().unwrap_or_default();
+            let new_body = rendered.body.clone().unwrap_or_default();
+            let mut changes = serde_json::Map::new();
+            if old_name != new_name {
+                changes.insert("name".to_owned(), serde_json::json!({ "from": old_name }));
+            }
+            if old_body != new_body {
+                changes.insert("body".to_owned(), serde_json::json!({ "from": old_body }));
+            }
+            if !changes.is_empty() {
+                crate::webhooks::events::release::deliver(
+                    &mut ctx,
+                    "edited",
+                    &rendered,
+                    Some(changes),
+                );
+            }
+        }
+        Ok(ApiResponse::typed(200, &rendered))
     }
 }
 
@@ -340,12 +400,20 @@ impl Handler for ops::ReposDeleteRelease {
         let id = id_param(request, "release_id")?;
         let mut state = lock(state);
         let found = find(&state, request, true)?;
-        let releases = &mut repo_mut(&mut state, &found).releases;
-        let index = releases
-            .iter()
-            .position(|release| release.id == id)
-            .ok_or_else(ApiResponse::not_found)?;
-        releases.remove(index);
+        let rendered = {
+            let release = repo(&state, &found)
+                .releases
+                .iter()
+                .find(|release| release.id == id)
+                .ok_or_else(ApiResponse::not_found)?;
+            render_release(&state, request, &found, release)
+        };
+        repo_mut(&mut state, &found)
+            .releases
+            .retain(|release| release.id != id);
+        let mut ctx =
+            crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
+        crate::webhooks::events::release::deliver(&mut ctx, "deleted", &rendered, None);
         Ok(ApiResponse::no_content())
     }
 }

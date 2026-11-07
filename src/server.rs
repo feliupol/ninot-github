@@ -715,7 +715,7 @@ impl Repository {
         }
         let request = self.api_request();
         let mut state = lock(&self.app.state);
-        let (sha, owner) = {
+        let (sha, owner, branch_created) = {
             let account = state
                 .account(&self.owner)
                 .ok_or_else(|| not_found("repository does not exist"))?;
@@ -726,6 +726,9 @@ impl Repository {
                 .git_dir
                 .as_ref()
                 .ok_or_else(|| io::Error::other("repository has no Git storage"))?;
+            let branch_existed =
+                ninot_common::git::resolve_commit(git_dir, &format!("refs/heads/{branch}"))?
+                    .is_some();
             let sha = match author {
                 Some(author) => crate::fixture_git::commit(crate::fixture_git::Commit {
                     git_dir,
@@ -746,13 +749,17 @@ impl Repository {
                     message,
                 )?,
             };
-            (sha, crate::render::simple_user(&request, account))
+            (
+                sha,
+                crate::render::simple_user(&request, account),
+                !branch_existed,
+            )
         };
         let reached = match committer {
             Some(committer) => crate::fixtures::parse_timestamp(&committer.date, "commit date")?,
             None => crate::fixtures::current_timestamp(),
         };
-        crate::handlers::timeline::branch_moved(
+        let moved = crate::handlers::timeline::branch_moved(
             &mut state,
             &self.owner,
             &self.name,
@@ -761,6 +768,20 @@ impl Repository {
             reached,
             &owner,
         )?;
+        let mut ctx =
+            crate::webhooks::events::Ctx::new(&mut state, &request, &self.owner, &self.name);
+        for item in &moved {
+            crate::webhooks::events::pull_request::synchronize(
+                &mut ctx,
+                &item.pull,
+                &item.before,
+                &item.after,
+                &owner,
+            );
+        }
+        if branch_created {
+            crate::webhooks::events::create::reference(&mut ctx, branch, "branch");
+        }
         Ok(Commit {
             repository: self.clone(),
             sha,
@@ -940,7 +961,14 @@ impl Repository {
             number,
             seed,
         )?;
-        state.add_issue(&self.owner, &self.name, number, issue);
+        state.add_issue(&self.owner, &self.name, number, issue.clone());
+        let labels = crate::webhooks::events::issues::issue_labels(&issue);
+        let mut ctx =
+            crate::webhooks::events::Ctx::new(&mut state, &request, &self.owner, &self.name);
+        crate::webhooks::events::issues::opened(&mut ctx, &issue);
+        for label in &labels {
+            crate::webhooks::events::issues::labeled(&mut ctx, &issue, label);
+        }
         Ok(Issue {
             repository: self.clone(),
             number,
@@ -997,12 +1025,24 @@ impl Repository {
                 format!("pull request #{number} already exists"),
             ));
         }
-        let entry = state.add_pull_request(&self.owner, &self.name, number, pull.data);
-        entry.files = pull.files;
-        for event in pull.events {
-            entry
-                .apply_event(event)
-                .map_err(|message| io::Error::new(io::ErrorKind::InvalidInput, message))?;
+        let data = {
+            let entry = state.add_pull_request(&self.owner, &self.name, number, pull.data);
+            entry.files = pull.files;
+            for event in pull.events {
+                entry
+                    .apply_event(event)
+                    .map_err(|message| io::Error::new(io::ErrorKind::InvalidInput, message))?;
+            }
+            entry.data.clone()
+        };
+        if let Some(data) = data {
+            let labels = crate::webhooks::events::pull_request::pull_labels(&data);
+            let mut ctx =
+                crate::webhooks::events::Ctx::new(&mut state, &request, &self.owner, &self.name);
+            crate::webhooks::events::pull_request::opened(&mut ctx, &data);
+            for label in &labels {
+                crate::webhooks::events::pull_request::labeled(&mut ctx, &data, label);
+            }
         }
         Ok(PullRequest {
             repository: self.clone(),
@@ -1019,13 +1059,31 @@ impl Repository {
         let request = self.api_request();
         let labels: Vec<String> = labels.iter().map(|label| (*label).to_owned()).collect();
         let scripts: Vec<String> = scripts.iter().map(|script| (*script).to_owned()).collect();
-        let (run_id, id) = lock(&self.app.state).queue_script_job(
-            &request,
-            &self.owner,
-            &self.name,
-            &labels,
-            &scripts,
-        )?;
+        let mut state = lock(&self.app.state);
+        let (run_id, id) =
+            state.queue_script_job(&request, &self.owner, &self.name, &labels, &scripts)?;
+        let (run, jobs) = {
+            let repo = state
+                .account(&self.owner)
+                .and_then(|account| account.repo(&self.name))
+                .ok_or_else(|| not_found("repository does not exist"))?;
+            let run_key = i64::try_from(run_id).unwrap_or(i64::MAX);
+            let run = repo
+                .workflow_runs
+                .iter()
+                .find(|run| run.id == run_key)
+                .cloned();
+            let jobs = repo.workflow_jobs.get(&run_id).cloned().unwrap_or_default();
+            (run, jobs)
+        };
+        if let Some(run) = run {
+            let mut ctx =
+                crate::webhooks::events::Ctx::new(&mut state, &request, &self.owner, &self.name);
+            crate::webhooks::events::workflow_run::deliver(&mut ctx, &run);
+            for job in &jobs {
+                crate::webhooks::events::workflow_job::deliver(&mut ctx, &run, job);
+            }
+        }
         Ok(WorkflowJob { run_id, id })
     }
 
@@ -1058,7 +1116,15 @@ impl Repository {
             .enumerate()
             .map(|(index, seed)| crate::fixtures::seeded_job(&request, &run, seed, index))
             .collect::<io::Result<Vec<_>>>()?;
+        let stored_run = run.clone();
+        let stored_jobs = jobs.clone();
         state.add_workflow_run(&self.owner, &self.name, run, jobs);
+        let mut ctx =
+            crate::webhooks::events::Ctx::new(&mut state, &request, &self.owner, &self.name);
+        crate::webhooks::events::workflow_run::deliver(&mut ctx, &stored_run);
+        for job in &stored_jobs {
+            crate::webhooks::events::workflow_job::deliver(&mut ctx, &stored_run, job);
+        }
         Ok(WorkflowRun {
             repository: self.clone(),
             id: run_id,
@@ -1206,12 +1272,28 @@ impl PullRequest {
                 .transpose()?;
         }
         let id = review.id;
+        let stored = review.clone();
         state.add_review(
             &self.repository.owner,
             &self.repository.name,
             self.number,
             review,
         );
+        let pull = state
+            .account(&self.repository.owner)
+            .and_then(|account| account.repo(&self.repository.name))
+            .and_then(|repo| repo.pull_requests.get(&self.number))
+            .and_then(|pull| pull.data.clone());
+        if let Some(pull) = pull {
+            let request = self.repository.api_request();
+            let mut ctx = crate::webhooks::events::Ctx::new(
+                &mut state,
+                &request,
+                &self.repository.owner,
+                &self.repository.name,
+            );
+            crate::webhooks::events::pull_request_review::submitted(&mut ctx, &pull, &stored);
+        }
         Ok(Review {
             pull_request: self.clone(),
             id,
@@ -1446,7 +1528,7 @@ impl PullRequest {
         let request = self.repository.api_request();
         let mut state = lock(&self.repository.app.state);
         require_pull_request(&state, &self.repository, self.number)?;
-        let (git_dir, branch, author, open) = {
+        let (git_dir, branch, author, open, before_sha) = {
             let repo = state
                 .account(&self.repository.owner)
                 .and_then(|account| account.repo(&self.repository.name))
@@ -1463,6 +1545,7 @@ impl PullRequest {
                 data.head.ref_.clone(),
                 data.user.clone(),
                 data.state == types::PullRequestState::Open,
+                data.head.sha.clone(),
             )
         };
         if !open {
@@ -1473,6 +1556,8 @@ impl PullRequest {
         }
         let sha = ninot_common::git::resolve_commit(&git_dir, sha)?
             .ok_or_else(|| not_found(format!("commit {sha} is not in the repository")))?;
+        let branch_existed =
+            ninot_common::git::resolve_commit(&git_dir, &format!("refs/heads/{branch}"))?.is_some();
         let actor = match actor {
             Some(user) => crate::fixtures::simple_user(&mut state, &request, user)?,
             None => author,
@@ -1484,12 +1569,43 @@ impl PullRequest {
             &sha,
             &crate::handlers::BOT,
         )?;
-        let pull = state
-            .account_mut(&self.repository.owner)
-            .and_then(|account| account.repo_mut(&self.repository.name))
-            .and_then(|repo| repo.pull_requests.get_mut(&self.number))
-            .expect("pull request checked above");
-        crate::handlers::timeline::record_head_update(&git_dir, pull, &sha, at, actor, event_id)
+        let after = {
+            let pull = state
+                .account_mut(&self.repository.owner)
+                .and_then(|account| account.repo_mut(&self.repository.name))
+                .and_then(|repo| repo.pull_requests.get_mut(&self.number))
+                .expect("pull request checked above");
+            crate::handlers::timeline::record_head_update(
+                &git_dir,
+                pull,
+                &sha,
+                at,
+                actor.clone(),
+                event_id,
+            )?;
+            pull.data.clone()
+        };
+        let mut ctx = crate::webhooks::events::Ctx::new(
+            &mut state,
+            &request,
+            &self.repository.owner,
+            &self.repository.name,
+        );
+        if let Some(data) = &after
+            && data.head.sha != before_sha
+        {
+            crate::webhooks::events::pull_request::synchronize(
+                &mut ctx,
+                data,
+                &before_sha,
+                &data.head.sha,
+                &actor,
+            );
+        }
+        if !branch_existed {
+            crate::webhooks::events::create::reference(&mut ctx, &branch, "branch");
+        }
+        Ok(())
     }
 }
 
@@ -1588,6 +1704,11 @@ impl Commit {
         let request = self.repository.api_request();
         let mut state = lock(&self.repository.app.state);
         require_repository(&state, &self.repository.owner, &self.repository.name)?;
+        let first = state
+            .account(&self.repository.owner)
+            .and_then(|account| account.repo(&self.repository.name))
+            .and_then(|repo| repo.check_runs.get(&self.sha))
+            .is_none_or(Vec::is_empty);
         let fallback = state
             .account(&self.repository.owner)
             .and_then(|account| account.repo(&self.repository.name))
@@ -1606,8 +1727,18 @@ impl Commit {
             &self.repository.owner,
             &self.repository.name,
             &self.sha,
-            check,
+            check.clone(),
         );
+        let mut ctx = crate::webhooks::events::Ctx::new(
+            &mut state,
+            &request,
+            &self.repository.owner,
+            &self.repository.name,
+        );
+        if first {
+            crate::webhooks::events::check_suite::requested(&mut ctx, &check);
+        }
+        crate::webhooks::events::check_run::created(&mut ctx, &check);
         Ok(())
     }
 
@@ -1637,8 +1768,15 @@ impl Commit {
             &self.repository.owner,
             &self.repository.name,
             &self.sha,
-            status,
+            status.clone(),
         );
+        let mut ctx = crate::webhooks::events::Ctx::new(
+            &mut state,
+            &request,
+            &self.repository.owner,
+            &self.repository.name,
+        );
+        crate::webhooks::events::status::commit_status(&mut ctx, &self.sha, &status);
         Ok(())
     }
 }
@@ -1813,7 +1951,15 @@ fn create_issue_comment(
     if let crate::fixtures::SeedField::Present(value) = seed.updated_at {
         comment.updated_at = crate::fixtures::parse_timestamp(&value, "issue comment updated_at")?;
     }
-    state.add_issue_comment(&repository.owner, &repository.name, number, comment);
+    state.add_issue_comment(&repository.owner, &repository.name, number, comment.clone());
+    let request = repository.api_request();
+    let mut ctx = crate::webhooks::events::Ctx::new(
+        &mut state,
+        &request,
+        &repository.owner,
+        &repository.name,
+    );
+    crate::webhooks::events::issue_comment::created(&mut ctx, number, &comment);
     Ok(())
 }
 
@@ -1896,7 +2042,22 @@ fn create_review_comment(
     if let crate::fixtures::SeedField::Present(value) = seed.updated_at {
         comment.updated_at = crate::fixtures::parse_timestamp(&value, "review comment updated_at")?;
     }
-    state.add_review_comment(&repository.owner, &repository.name, number, comment);
+    state.add_review_comment(&repository.owner, &repository.name, number, comment.clone());
+    let pull = state
+        .account(&repository.owner)
+        .and_then(|account| account.repo(&repository.name))
+        .and_then(|repo| repo.pull_requests.get(&number))
+        .and_then(|pull| pull.data.clone());
+    if let Some(pull) = pull {
+        let request = repository.api_request();
+        let mut ctx = crate::webhooks::events::Ctx::new(
+            &mut state,
+            &request,
+            &repository.owner,
+            &repository.name,
+        );
+        crate::webhooks::events::pull_request_review_comment::created(&mut ctx, &pull, &comment);
+    }
     Ok(())
 }
 
@@ -2461,8 +2622,9 @@ impl App {
                     eprintln!("ninot-github: cannot set the default branch to {branch}: {error}");
                 }
             }
-            if let Some(pusher) = pusher {
+            if let Some(pusher) = &pusher {
                 let at = crate::render::timestamp(&crate::state::now());
+                let mut moved = Vec::new();
                 for (name_of_ref, sha) in &after {
                     let Some(branch) = name_of_ref.strip_prefix("refs/heads/") else {
                         continue;
@@ -2470,15 +2632,32 @@ impl App {
                     if before.get(name_of_ref) == Some(sha) {
                         continue;
                     }
-                    if let Err(error) = crate::handlers::timeline::branch_moved(
-                        &mut state, &owner, &name, branch, sha, at, &pusher,
+                    match crate::handlers::timeline::branch_moved(
+                        &mut state, &owner, &name, branch, sha, at, pusher,
                     ) {
-                        eprintln!("ninot-github: cannot move pull requests on {branch}: {error}");
+                        Ok(items) => moved.extend(items),
+                        Err(error) => {
+                            eprintln!(
+                                "ninot-github: cannot move pull requests on {branch}: {error}"
+                            );
+                        }
                     }
+                }
+                let mut ctx = crate::webhooks::events::Ctx::new(&mut state, &urls, &owner, &name);
+                for item in &moved {
+                    crate::webhooks::events::pull_request::synchronize(
+                        &mut ctx,
+                        &item.pull,
+                        &item.before,
+                        &item.after,
+                        pusher,
+                    );
                 }
             }
             drop(state);
             webhooks::enqueue_push(&self.state, &urls, &owner, &name, &git_dir, &before, &after);
+            webhooks::events::create::from_push(&self.state, &urls, &owner, &name, &before, &after);
+            webhooks::events::delete::from_push(&self.state, &urls, &owner, &name, &before, &after);
         }
         let mut reply = ApiResponse::bytes(response.status, "", response.body);
         reply.headers = response.headers;

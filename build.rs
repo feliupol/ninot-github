@@ -170,8 +170,14 @@ const RESPONSE_OPERATIONS: [&str; 70] = [
 /// `SOURCE`, trimmed to the events below and the schemas they reference.
 const WEBHOOK_SCHEMAS: &str = "spec/webhooks";
 
-/// Events the fake delivers. Each has a schema `<event>/event.schema.json`.
+/// Events whose aggregate schema is `<event>/event.schema.json` in `spec/webhooks`.
+/// Action payloads (for example `pull_request` opened) live in `src/webhooks/schemas` and are
+/// merged into the validation bundle only; typify keeps generating types for ping and push.
 const WEBHOOK_EVENTS: [&str; 2] = ["ping", "push"];
+
+/// Official octokit/webhooks schemas, from the same commit as `spec/webhooks/SOURCE`, for the
+/// events this fake delivers beyond ping and push.
+const EXTRA_WEBHOOK_SCHEMAS: &str = "src/webhooks/schemas";
 
 /// One correction to the component schema `schema` at the JSON pointer `path` inside it.
 #[derive(Deserialize)]
@@ -194,6 +200,7 @@ fn main() {
     println!("cargo::rerun-if-changed={SPEC}");
     println!("cargo::rerun-if-changed={OVERRIDES}");
     println!("cargo::rerun-if-changed={WEBHOOK_SCHEMAS}");
+    println!("cargo::rerun-if-changed={EXTRA_WEBHOOK_SCHEMAS}");
     let mut spec: Value =
         serde_json::from_slice(&fs::read(SPEC).expect("cannot read the pinned spec"))
             .expect("the pinned spec is not valid JSON");
@@ -219,7 +226,11 @@ fn main() {
     fs::write(out.join("types.rs"), prettyplease::unparse(&file))
         .expect("cannot write the generated types");
 
-    let definitions = webhook_definitions(Path::new(WEBHOOK_SCHEMAS));
+    let typed = webhook_definitions(Path::new(WEBHOOK_SCHEMAS));
+    let mut definitions = typed.clone();
+    for (name, schema) in read_webhook_definitions(Path::new(EXTRA_WEBHOOK_SCHEMAS)) {
+        definitions.entry(name).or_insert(schema);
+    }
     // `validate` checks payloads against this bundle.
     let bundle = json!({
         "$schema": "http://json-schema.org/draft-07/schema",
@@ -230,15 +241,15 @@ fn main() {
         serde_json::to_vec(&bundle).unwrap(),
     )
     .expect("cannot write the webhook schemas");
-    let file = syn::parse2(webhook_types(definitions))
-        .expect("the generated webhook types are not valid Rust");
+    let file =
+        syn::parse2(webhook_types(typed)).expect("the generated webhook types are not valid Rust");
     fs::write(out.join("webhook_types.rs"), prettyplease::unparse(&file))
         .expect("cannot write the generated webhook types");
 }
 
 /// The schemas under `dir` as definitions of one document, keyed by [`definition_name`], with
 /// their references rewritten to `#/definitions/<name>`.
-fn webhook_definitions(dir: &Path) -> BTreeMap<String, Value> {
+fn read_webhook_definitions(dir: &Path) -> BTreeMap<String, Value> {
     let mut schemas = BTreeMap::new();
     let mut pending = vec![dir.to_owned()];
     while let Some(path) = pending.pop() {
@@ -267,6 +278,13 @@ fn webhook_definitions(dir: &Path) -> BTreeMap<String, Value> {
             schemas.insert(definition_name(&id), schema);
         }
     }
+    schemas
+}
+
+/// [`read_webhook_definitions`] for the pinned `spec/webhooks` tree, which must contain every
+/// aggregate event in [`WEBHOOK_EVENTS`].
+fn webhook_definitions(dir: &Path) -> BTreeMap<String, Value> {
+    let schemas = read_webhook_definitions(dir);
     for event in WEBHOOK_EVENTS {
         assert!(
             schemas.contains_key(&format!("{event}-event")),

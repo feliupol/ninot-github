@@ -114,7 +114,7 @@ impl Handler for ops::GitCreateRef {
                 "invalid",
             ));
         }
-        let state = lock(state);
+        let mut state = lock(state);
         let found = find_repo(&state, request)?;
         if !found.permission.push {
             return Err(ApiResponse::error(
@@ -122,41 +122,52 @@ impl Handler for ops::GitCreateRef {
                 "Resource not accessible by integration",
             ));
         }
-        let repo = state
-            .account(&found.owner)
-            .and_then(|account| account.repo(&found.name))
-            .expect("repository exists");
-        let git_dir = repo
-            .git_dir
-            .as_ref()
-            .ok_or_else(|| ApiResponse::error(500, "repository has no git storage"))?;
-        let object = super::git_store::open_repo(git_dir)?
+        let (git_dir, default_branch) = {
+            let repo = state
+                .account(&found.owner)
+                .and_then(|account| account.repo(&found.name))
+                .expect("repository exists");
+            (
+                repo.git_dir
+                    .clone()
+                    .ok_or_else(|| ApiResponse::error(500, "repository has no git storage"))?,
+                repo.default_branch.clone(),
+            )
+        };
+        let object = super::git_store::open_repo(&git_dir)?
             .rev_parse_single(body.sha.as_str())
             .ok()
             .map(|id| id.to_string())
             .ok_or_else(|| ApiResponse::validation_failed("Reference", "sha", "invalid"))?;
-        if git::refs(git_dir, &body.ref_)
+        if git::refs(&git_dir, &body.ref_)
             .map_err(internal)?
             .iter()
             .any(|reference| reference.name == body.ref_)
         {
             return Err(ApiResponse::error(409, "Reference already exists"));
         }
-        git::create_ref(git_dir, &body.ref_, &object, &super::BOT).map_err(internal)?;
+        git::create_ref(&git_dir, &body.ref_, &object, &super::BOT).map_err(internal)?;
         let located = Located {
             found,
             git_dir: git_dir.clone(),
-            default_branch: repo.default_branch.clone(),
+            default_branch,
         };
-        let reference = git::refs(git_dir, &body.ref_)
+        let reference = git::refs(&git_dir, &body.ref_)
             .map_err(internal)?
             .into_iter()
             .find(|reference| reference.name == body.ref_)
             .ok_or_else(|| ApiResponse::error(500, "created reference could not be read"))?;
-        Ok(ApiResponse::typed(
-            201,
-            &types::GitCreateRefResponse(render_ref(request, &located, &reference)),
-        ))
+        let response = types::GitCreateRefResponse(render_ref(request, &located, &reference));
+        if let Some((short, kind)) = crate::webhooks::events::create::ref_kind(&body.ref_) {
+            let mut ctx = crate::webhooks::events::Ctx::new(
+                &mut state,
+                request,
+                &located.found.owner,
+                &located.found.name,
+            );
+            crate::webhooks::events::create::reference(&mut ctx, short, kind);
+        }
+        Ok(ApiResponse::typed(201, &response))
     }
 }
 
@@ -739,6 +750,9 @@ impl Handler for ops::ReposCreateOrUpdateFileContents {
             _ => {}
         }
         let now = crate::time::now();
+        let branch_existed = git::resolve_commit(&located.git_dir, &format!("refs/heads/{branch}"))
+            .map_err(internal)?
+            .is_some();
         let sha = crate::fixture_git::commit(crate::fixture_git::Commit {
             git_dir: &located.git_dir,
             branch,
@@ -761,7 +775,7 @@ impl Handler for ops::ReposCreateOrUpdateFileContents {
             .account(&caller.login)
             .map(|account| render::simple_user(request, account))
             .expect("authenticated callers have accounts");
-        crate::handlers::timeline::branch_moved(
+        let moved = crate::handlers::timeline::branch_moved(
             &mut state,
             &located.found.owner,
             &located.found.name,
@@ -771,6 +785,26 @@ impl Handler for ops::ReposCreateOrUpdateFileContents {
             &actor,
         )
         .map_err(internal)?;
+        {
+            let mut ctx = crate::webhooks::events::Ctx::new(
+                &mut state,
+                request,
+                &located.found.owner,
+                &located.found.name,
+            );
+            for item in &moved {
+                crate::webhooks::events::pull_request::synchronize(
+                    &mut ctx,
+                    &item.pull,
+                    &item.before,
+                    &item.after,
+                    &actor,
+                );
+            }
+            if !branch_existed {
+                crate::webhooks::events::create::reference(&mut ctx, branch, "branch");
+            }
+        }
         drop(state);
         let commit = git::commit(&located.git_dir, &sha).map_err(internal)?;
         let Some(PathContent::File(file)) =
@@ -886,6 +920,16 @@ impl Handler for ops::GitDeleteRef {
             .map_err(internal)?;
         if !deleted.status.success() {
             return Err(ApiResponse::not_found());
+        }
+        if let Some((short, kind)) = crate::webhooks::events::create::ref_kind(&reference) {
+            let mut state = lock(state);
+            let mut ctx = crate::webhooks::events::Ctx::new(
+                &mut state,
+                request,
+                &located.found.owner,
+                &located.found.name,
+            );
+            crate::webhooks::events::delete::reference(&mut ctx, short, kind);
         }
         Ok(ApiResponse::no_content())
     }

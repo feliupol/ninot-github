@@ -108,8 +108,20 @@ pub(crate) fn record_head_update(
     Ok(())
 }
 
+/// An open pull request whose stored head SHA changed.
+pub(crate) struct MovedPull {
+    /// Head SHA before the move.
+    pub before: String,
+    /// Head SHA after the move.
+    pub after: String,
+    /// The pull request after the move.
+    pub pull: types::PullRequest,
+}
+
 /// Moves every open pull request of `owner/name` whose head is `branch` of that same repository
 /// to `new_sha`, as a push to the branch does; see [`record_head_update`].
+///
+/// Returns the pull requests whose head SHA changed.
 ///
 /// # Errors
 ///
@@ -122,7 +134,7 @@ pub(crate) fn branch_moved(
     new_sha: &str,
     at: DateTime<Utc>,
     actor: &types::SimpleUser,
-) -> io::Result<()> {
+) -> io::Result<Vec<MovedPull>> {
     let numbers = state
         .account(owner)
         .and_then(|account| account.repo(name))
@@ -138,22 +150,33 @@ pub(crate) fn branch_moved(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    let mut moved = Vec::new();
     for number in numbers {
         let event_id = state.next_id();
         let Some(repo) = state
             .account_mut(owner)
             .and_then(|account| account.repo_mut(name))
         else {
-            return Ok(());
+            return Ok(moved);
         };
         let Some(git_dir) = repo.git_dir.clone() else {
-            return Ok(());
+            return Ok(moved);
         };
         if let Some(pull) = repo.pull_requests.get_mut(&number) {
+            let before = pull.data.as_ref().map(|data| data.head.sha.clone());
             record_head_update(&git_dir, pull, new_sha, at, actor.clone(), event_id)?;
+            if let (Some(before), Some(data)) = (before, pull.data.clone())
+                && before != data.head.sha
+            {
+                moved.push(MovedPull {
+                    before,
+                    after: data.head.sha.clone(),
+                    pull: data,
+                });
+            }
         }
     }
-    Ok(())
+    Ok(moved)
 }
 
 /// A timestamp as timeline events that type it as a string render it.
