@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use url::Url;
 
 use crate::api::ApiRequest;
-use crate::state::{Account, AccountKind, Permission, Repo};
+use crate::state::{Account, AccountKind, Milestone, Permission, Repo};
 use crate::types;
 use crate::webhook_types;
 
@@ -1203,6 +1203,153 @@ impl From<types::FullRepositoryPermissions> for webhook_types::RepositoryPermiss
             push: value.push,
             triage: value.triage,
         }
+    }
+}
+
+/// The repository coordinates and live issue counts a milestone response needs.
+pub struct MilestoneRender<'a> {
+    /// Request the response is being built for.
+    pub request: &'a ApiRequest,
+    /// Repository owner login.
+    pub owner: &'a str,
+    /// Repository name.
+    pub name: &'a str,
+    /// Open issues and pull requests currently in the milestone.
+    pub open_issues: i64,
+    /// Closed issues and pull requests currently in the milestone.
+    pub closed_issues: i64,
+}
+
+/// Renders a stored milestone, including the issue counts in `view`.
+pub fn milestone(source: &Milestone, view: MilestoneRender<'_>) -> types::NullableMilestone {
+    let api = format!(
+        "{}/repos/{}/{}",
+        view.request.api_url, view.owner, view.name
+    );
+    let web = format!("{}/{}/{}", view.request.web_url, view.owner, view.name);
+    let number = id(source.number);
+    types::NullableMilestone {
+        closed_at: source.closed_at,
+        closed_issues: view.closed_issues,
+        created_at: source.created_at,
+        creator: Some(source.creator.clone()),
+        description: source.description.clone(),
+        due_on: source.due_on,
+        html_url: format!("{web}/milestone/{number}"),
+        id: id(source.id),
+        labels_url: format!("{api}/milestones/{number}/labels"),
+        node_id: node_id("Milestone", source.id),
+        number,
+        open_issues: view.open_issues,
+        state: source.state,
+        title: source.title.clone(),
+        updated_at: source.updated_at,
+        url: format!("{api}/milestones/{number}"),
+    }
+}
+
+/// The issue-label object embedded on an issue, copied from a repository label.
+pub fn label_on_issue(label: &types::Label) -> types::IssueLabelsItem {
+    types::IssueLabelsItem::Object {
+        archived_by: label.archived_by.clone(),
+        color: Some(label.color.clone()),
+        default: Some(label.default),
+        description: label.description.clone(),
+        id: Some(label.id),
+        name: Some(label.name.clone()),
+        node_id: Some(label.node_id.clone()),
+        url: Some(label.url.clone()),
+    }
+}
+
+/// The label object embedded on a pull request, copied from a repository label.
+pub fn label_on_pull(label: &types::Label) -> types::PullRequestLabelsItem {
+    types::PullRequestLabelsItem {
+        archived_at: match label.archived_at {
+            Some(time) => {
+                serde_json::Value::String(time.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+            }
+            None => serde_json::Value::Null,
+        },
+        archived_by: label.archived_by.clone(),
+        color: label.color.clone(),
+        default: label.default,
+        description: label.description.clone(),
+        id: label.id,
+        name: label.name.clone(),
+        node_id: label.node_id.clone(),
+        url: label.url.clone(),
+    }
+}
+
+/// Projects a pull request into the issue shape the issue endpoints return.
+pub fn issue_from_pull(pull: &types::PullRequest) -> types::Issue {
+    let repository_url = pull
+        .issue_url
+        .rsplit_once("/issues/")
+        .map(|(repository, _)| repository.to_owned())
+        .unwrap_or_else(|| pull.issue_url.clone());
+    types::Issue {
+        active_lock_reason: pull.active_lock_reason.clone(),
+        assignee: pull.assignee.clone(),
+        assignees: pull.assignees.clone(),
+        author_association: Some(pull.author_association),
+        body: pull.body.clone(),
+        body_html: None,
+        body_text: None,
+        closed_at: pull.closed_at,
+        closed_by: None,
+        comments: pull.comments,
+        comments_url: pull.comments_url.clone(),
+        created_at: pull.created_at,
+        draft: pull.draft,
+        events_url: format!("{}/events", pull.issue_url),
+        html_url: pull.html_url.clone(),
+        id: pull.id,
+        issue_dependencies_summary: None,
+        issue_field_values: Vec::new(),
+        labels: pull.labels.iter().map(label_from_pull_item).collect(),
+        labels_url: format!("{}/labels{{/name}}", pull.issue_url),
+        locked: pull.locked,
+        milestone: pull.milestone.clone(),
+        node_id: pull.node_id.clone(),
+        number: pull.number,
+        parent_issue_url: None,
+        performed_via_github_app: None,
+        pinned_comment: None,
+        pull_request: Some(types::IssuePullRequest {
+            diff_url: Some(pull.diff_url.clone()),
+            html_url: Some(pull.html_url.clone()),
+            merged_at: pull.merged_at,
+            patch_url: Some(pull.patch_url.clone()),
+            url: Some(pull.url.clone()),
+        }),
+        reactions: None,
+        repository: None,
+        repository_url,
+        state: pull.state.to_string(),
+        state_reason: None,
+        sub_issues_summary: None,
+        timeline_url: Some(format!("{}/timeline", pull.issue_url)),
+        title: pull.title.clone(),
+        type_: None,
+        updated_at: pull.updated_at,
+        url: pull.issue_url.clone(),
+        user: Some(pull.user.clone().into()),
+    }
+}
+
+/// Converts one pull-request label into the issue label union.
+fn label_from_pull_item(label: &types::PullRequestLabelsItem) -> types::IssueLabelsItem {
+    types::IssueLabelsItem::Object {
+        archived_by: label.archived_by.clone(),
+        color: Some(label.color.clone()),
+        default: Some(label.default),
+        description: label.description.clone(),
+        id: Some(label.id),
+        name: Some(label.name.clone()),
+        node_id: Some(label.node_id.clone()),
+        url: Some(label.url.clone()),
     }
 }
 

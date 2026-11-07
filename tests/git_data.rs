@@ -456,3 +456,80 @@ fn putting_contents_into_an_empty_repository_creates_its_branch() {
     let file = admin.get("/repos/admin/empty/contents/README.md");
     assert_eq!(decoded_content(&file), "hi\n");
 }
+
+#[test]
+fn update_ref_fast_forwards_and_force_updates() {
+    let server = Server::start().unwrap();
+    let (_work, head) = pushed(&server);
+    let admin = Api::admin(&server);
+    let parent = admin.get(&format!("/repos/admin/tool/commits/{head}")).body["parents"][0]["sha"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let rewind = admin.patch(
+        "/repos/admin/tool/git/refs/heads/main",
+        json!({ "sha": parent }),
+    );
+    assert_eq!(rewind.status, 422, "{}", rewind.body);
+    assert_eq!(rewind.body["message"], "Update is not a fast forward");
+    assert_eq!(
+        admin.get("/repos/admin/tool/git/ref/heads/main").body["object"]["sha"],
+        head
+    );
+
+    let forced = admin.patch(
+        "/repos/admin/tool/git/refs/heads/main",
+        json!({ "sha": parent, "force": true }),
+    );
+    assert_eq!(forced.status, 200, "{}", forced.body);
+    assert_eq!(forced.body["ref"], "refs/heads/main");
+    assert_eq!(forced.body["object"]["sha"], parent);
+    assert_eq!(
+        admin.get("/repos/admin/tool/git/ref/heads/main").body["object"]["sha"],
+        parent
+    );
+}
+
+#[test]
+fn update_ref_rejects_missing_refs_shas_and_readers() {
+    let server = Server::start().unwrap();
+    let (_work, head) = pushed(&server);
+    let admin = Api::admin(&server);
+    let missing = admin.patch(
+        "/repos/admin/tool/git/refs/heads/nope",
+        json!({ "sha": head }),
+    );
+    assert_eq!(missing.status, 422, "{}", missing.body);
+    let bad_sha = admin.patch(
+        "/repos/admin/tool/git/refs/heads/main",
+        json!({ "sha": "0000000000000000000000000000000000000000" }),
+    );
+    assert_eq!(bad_sha.status, 422, "{}", bad_sha.body);
+
+    server.add_user("reader");
+    let reader = Api::new(
+        &server,
+        Some(&server.user("reader").unwrap().add_token(&["repo"])),
+    );
+    assert_eq!(
+        reader
+            .patch(
+                "/repos/admin/tool/git/refs/heads/main",
+                json!({ "sha": head }),
+            )
+            .status,
+        403
+    );
+
+    admin.post("/user/repos", json!({ "name": "empty" }));
+    assert_eq!(
+        admin
+            .patch(
+                "/repos/admin/empty/git/refs/heads/main",
+                json!({ "sha": head }),
+            )
+            .status,
+        409
+    );
+}

@@ -1,12 +1,12 @@
 //! Refs, commits, branches and file contents read from the hosted git repositories.
 
-use std::path::PathBuf;
 use std::sync::Mutex;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 
 use super::Handler;
+use super::git_store::{Located, empty_repository, internal, locate, wrapped_base64};
 use super::repos::{Found, find_repo};
 use crate::api::{ApiRequest, ApiResponse, ApiResult, paginate};
 use crate::operation::ops;
@@ -14,49 +14,6 @@ use crate::render::{self, node_id};
 use crate::state::{State, lock};
 use crate::types;
 use ninot_common::git::{self, PathContent, TreeEntry};
-
-/// A visible repository and its bare git repository, with the state lock released.
-struct Located {
-    found: Found,
-    git_dir: PathBuf,
-    default_branch: String,
-}
-
-impl Located {
-    fn api(&self, request: &ApiRequest) -> String {
-        format!(
-            "{}/repos/{}/{}",
-            request.api_url, self.found.owner, self.found.name
-        )
-    }
-
-    fn html(&self, request: &ApiRequest) -> String {
-        format!(
-            "{}/{}/{}",
-            request.web_url, self.found.owner, self.found.name
-        )
-    }
-}
-
-fn locate(state: &Mutex<State>, request: &ApiRequest) -> Result<Located, ApiResponse> {
-    let state = lock(state);
-    let found = find_repo(&state, request)?;
-    let repo = state
-        .account(&found.owner)
-        .unwrap()
-        .repo(&found.name)
-        .unwrap();
-    let git_dir = repo
-        .git_dir
-        .clone()
-        .ok_or_else(|| ApiResponse::error(500, "repository has no git storage"))?;
-    let default_branch = repo.default_branch.clone();
-    Ok(Located {
-        found,
-        git_dir,
-        default_branch,
-    })
-}
 
 fn resolve_fork_network_branch(
     state: &Mutex<State>,
@@ -96,16 +53,12 @@ fn resolve_fork_network_branch(
     git::resolve_commit(target_git_dir, branch).map_err(internal)
 }
 
-fn internal(error: std::io::Error) -> ApiResponse {
-    ApiResponse::error(500, &error.to_string())
-}
-
-/// GitHub's answer for git data in a repository without commits.
-fn empty_repository() -> ApiResponse {
-    ApiResponse::error(409, "Git Repository is empty.")
-}
-
-fn render_ref(request: &ApiRequest, located: &Located, found: &git::Ref) -> types::GitRef {
+/// A git reference as the REST API renders it.
+pub(crate) fn render_ref(
+    request: &ApiRequest,
+    located: &Located,
+    found: &git::Ref,
+) -> types::GitRef {
     let api = located.api(request);
     let object_kind = if found.kind == "tag" {
         "tags"
@@ -177,8 +130,10 @@ impl Handler for ops::GitCreateRef {
             .git_dir
             .as_ref()
             .ok_or_else(|| ApiResponse::error(500, "repository has no git storage"))?;
-        let commit = git::resolve_commit(git_dir, &body.sha)
-            .map_err(internal)?
+        let object = super::git_store::open_repo(git_dir)?
+            .rev_parse_single(body.sha.as_str())
+            .ok()
+            .map(|id| id.to_string())
             .ok_or_else(|| ApiResponse::validation_failed("Reference", "sha", "invalid"))?;
         if git::refs(git_dir, &body.ref_)
             .map_err(internal)?
@@ -187,7 +142,7 @@ impl Handler for ops::GitCreateRef {
         {
             return Err(ApiResponse::error(409, "Reference already exists"));
         }
-        git::create_ref(git_dir, &body.ref_, &commit, &super::BOT).map_err(internal)?;
+        git::create_ref(git_dir, &body.ref_, &object, &super::BOT).map_err(internal)?;
         let located = Located {
             found,
             git_dir: git_dir.clone(),
@@ -490,17 +445,6 @@ fn directory_item(
         type_: entry.kind,
         url: entry.self_url,
     })
-}
-
-/// Base64 wrapped at 60 columns, as GitHub encodes file contents.
-fn wrapped_base64(bytes: &[u8]) -> String {
-    let encoded = STANDARD.encode(bytes);
-    let mut wrapped = String::with_capacity(encoded.len() + encoded.len() / 60 + 1);
-    for chunk in encoded.as_bytes().chunks(60) {
-        wrapped.push_str(std::str::from_utf8(chunk).unwrap());
-        wrapped.push('\n');
-    }
-    wrapped
 }
 
 impl Handler for ops::ReposGetContent {
@@ -944,6 +888,84 @@ impl Handler for ops::GitDeleteRef {
             return Err(ApiResponse::not_found());
         }
         Ok(ApiResponse::no_content())
+    }
+}
+
+impl Handler for ops::GitUpdateRef {
+    fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
+        let caller = request.require_scope(&["repo", "public_repo"])?.clone();
+        let body: types::GitUpdateRefRequest = request.json_as()?;
+        let state = lock(state);
+        let found = find_repo(&state, request)?;
+        if !found.permission.push {
+            return Err(ApiResponse::error(
+                403,
+                "Resource not accessible by integration",
+            ));
+        }
+        let repo = state
+            .account(&found.owner)
+            .and_then(|account| account.repo(&found.name))
+            .expect("repository exists");
+        let git_dir = repo
+            .git_dir
+            .clone()
+            .ok_or_else(|| ApiResponse::error(500, "repository has no git storage"))?;
+        let default_branch = repo.default_branch.clone();
+        if git::is_empty(&git_dir).map_err(internal)? {
+            return Err(empty_repository());
+        }
+        let reference = format!("refs/{}", request.param("ref"));
+        if gix::refs::FullName::try_from(reference.clone()).is_err() {
+            return Err(ApiResponse::error(422, "invalid ref"));
+        }
+        let current = git::refs(&git_dir, &reference)
+            .map_err(internal)?
+            .into_iter()
+            .find(|found| found.name == reference)
+            .ok_or_else(|| ApiResponse::validation_failed("Reference", "ref", "invalid"))?;
+        let new_sha = {
+            let repo = super::git_store::open_repo(&git_dir)?;
+            super::git_store::resolve_object(&repo, &body.sha)?
+                .ok_or_else(|| ApiResponse::validation_failed("Reference", "sha", "invalid"))?
+                .to_string()
+        };
+        let force = body.force.unwrap_or(false);
+        if !force && !super::git_store::is_ancestor(&git_dir, &current.sha, &new_sha)? {
+            return Err(ApiResponse::error(422, "Update is not a fast forward"));
+        }
+        git::create_ref(&git_dir, &reference, &new_sha, &super::BOT).map_err(internal)?;
+        let located = Located {
+            found,
+            git_dir: git_dir.clone(),
+            default_branch,
+        };
+        if let Some(branch) = reference.strip_prefix("refs/heads/") {
+            let actor = state
+                .account(&caller.login)
+                .map(|account| render::simple_user(request, account))
+                .expect("authenticated callers have accounts");
+            let mut state = state;
+            crate::handlers::timeline::branch_moved(
+                &mut state,
+                &located.found.owner,
+                &located.found.name,
+                branch,
+                &new_sha,
+                render::timestamp(&crate::time::now()),
+                &actor,
+            )
+            .map_err(internal)?;
+        }
+        let updated = git::refs(&git_dir, &reference)
+            .map_err(internal)?
+            .into_iter()
+            .find(|found| found.name == reference)
+            .ok_or_else(|| ApiResponse::error(500, "updated reference could not be read"))?;
+        Ok(ApiResponse::typed(
+            200,
+            &types::GitUpdateRefResponse(render_ref(request, &located, &updated)),
+        ))
     }
 }
 

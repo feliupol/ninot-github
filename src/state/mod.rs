@@ -17,8 +17,8 @@ pub use account::{Account, AccountKind, Team};
 pub use hook::{Delivery, Hook};
 pub use release::{Asset, Release};
 pub use repo::{
-    Issue, Permission, PullRequest, Repo, ReviewThread, ReviewThreadComment, Settings,
-    StoredActionsSecret, TimelineEvent, TimelineEventKind,
+    CheckSuiteRecord, Issue, Milestone, Permission, PullRequest, Repo, ReviewThread,
+    ReviewThreadComment, Settings, StoredActionsSecret, TimelineEvent, TimelineEventKind,
 };
 pub(crate) use runner::RunnerTokenKind;
 pub(crate) use runner::{CreateRunnerError, RunnerSpec, valid_label_name, valid_runner_name};
@@ -102,6 +102,8 @@ pub struct Installation {
     pub id: u64,
     pub owner: String,
     pub repository: String,
+    /// GitHub App that owns the installation. The default app is 1.
+    pub app_id: u64,
     /// Actions secrets access granted to tokens minted for this installation.
     pub secrets_permission: Option<crate::types::AppPermissionsSecrets>,
 }
@@ -113,6 +115,22 @@ impl State {
         owner: &str,
         repository: &str,
         id: u64,
+        secrets_permission: Option<crate::types::AppPermissionsSecrets>,
+    ) {
+        self.insert_installation(owner, repository, id, 1, secrets_permission);
+    }
+
+    /// Seeds an installation of `app_id` on one existing repository.
+    pub fn add_app_installation(&mut self, owner: &str, repository: &str, id: u64, app_id: u64) {
+        self.insert_installation(owner, repository, id, app_id, None);
+    }
+
+    fn insert_installation(
+        &mut self,
+        owner: &str,
+        repository: &str,
+        id: u64,
+        app_id: u64,
         secrets_permission: Option<crate::types::AppPermissionsSecrets>,
     ) {
         assert!(
@@ -127,6 +145,7 @@ impl State {
                 id,
                 owner: owner.to_owned(),
                 repository: repository.to_owned(),
+                app_id,
                 secrets_permission,
             },
         );

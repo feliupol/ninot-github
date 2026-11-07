@@ -18,9 +18,18 @@ mod actions;
 mod actions_secrets;
 pub(crate) mod actions_service;
 mod apps;
+mod check_suites;
+mod checks;
+mod checks_model;
 mod gists;
+mod git_blobs;
+mod git_commits;
 mod git_data;
+mod git_store;
+mod git_tags;
+mod git_trees;
 mod hooks;
+mod issues;
 mod meta;
 mod pulls;
 pub mod releases;
@@ -77,6 +86,15 @@ registry![
     ops::GitGetRef,
     ops::GitCreateRef,
     ops::GitListMatchingRefs,
+    ops::GitCreateBlob,
+    ops::GitGetBlob,
+    ops::GitCreateCommit,
+    ops::GitGetCommit,
+    ops::GitUpdateRef,
+    ops::GitCreateTag,
+    ops::GitGetTag,
+    ops::GitCreateTree,
+    ops::GitGetTree,
     ops::ReposGetCommit,
     ops::ReposListBranches,
     ops::ActionsListWorkflowRunsForRepo,
@@ -94,6 +112,16 @@ registry![
     ops::ActionsDownloadWorkflowRunLogs,
     ops::ChecksListForRef,
     ops::ChecksGet,
+    ops::ChecksCreate,
+    ops::ChecksUpdate,
+    ops::ChecksListAnnotations,
+    ops::ChecksRerequestRun,
+    ops::ChecksCreateSuite,
+    ops::ChecksSetSuitesPreferences,
+    ops::ChecksGetSuite,
+    ops::ChecksListForSuite,
+    ops::ChecksRerequestSuite,
+    ops::ChecksListSuitesForRef,
     ops::ReposListCommitStatusesForRef,
     ops::ReposGetCombinedStatusForRef,
     ops::ReposListPullRequestsAssociatedWithCommit,
@@ -130,6 +158,34 @@ registry![
     ops::IssuesGet,
     ops::IssuesListLabelsForRepo,
     ops::IssuesListLabelsOnIssue,
+    ops::IssuesUpdate,
+    ops::IssuesAddAssignees,
+    ops::IssuesRemoveAssignees,
+    ops::IssuesListAssignees,
+    ops::IssuesCheckUserCanBeAssigned,
+    ops::IssuesCheckUserCanBeAssignedToIssue,
+    ops::IssuesSetLabels,
+    ops::IssuesRemoveAllLabels,
+    ops::IssuesRemoveLabel,
+    ops::IssuesCreateLabel,
+    ops::IssuesGetLabel,
+    ops::IssuesUpdateLabel,
+    ops::IssuesDeleteLabel,
+    ops::IssuesListMilestones,
+    ops::IssuesCreateMilestone,
+    ops::IssuesGetMilestone,
+    ops::IssuesUpdateMilestone,
+    ops::IssuesDeleteMilestone,
+    ops::IssuesListLabelsForMilestone,
+    ops::IssuesGetComment,
+    ops::IssuesUpdateComment,
+    ops::IssuesDeleteComment,
+    ops::IssuesListCommentsForRepo,
+    ops::IssuesLock,
+    ops::IssuesUnlock,
+    ops::IssuesList,
+    ops::IssuesListForOrg,
+    ops::IssuesListForAuthenticatedUser,
     ops::SearchIssuesAndPullRequests,
     ops::SearchRepos,
     ops::PullsMerge,

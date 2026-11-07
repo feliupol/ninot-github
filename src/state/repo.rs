@@ -38,6 +38,13 @@ pub struct Repo {
     pub pull_requests: BTreeMap<u64, PullRequest>,
     /// Issues by number.
     pub issues: BTreeMap<u64, Issue>,
+    /// Labels defined on the repository, keyed by lowercase name.
+    ///
+    /// Labels that only exist because an issue or pull request was seeded with them are not
+    /// copied here. Reads merge this map with those copies.
+    pub labels: BTreeMap<String, crate::types::Label>,
+    /// Milestones by their repository-local number.
+    pub milestones: BTreeMap<u64, Milestone>,
     /// Workflow runs, ordered as the Actions API lists them.
     pub workflow_runs: Vec<crate::types::WorkflowRun>,
     /// Jobs keyed by workflow run id.
@@ -50,10 +57,39 @@ pub struct Repo {
     pub actions_secrets: BTreeMap<String, StoredActionsSecret>,
     /// Check runs keyed by commit SHA.
     pub check_runs: BTreeMap<String, Vec<crate::types::CheckRun>>,
+    /// Check suites by id.
+    pub check_suites: BTreeMap<i64, CheckSuiteRecord>,
+    /// Annotations of a check run, in the order they were submitted.
+    pub check_annotations: BTreeMap<i64, Vec<crate::types::CheckAnnotation>>,
+    /// Whether a GitHub App creates a check suite on push. Absent means enabled.
+    pub check_suite_preferences: BTreeMap<i64, bool>,
     /// Commit statuses keyed by commit SHA.
     pub commit_statuses: BTreeMap<String, Vec<crate::types::Status>>,
     pub hooks: Vec<Hook>,
     pub settings: Settings,
+}
+
+/// A check suite owned by one GitHub App and one commit.
+#[derive(Clone)]
+pub struct CheckSuiteRecord {
+    /// Suite id.
+    pub id: i64,
+    /// GitHub App that owns the suite.
+    pub app_id: i64,
+    /// Commit the suite checks.
+    pub head_sha: String,
+    /// Branch name when the head is the tip of a branch.
+    pub head_branch: Option<String>,
+    /// Parent of `head_sha`, or forty zeros when the commit has none.
+    pub before: String,
+    /// `head_sha` as recorded when the suite was created.
+    pub after: String,
+    /// When the suite was created.
+    pub created_at: DateTime<Utc>,
+    /// When the suite or one of its runs last changed.
+    pub updated_at: DateTime<Utc>,
+    /// Rerequest forces queued with no conclusion until a run in the suite changes.
+    pub rerequested: bool,
 }
 
 /// Encrypted Actions secret data retained by the fake but never returned by REST reads.
@@ -308,6 +344,35 @@ pub struct Issue {
     pub comments: Vec<crate::types::IssueComment>,
 }
 
+/// A repository milestone.
+///
+/// `open_issues` and `closed_issues` are not stored. They are the number of open and closed
+/// issues and pull requests whose milestone number is [`Self::number`], computed when a
+/// milestone is rendered.
+#[derive(Clone)]
+pub struct Milestone {
+    /// Stable id, unique across the server.
+    pub id: u64,
+    /// Number of the milestone within its repository, starting at 1.
+    pub number: u64,
+    /// Title. Unique among the repository's milestones, ignoring case.
+    pub title: String,
+    /// Description, when one has been set.
+    pub description: Option<String>,
+    /// `open` or `closed`.
+    pub state: crate::types::NullableMilestoneState,
+    /// User who created the milestone.
+    pub creator: crate::types::NullableSimpleUser,
+    /// When the milestone was created.
+    pub created_at: DateTime<Utc>,
+    /// When the milestone was last updated.
+    pub updated_at: DateTime<Utc>,
+    /// When the milestone was closed. Absent while it is open.
+    pub closed_at: Option<DateTime<Utc>>,
+    /// Due date, when one has been set.
+    pub due_on: Option<DateTime<Utc>>,
+}
+
 impl Repo {
     /// Returns whether this repository is the root or a fork in the given fork network.
     pub(crate) fn belongs_to_fork_network(&self, owner: &str, root: &(String, String)) -> bool {
@@ -451,12 +516,17 @@ impl State {
                 releases: Vec::new(),
                 pull_requests: BTreeMap::new(),
                 issues: BTreeMap::new(),
+                labels: BTreeMap::new(),
+                milestones: BTreeMap::new(),
                 workflow_runs: Vec::new(),
                 workflow_jobs: BTreeMap::new(),
                 workflow_job_logs: BTreeMap::new(),
                 actions_public_key: None,
                 actions_secrets: BTreeMap::new(),
                 check_runs: BTreeMap::new(),
+                check_suites: BTreeMap::new(),
+                check_annotations: BTreeMap::new(),
+                check_suite_preferences: BTreeMap::new(),
                 commit_statuses: BTreeMap::new(),
                 hooks: Vec::new(),
                 settings: Settings::default(),

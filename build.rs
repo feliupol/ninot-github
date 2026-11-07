@@ -20,11 +20,12 @@ const OVERRIDES: &str = "spec/overrides.json";
 
 /// Component schemas the handlers return. Their Rust types, and those of every schema they
 /// reference, are generated into `types`.
-const RESPONSE_SCHEMAS: [&str; 27] = [
+const RESPONSE_SCHEMAS: [&str; 32] = [
     "actions-public-key",
     "actions-secret",
     "basic-error",
     "base-gist",
+    "blob",
     "branch-with-protection",
     "commit",
     "commit-comparison",
@@ -33,7 +34,10 @@ const RESPONSE_SCHEMAS: [&str; 27] = [
     "content-submodule",
     "content-symlink",
     "full-repository",
+    "git-commit",
     "git-ref",
+    "git-tag",
+    "git-tree",
     "hook",
     "hook-delivery-item",
     "issue-search-result-item",
@@ -45,19 +49,29 @@ const RESPONSE_SCHEMAS: [&str; 27] = [
     "release-asset",
     "repository",
     "root",
+    "short-blob",
     "short-branch",
     "simple-user",
     "validation-error",
 ];
 
 /// Supported operations whose JSON request models are generated alongside their responses.
-const REQUEST_OPERATIONS: [&str; 24] = [
+const REQUEST_OPERATIONS: [&str; 33] = [
     "actions/create-or-update-repo-secret",
     "actions/re-run-workflow",
     "actions/re-run-workflow-failed-jobs",
     "apps/create-installation-access-token",
+    "checks/create",
+    "checks/create-suite",
+    "checks/set-suites-preferences",
+    "checks/update",
     "gists/create",
+    "git/create-blob",
+    "git/create-commit",
     "git/create-ref",
+    "git/create-tag",
+    "git/create-tree",
+    "git/update-ref",
     "issues/add-labels",
     "issues/create",
     "issues/create-comment",
@@ -79,7 +93,7 @@ const REQUEST_OPERATIONS: [&str; 24] = [
 ];
 
 /// Supported REST operations whose JSON response models are used by handlers.
-const RESPONSE_OPERATIONS: [&str; 51] = [
+const RESPONSE_OPERATIONS: [&str; 70] = [
     "actions/create-or-update-repo-secret",
     "actions/get-repo-public-key",
     "actions/get-repo-secret",
@@ -92,10 +106,29 @@ const RESPONSE_OPERATIONS: [&str; 51] = [
     "actions/re-run-workflow-failed-jobs",
     "apps/create-installation-access-token",
     "apps/get-repo-installation",
+    "checks/create",
+    "checks/create-suite",
     "checks/get",
+    "checks/get-suite",
+    "checks/list-annotations",
     "checks/list-for-ref",
+    "checks/list-for-suite",
+    "checks/list-suites-for-ref",
+    "checks/rerequest-run",
+    "checks/rerequest-suite",
+    "checks/set-suites-preferences",
+    "checks/update",
     "gists/create",
+    "git/create-blob",
+    "git/create-commit",
     "git/create-ref",
+    "git/create-tag",
+    "git/create-tree",
+    "git/get-blob",
+    "git/get-commit",
+    "git/get-tag",
+    "git/get-tree",
+    "git/update-ref",
     "issues/add-labels",
     "issues/create",
     "issues/create-comment",
@@ -397,6 +430,15 @@ fn api_types(spec: &Value) -> TokenStream {
             // Keep both optional in the model and enforce at least one in the handler.
             object.remove("anyOf");
         }
+        if matches!(operation_id, "checks/create" | "checks/update")
+            && let Some(object) = schema.as_object_mut()
+        {
+            // The oneOf/anyOf only constrains `status` against `conclusion`. The request
+            // validator still enforces it; the model keeps every property optional.
+            object.remove("oneOf");
+            object.remove("anyOf");
+            object.remove("discriminator");
+        }
         if operation_id == "repos/update-webhook" {
             let config_name = "ReposUpdateWebhookRequestConfig";
             let mut config = spec["components"]["schemas"]["webhook-config"].clone();
@@ -419,6 +461,17 @@ fn api_types(spec: &Value) -> TokenStream {
                 .extend(["description".to_owned(), "homepage".to_owned()]);
         }
         request_fields.insert(schema_name.clone(), request_rules);
+        if operation_id == "git/create-tree" {
+            // `tree[].sha` is nullable so a JSON `null` deletes the path from `base_tree`.
+            request_fields.insert(
+                "GitCreateTreeRequestTreeItem".to_owned(),
+                RequestFields {
+                    required: BTreeSet::new(),
+                    nullable: ["sha".to_owned()].into_iter().collect(),
+                    patch: false,
+                },
+            );
+        }
         schemas.insert(schema_name.clone(), schema);
         roots.push(schema_name.clone());
         if body_nullable {

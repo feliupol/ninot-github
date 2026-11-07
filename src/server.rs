@@ -822,6 +822,18 @@ impl Repository {
         Ok(())
     }
 
+    /// Seeds a GitHub App installation of `app_id` on this repository.
+    pub fn create_app_installation(&self, installation_id: u64, app_id: u64) -> io::Result<()> {
+        self.ensure_running()?;
+        lock(&self.app.state).add_app_installation(
+            &self.owner,
+            &self.name,
+            installation_id,
+            app_id,
+        );
+        Ok(())
+    }
+
     /// Seeds the repository public key used to encrypt Actions secrets.
     pub fn set_actions_public_key(
         &self,

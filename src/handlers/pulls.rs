@@ -491,21 +491,7 @@ impl Handler for ops::IssuesListLabelsForRepo {
             .account(&found.owner)
             .and_then(|account| account.repo(&found.name))
             .expect("find_repo found the repository");
-        let mut labels = std::collections::BTreeMap::<String, types::Label>::new();
-        for label in repo
-            .issues
-            .values()
-            .flat_map(|issue| issue.data.labels.iter().filter_map(issue_label))
-            .chain(
-                repo.pull_requests
-                    .values()
-                    .filter_map(|pull| pull.data.as_ref())
-                    .flat_map(|pull| pull.labels.iter().map(pull_label)),
-            )
-        {
-            labels.entry(label.name.clone()).or_insert(label);
-        }
-        let labels = labels.into_values().collect::<Vec<_>>();
+        let labels = super::issues::repository_labels(repo);
         Ok(paginate(request, &request.path, labels))
     }
 }

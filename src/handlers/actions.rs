@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 
 use super::Handler;
 use super::repos::find_repo;
-use crate::api::{ApiRequest, ApiResponse, ApiResult};
+use crate::api::{ApiRequest, ApiResponse, ApiResult, paginate_with};
 use crate::operation::ops;
 use crate::state::{State, lock};
 use crate::types;
@@ -344,16 +344,20 @@ impl Handler for ops::ChecksListForRef {
             .account(&found.owner)
             .and_then(|owner| owner.repo(&found.name))
             .expect("repository exists");
-        let checks = repo
-            .check_runs
-            .get(request.param("ref"))
-            .cloned()
-            .unwrap_or_default();
-        let response = types::ChecksListForRefResponse {
-            total_count: checks.len() as i64,
-            check_runs: checks,
-        };
-        Ok(ApiResponse::typed(200, &response))
+        let sha = super::checks_model::commit_key(repo, request.param("ref"));
+        let checks = super::checks_model::select_runs(
+            repo.check_runs.get(&sha).cloned().unwrap_or_default(),
+            request,
+        );
+        Ok(paginate_with(
+            request,
+            &request.path,
+            checks,
+            |total_count, check_runs| types::ChecksListForRefResponse {
+                total_count,
+                check_runs,
+            },
+        ))
     }
 }
 

@@ -461,6 +461,9 @@ pub struct IssueSeed {
     /// Users assigned to the issue.
     #[serde(default, skip_serializing_if = "SeedField::is_missing")]
     pub assignees: SeedField<Vec<UserSeed>>,
+    /// Issue author. The repository owner when omitted.
+    #[serde(default, skip_serializing_if = "SeedField::is_missing")]
+    pub user: SeedField<UserSeed>,
 }
 
 /// Sparse review response values accepted by [`crate::server::PullRequest`].
@@ -1079,6 +1082,9 @@ pub(crate) fn seeded_issue(
             .into_iter()
             .map(|seed| simple_user(state, request, seed))
             .collect::<io::Result<Vec<_>>>()?;
+    }
+    if let SeedField::Present(user_seed) = seed.user {
+        issue.user = Some(simple_user(state, request, user_seed)?.into());
     }
     Ok(issue)
 }

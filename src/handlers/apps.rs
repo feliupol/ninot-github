@@ -8,6 +8,14 @@ use crate::operation::ops;
 use crate::state::{State, lock};
 use crate::types;
 
+fn app_slug(app_id: u64) -> String {
+    if app_id == 1 {
+        "ninot-test".to_owned()
+    } else {
+        format!("app-{app_id}")
+    }
+}
+
 fn app_permissions(secrets: Option<types::AppPermissionsSecrets>) -> types::AppPermissions {
     types::AppPermissions {
         actions: None,
@@ -100,8 +108,8 @@ impl Handler for ops::AppsGetRepoInstallation {
                 account: Some(types::InstallationAccount::SimpleUser(
                     crate::render::simple_user(request, account),
                 )),
-                app_id: 1,
-                app_slug: "ninot-test".to_owned(),
+                app_id: crate::render::id(installation.app_id),
+                app_slug: app_slug(installation.app_id),
                 client_id: None,
                 contact_email: None,
                 created_at: timestamp,
@@ -196,6 +204,7 @@ impl Handler for ops::AppsCreateInstallationAccessToken {
             "installation:{}/{}",
             installation.owner, installation.repository
         );
+        let app_scope = format!("github-app:{}", installation.app_id);
         let secrets_scopes = match effective_secrets {
             Some(types::AppPermissionsSecrets::Read) => vec!["actions:secrets:read".to_owned()],
             Some(types::AppPermissionsSecrets::Write) => vec![
@@ -209,6 +218,7 @@ impl Handler for ops::AppsCreateInstallationAccessToken {
             Caller {
                 login: installation.owner.clone(),
                 scopes: std::iter::once(installation_scope)
+                    .chain(std::iter::once(app_scope))
                     .chain(secrets_scopes)
                     .collect(),
             },
