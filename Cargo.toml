@@ -3,7 +3,7 @@ members = [".", "python"]
 
 [package]
 name = "ninot-github"
-version = "2026.45.0"
+version = "2026.46.0"
 edition = "2024"
 rust-version = "1.88"
 description = "In-memory fake of the GitHub REST API and git hosting for end-to-end tests"

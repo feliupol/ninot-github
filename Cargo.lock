@@ -2310,7 +2310,7 @@ dependencies = [
 
 [[package]]
 name = "ninot-github"
-version = "2026.45.0"
+version = "2026.46.0"
 dependencies = [
  "async-graphql",
  "axum",
