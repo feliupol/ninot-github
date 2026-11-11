@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "python"]
+members = [".", "python", "xtask"]
 
 [package]
 name = "ninot-github"

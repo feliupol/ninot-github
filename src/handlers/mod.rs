@@ -192,7 +192,6 @@ registry![
     ops::SearchIssuesAndPullRequests,
     ops::SearchRepos,
     ops::PullsMerge,
-    ops::PullsUpdate,
     ops::GitDeleteRef,
     ops::ReposUploadReleaseAsset,
     ops::ReposGetReleaseAsset,

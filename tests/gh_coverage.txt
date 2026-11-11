@@ -1,4 +1,4 @@
-# What the gh_cli tests exercise; `cargo run --example gh_coverage -- update` rewrites it.
+# What the gh_cli tests exercise; `cargo xtask gh-coverage update` rewrites it.
 # gh version 2.101.0 (2026-09-15)
 command api
 command auth setup-git

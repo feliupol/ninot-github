@@ -4,7 +4,7 @@
 //! `SSL_CERT_FILE`, so it would not trust the fake's certificate authority.
 //!
 //! Each test's `gh` invocations and the fake's hits are logged to [`COVERAGE_LOG`], which
-//! `cargo run --example gh_coverage` turns into a report and a ratchet.
+//! `cargo xtask gh-coverage` turns into a report and a ratchet.
 #![cfg(unix)]
 
 mod common;
