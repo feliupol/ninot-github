@@ -63,6 +63,8 @@ pub struct State {
     pub deliveries: Vec<Delivery>,
     /// Hands deliveries to the sender thread; without it, deliveries are recorded but not sent.
     pub webhook_queue: Option<std::sync::mpsc::Sender<u64>>,
+    /// Which addresses a webhook delivery may contact. Defaults to allowing every address.
+    pub webhook_targets: crate::webhooks::TargetPolicy,
     /// Checks every webhook payload against its octokit/webhooks schema before delivery.
     pub validate_payloads: bool,
     pub faults: crate::faults::Faults,

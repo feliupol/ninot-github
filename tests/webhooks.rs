@@ -378,3 +378,91 @@ fn failed_hook_update_changes_nothing() {
     assert_eq!(refused.status, 422, "{}", refused.body);
     assert_eq!(admin.get(&path).body, before);
 }
+
+#[test]
+fn a_redirect_from_the_target_is_recorded_and_not_followed() {
+    let server = Server::start().unwrap();
+    let admin = Api::admin(&server);
+    admin.post("/user/repos", json!({ "name": "tool" }));
+    let elsewhere = Receiver::start(200);
+    let redirector = Receiver::redirecting(&elsewhere.url);
+    create_hook(&admin, &redirector, json!({}));
+
+    let deliveries = server.wait_for_deliveries(1, Duration::from_secs(5));
+    assert_eq!(
+        deliveries[0].status_code,
+        Some(302),
+        "{:?}",
+        deliveries[0].error
+    );
+    redirector.next();
+    assert!(elsewhere.try_next().is_none(), "the redirect was followed");
+}
+
+fn public_only_server() -> Server {
+    let server = Server::start_with(ninot_github::server::Options {
+        webhook_targets: ninot_github::TargetPolicy::PublicOnly,
+        ..Default::default()
+    })
+    .unwrap();
+    Api::admin(&server).post("/user/repos", json!({ "name": "tool" }));
+    server
+}
+
+#[test]
+fn a_public_only_server_refuses_to_deliver_to_a_loopback_receiver() {
+    let server = public_only_server();
+    let admin = Api::admin(&server);
+    let receiver = Receiver::start(200);
+    // `localhost` is refused by name at creation, so the trailing-dot spelling of the same
+    // name is what reaches delivery, where the resolved address is checked.
+    let port = receiver
+        .url
+        .rsplit(':')
+        .next()
+        .unwrap()
+        .split('/')
+        .next()
+        .unwrap();
+    let created = admin.post(
+        "/repos/admin/tool/hooks",
+        json!({ "config": { "url": format!("http://localhost.:{port}/hook") } }),
+    );
+    assert_eq!(created.status, 201, "{}", created.body);
+
+    let deliveries = server.wait_for_deliveries(1, Duration::from_secs(5));
+    assert_eq!(deliveries[0].status_code, None);
+    assert_eq!(
+        deliveries[0].error.as_deref(),
+        Some("webhook target not allowed")
+    );
+    assert!(receiver.try_next().is_none(), "a refused target was called");
+}
+
+#[test]
+fn a_public_only_server_rejects_private_hook_urls_when_they_are_configured() {
+    let server = public_only_server();
+    let admin = Api::admin(&server);
+    for url in [
+        "http://127.0.0.1:9/hook",
+        "http://[::1]:9/hook",
+        "http://localhost:9/hook",
+        "http://169.254.169.254/hook",
+    ] {
+        let created = admin.post(
+            "/repos/admin/tool/hooks",
+            json!({ "config": { "url": url } }),
+        );
+        assert_eq!(created.status, 422, "{url}: {}", created.body);
+    }
+}
+
+#[test]
+fn the_default_policy_delivers_to_a_loopback_receiver() {
+    let server = Server::start().unwrap();
+    let admin = Api::admin(&server);
+    admin.post("/user/repos", json!({ "name": "tool" }));
+    let receiver = Receiver::start(200);
+    create_hook(&admin, &receiver, json!({}));
+    receiver.next();
+}

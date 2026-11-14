@@ -118,6 +118,10 @@ pub struct Options {
     /// certificate [`Server::ca_cert_path`] points at.
     pub tls: bool,
     pub rate_limits: Limits,
+    /// Which addresses a webhook delivery may contact ([`crate::TargetPolicy`]). The default,
+    /// [`crate::TargetPolicy::Any`], allows every address, including loopback, so local
+    /// receivers keep working.
+    pub webhook_targets: webhooks::TargetPolicy,
 }
 
 impl Default for Options {
@@ -127,6 +131,7 @@ impl Default for Options {
             validate_responses: true,
             tls: false,
             rate_limits: Limits::default(),
+            webhook_targets: webhooks::TargetPolicy::Any,
         }
     }
 }
@@ -244,7 +249,7 @@ impl Server {
         let admin_token = token::new_token(TOKEN_PREFIX);
         let data_dir_name = token::new_token(TOKEN_PREFIX);
         let data_dir = std::env::temp_dir().join(format!("ninot-github-{}", &data_dir_name[4..]));
-        std::fs::create_dir_all(&data_dir)?;
+        create_private_dir(&data_dir)?;
         let tls = if options.tls {
             let tls =
                 ninot_common::tls::generate("ninot-github local CA").map_err(io::Error::other)?;
@@ -257,6 +262,7 @@ impl Server {
         state.git_root = Some(data_dir.clone());
         state.rate_limits = RateLimits::new(options.rate_limits);
         state.validate_payloads = options.validate_responses;
+        state.webhook_targets = options.webhook_targets;
         state.add_user(ADMIN_LOGIN);
         state.tokens.insert(
             admin_token.clone(),
@@ -2112,11 +2118,50 @@ impl Drop for Server {
     }
 }
 
+/// Creates `path` (and missing parents) readable only by its owner.
+fn create_private_dir(path: &std::path::Path) -> io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(path)
+}
+
+/// The response for a request body that could not be read: `413` when it exceeded
+/// [`MAX_BODY_BYTES`], otherwise `400`.
+fn body_error(error: &axum::Error) -> ApiResponse {
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        if cause.is::<http_body_util::LengthLimitError>() {
+            return body_too_large();
+        }
+        source = cause.source();
+    }
+    ApiResponse::error(400, "cannot read request body")
+}
+
+fn body_too_large() -> ApiResponse {
+    ApiResponse::error(413, "Request body too large")
+}
+
+/// The largest request body the fake reads, 100 MiB (GitHub's hard limit for one file). A
+/// larger body is answered with `413`, from its `Content-Length` before any of it is read, or
+/// once a chunked body passes the limit.
+const MAX_BODY_BYTES: usize = 100 * 1024 * 1024;
+
 async fn dispatch(AxumState(app): AxumState<Arc<App>>, request: Request) -> Response {
     let (parts, body) = request.into_parts();
-    let body = match to_bytes(body, usize::MAX).await {
+    let declared = parts
+        .headers
+        .get(http::header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<usize>().ok());
+    if declared.is_some_and(|length| length > MAX_BODY_BYTES) {
+        return into_response(body_too_large(), None);
+    }
+    let body = match to_bytes(body, MAX_BODY_BYTES).await {
         Ok(body) => body,
-        Err(_) => return into_response(ApiResponse::error(400, "cannot read request body"), None),
+        Err(error) => return into_response(body_error(&error), None),
     };
     let path = parts.uri.path().to_owned();
     let handler_app = app.clone();
@@ -2546,7 +2591,14 @@ impl App {
     fn serve_git(&self, parts: &Parts, body: &bytes::Bytes, path: &git::GitPath) -> Response {
         let query = parts.uri.query().unwrap_or("");
         let push = git::is_push(path.service_path, query);
-        let caller = self.authenticate(&parts.headers).ok().flatten();
+        let caller = match self.authenticate(&parts.headers) {
+            Ok(caller) => caller,
+            Err(_) => {
+                return git_text(401, "Bad credentials\n")
+                    .with_header("www-authenticate", "Basic realm=\"GitHub\"".to_owned())
+                    .into_axum();
+            }
+        };
         let resolved = {
             let state = lock(&self.state);
             let target = match state.permission(caller.as_ref(), path.owner, path.repo) {
@@ -2818,6 +2870,30 @@ fn into_response(response: ApiResponse, caller: Option<&Caller>) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn private_dirs_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = std::env::temp_dir().join(format!("ninot-github-mode-{}", std::process::id()));
+        create_private_dir(&dir).unwrap();
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        std::fs::remove_dir(&dir).unwrap();
+        assert_eq!(mode, 0o700);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_data_directory_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let server = Server::start().unwrap();
+        let mode = std::fs::metadata(&server.data_dir)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o700);
+    }
 
     #[test]
     fn requests_succeed_after_a_panic_while_holding_the_state() {

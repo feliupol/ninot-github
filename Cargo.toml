@@ -32,6 +32,7 @@ headers = "0.4"
 gix = { version = "0.87", default-features = false, features = ["sha1", "revision", "attributes"] }
 hmac = "0.12"
 http = "1"
+http-body-util = "0.1"
 humantime = "2"
 jsonschema = { version = "0.58", default-features = false }
 mime = "0.3"

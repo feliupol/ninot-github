@@ -2322,6 +2322,7 @@ dependencies = [
  "headers",
  "hmac",
  "http",
+ "http-body-util",
  "humantime",
  "jsonschema",
  "mime",

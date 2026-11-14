@@ -23,6 +23,9 @@ enum Command {
         /// Serves HTTPS with a certificate from a fresh local certificate authority.
         #[arg(long)]
         tls: bool,
+        /// Refuse webhook targets on loopback, link-local and private addresses.
+        #[arg(long)]
+        deny_private_webhook_targets: bool,
     },
     /// Lists the operations of the pinned spec and which are implemented.
     Operations,
@@ -34,7 +37,11 @@ fn main() -> ExitCode {
             print!("{}", operations_report());
             ExitCode::SUCCESS
         }
-        Command::Serve { port, tls } => serve(port, tls),
+        Command::Serve {
+            port,
+            tls,
+            deny_private_webhook_targets,
+        } => serve(port, tls, deny_private_webhook_targets),
     }
 }
 
@@ -58,11 +65,18 @@ fn operations_report() -> String {
     report
 }
 
-fn serve(port: u16, tls: bool) -> ExitCode {
+fn serve(port: u16, tls: bool, deny_private_webhook_targets: bool) -> ExitCode {
+    use ninot_github::TargetPolicy;
+
     let options = ninot_github::server::Options {
         address: SocketAddr::from(([127, 0, 0, 1], port)),
         validate_responses: false,
         tls,
+        webhook_targets: if deny_private_webhook_targets {
+            TargetPolicy::PublicOnly
+        } else {
+            TargetPolicy::Any
+        },
         ..Default::default()
     };
     let server = match ninot_github::Server::start_with(options) {

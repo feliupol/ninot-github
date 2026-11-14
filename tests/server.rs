@@ -172,3 +172,37 @@ fn hits_record_operations_fields_and_unrouted_requests() {
     }
     assert_eq!(hits.len(), 6, "{hits:?}");
 }
+
+#[test]
+fn an_oversized_request_body_is_rejected_with_413() {
+    use std::io::{Read, Write};
+    let server = Server::start().unwrap();
+    let address = server.url().trim_start_matches("http://").to_owned();
+    let mut stream = std::net::TcpStream::connect(address).unwrap();
+    stream
+        .write_all(
+            b"POST /user/repos HTTP/1.1\r\nHost: x\r\nContent-Length: 1073741824\r\nConnection: close\r\n\r\n",
+        )
+        .unwrap();
+    let mut reply = String::new();
+    stream.read_to_string(&mut reply).unwrap();
+    assert!(reply.starts_with("HTTP/1.1 413"), "{reply}");
+}
+
+#[test]
+fn a_bad_git_token_is_rejected_and_a_missing_one_is_anonymous() {
+    let server = Server::start().unwrap();
+    let api = common::Api::admin(&server);
+    api.post("/user/repos", json!({ "name": "open", "auto_init": true }));
+    let path = "/admin/open.git/info/refs?service=git-upload-pack";
+
+    let anonymous = get(&server, path, None);
+    assert_eq!(anonymous.status(), 200);
+
+    let bad = get(&server, path, Some("ghp_wrong"));
+    assert_eq!(bad.status(), 401);
+    assert!(bad.headers().contains_key("www-authenticate"));
+
+    let good = get(&server, path, Some(server.admin_token()));
+    assert_eq!(good.status(), 200);
+}

@@ -195,6 +195,15 @@ impl Receiver {
     /// Serves on a free local port from its own thread and runtime, answering every request
     /// with `status`.
     pub fn start(status: u16) -> Self {
+        Self::spawn(status, None)
+    }
+
+    /// Like [`Receiver::start`], answering every request with `302 Found` to `location`.
+    pub fn redirecting(location: &str) -> Self {
+        Self::spawn(302, Some(location.to_owned()))
+    }
+
+    fn spawn(status: u16, location: Option<String>) -> Self {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let url = format!("http://{}/hook", listener.local_addr().unwrap());
@@ -220,7 +229,15 @@ impl Receiver {
                         headers,
                         body: body.to_vec(),
                     });
-                    std::future::ready(status)
+                    let mut response = axum::response::Response::new(axum::body::Body::empty());
+                    *response.status_mut() = status;
+                    if let Some(location) = &location {
+                        response.headers_mut().insert(
+                            axum::http::header::LOCATION,
+                            axum::http::HeaderValue::from_str(location).unwrap(),
+                        );
+                    }
+                    std::future::ready(response)
                 };
                 let listener = tokio::net::TcpListener::from_std(listener).unwrap();
                 axum::serve(listener, axum::Router::new().fallback(record))
@@ -229,6 +246,11 @@ impl Receiver {
             });
         });
         Self { url, requests }
+    }
+
+    /// A captured request that has not been taken yet, if any.
+    pub fn try_next(&self) -> Option<Captured> {
+        self.requests.try_recv().ok()
     }
 
     /// The next captured request, or a panic after five seconds.

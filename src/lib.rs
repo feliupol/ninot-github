@@ -11,6 +11,8 @@
 //!   [`faults::Fault`] and the [`faults::Applied`] log.
 //! - [`Delivery`] and [`DeliveryHeaders`] describe the webhook deliveries
 //!   [`Server::deliveries`] returns.
+//! - [`TargetPolicy`] decides which addresses a webhook delivery may contact. The default
+//!   allows every address, including loopback.
 //! - [`OPERATIONS`], [`ops`], [`Operation`], [`OperationInfo`] and [`Method`] describe the
 //!   spec's operations, and [`IMPLEMENTED`] lists those the fake serves.
 
@@ -77,4 +79,4 @@ pub use server::{
     WorkflowRun,
 };
 pub use state::{Delivery, State};
-pub use webhooks::DeliveryHeaders;
+pub use webhooks::{DeliveryHeaders, TargetPolicy};

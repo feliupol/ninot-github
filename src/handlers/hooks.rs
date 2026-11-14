@@ -116,15 +116,26 @@ fn config(hook: &Hook) -> types::WebhookConfig {
 }
 
 /// Applies `config` fields to `hook`, rejecting an invalid URL or content type.
+///
+/// The URL has to be `http` or `https`. Under [`webhooks::TargetPolicy::PublicOnly`], an IP
+/// literal that policy refuses, or the name `localhost`, is rejected too; other hostnames are
+/// checked only when the hook fires.
 fn apply_config(
     hook: &mut Hook,
+    policy: webhooks::TargetPolicy,
     url: Option<&str>,
     content_type: Option<&str>,
     secret: Option<Option<&str>>,
     insecure_ssl: Option<String>,
 ) -> Result<(), ApiResponse> {
     if let Some(url) = url {
-        if !is_web_url(url) {
+        let parsed = Url::parse(url)
+            .ok()
+            .filter(|parsed| matches!(parsed.scheme(), "http" | "https"));
+        let Some(parsed) = parsed else {
+            return Err(ApiResponse::validation_failed("Hook", "url", "invalid"));
+        };
+        if host_refused(policy, &parsed) {
             return Err(ApiResponse::validation_failed("Hook", "url", "invalid"));
         }
         hook.url = url.to_owned();
@@ -150,9 +161,21 @@ fn apply_config(
     Ok(())
 }
 
-/// Whether a hook's target is an `http` or `https` URL, which is all a fake can deliver to.
-fn is_web_url(url: &str) -> bool {
-    Url::parse(url).is_ok_and(|url| matches!(url.scheme(), "http" | "https"))
+/// Whether `url`'s host is refused by [`webhooks::TargetPolicy::PublicOnly`] before delivery.
+///
+/// IP literals are refused when [`webhooks::TargetPolicy::allows`] refuses them, and
+/// `localhost` is refused in any letter case. Other names are not resolved here. Every host
+/// is accepted under [`webhooks::TargetPolicy::Any`].
+fn host_refused(policy: webhooks::TargetPolicy, url: &Url) -> bool {
+    if policy != webhooks::TargetPolicy::PublicOnly {
+        return false;
+    }
+    match url.host() {
+        Some(url::Host::Ipv4(addr)) => !policy.allows(std::net::IpAddr::from(addr)),
+        Some(url::Host::Ipv6(addr)) => !policy.allows(std::net::IpAddr::from(addr)),
+        Some(url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+        None => false,
+    }
 }
 
 /// The event names listed under `key`.
@@ -188,6 +211,7 @@ impl Handler for ops::ReposCreateWebhook {
         };
         apply_config(
             &mut hook,
+            state.webhook_targets,
             config.url.as_ref().map(|value| value.0.as_str()),
             config.content_type.as_ref().map(|value| value.0.as_str()),
             config.secret.as_ref().map(|value| Some(value.0.as_str())),
@@ -244,6 +268,7 @@ impl Handler for ops::ReposUpdateWebhook {
         let body: types::ReposUpdateWebhookRequest = request.json_as()?;
         let mut state = lock(state);
         let found = find_admin(&state, request)?;
+        let policy = state.webhook_targets;
         let stored = hooks_mut(&mut state, &found)
             .iter_mut()
             .find(|hook| hook.id == id)
@@ -252,6 +277,7 @@ impl Handler for ops::ReposUpdateWebhook {
         if let Some(config) = body.config {
             apply_config(
                 &mut hook,
+                policy,
                 config.url.as_ref().map(|value| value.0.as_str()),
                 config.content_type.as_ref().map(|value| value.0.as_str()),
                 config
