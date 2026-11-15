@@ -30,6 +30,7 @@ pub(crate) fn commit_key(repo: &Repo, reference: &str) -> String {
 }
 
 /// The caller must be the GitHub App installed on this repository.
+// Source: <https://docs.github.com/en/rest/checks/runs#create-a-check-run>
 pub(crate) fn require_checks_app(request: &ApiRequest) -> Result<i64, ApiResponse> {
     let caller = request.require_caller()?;
     let wanted = format!(
@@ -56,6 +57,7 @@ pub(crate) fn require_checks_app(request: &ApiRequest) -> Result<i64, ApiRespons
 }
 
 /// 403 for a token that is not the GitHub App allowed to write this check.
+// Source: <https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api#resource-not-accessible>
 pub(crate) fn checks_forbidden(request: &ApiRequest) -> ApiResponse {
     let integration = request.caller.as_ref().is_some_and(|caller| {
         caller
@@ -157,6 +159,7 @@ pub(crate) fn touch_suite(repo: &mut Repo, suite_id: i64) {
 }
 
 /// Resets a suite to queued with no conclusion. The check runs themselves stay as they are.
+// Source: <https://docs.github.com/en/rest/checks/suites#rerequest-a-check-suite>
 pub(crate) fn mark_rerequested(repo: &mut Repo, suite_id: i64) -> bool {
     let Some(suite) = repo.check_suites.get_mut(&suite_id) else {
         return false;
@@ -167,6 +170,7 @@ pub(crate) fn mark_rerequested(repo: &mut Repo, suite_id: i64) -> bool {
 }
 
 /// Drops the oldest runs once one suite holds 1000 runs of `name`, making room for one more.
+// Source: <https://docs.github.com/en/rest/checks/runs#create-a-check-run>
 pub(crate) fn cap_same_name(repo: &mut Repo, suite_id: i64, name: &str) {
     let mut ids = Vec::new();
     for run in repo.check_runs.values().flatten() {
@@ -215,6 +219,7 @@ pub(crate) fn select_runs(
     mut runs: Vec<types::CheckRun>,
     request: &ApiRequest,
 ) -> Vec<types::CheckRun> {
+    // Source: <https://docs.github.com/en/rest/checks/runs#list-check-runs-for-a-git-reference>
     if request.query("filter") != Some("all") {
         runs = latest_of(runs);
     }

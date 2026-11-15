@@ -76,12 +76,15 @@ fn pull_collection(
         .get(&number)
         .ok_or_else(ApiResponse::not_found)?;
     match collection {
+        // Source: <https://docs.github.com/en/rest/pulls/reviews#list-reviews-for-a-pull-request>
         "reviews" => Ok(paginate(request, &request.path, pull.reviews.clone())),
+        // Source: <https://docs.github.com/en/rest/issues/comments#list-issue-comments>
         "issue_comments" => Ok(paginate(
             request,
             &request.path,
             pull.issue_comments.clone(),
         )),
+        // Source: <https://docs.github.com/en/rest/pulls/comments#list-review-comments-on-a-pull-request>
         "review_comments" => Ok(paginate(
             request,
             &request.path,
@@ -160,6 +163,7 @@ impl Handler for ops::PullsUpdate {
                 "Must have write access or be the pull request author",
             ));
         }
+        // The status only. Source: OpenAPI pulls/update 422
         if data.merged && matches!(body.state, Some(types::PullsUpdateRequestState::Open)) {
             return Err(ApiResponse::validation_failed(
                 "PullRequest",
@@ -297,6 +301,8 @@ impl Handler for ops::PullsList {
             })
             .collect::<Vec<_>>();
         let sort = request.query("sort").unwrap_or("created");
+        // Default direction, and `popularity` meaning comment count.
+        // Source: <https://docs.github.com/en/rest/pulls/pulls#list-pull-requests>
         let ascending = match request.query("direction") {
             Some("asc") => true,
             Some("desc") => false,
@@ -625,6 +631,7 @@ impl Handler for ops::PullsCreate {
         if head_git_dir != *git_dir {
             crate::fixture_git::copy_refs(git_dir, &head_git_dir).map_err(ApiResponse::internal)?;
         }
+        // A missing branch is a validation failure; the status only. Source: OpenAPI pulls/create 422
         let base_sha = ninot_common::git::resolve_commit(git_dir, base_ref)
             .map_err(ApiResponse::internal)?
             .ok_or_else(|| ApiResponse::unprocessable("base branch does not exist"))?;
@@ -901,6 +908,7 @@ impl Handler for ops::PullsMerge {
         let body = body.unwrap_or_default();
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
+        // The status only. Source: OpenAPI pulls/merge 403
         if !found.permission.push {
             return Err(ApiResponse::error(
                 403,
@@ -923,9 +931,11 @@ impl Handler for ops::PullsMerge {
             .as_ref()
             .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?;
         let expected = body.sha.as_deref();
+        // Source: OpenAPI pulls/merge 409
         if expected.is_some_and(|sha| data.head.sha != sha) {
             return Err(ApiResponse::error(409, "head SHA does not match"));
         }
+        // Source: OpenAPI pulls/merge 405
         if data.state != types::PullRequestState::Open
             || data.mergeable == Some(false)
             || data.draft == Some(true)
@@ -976,6 +986,8 @@ impl Handler for ops::PullsCreateReview {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let caller = request.require_scope(&["repo", "public_repo"])?;
         let body: types::PullsCreateReviewRequest = request.json_as()?;
+        // A blank event creates a pending review; `body` is required for REQUEST_CHANGES and COMMENT.
+        // Source: <https://docs.github.com/en/rest/pulls/reviews#create-a-review-for-a-pull-request>
         let event = body.event.map_or("PENDING", |event| match event {
             types::PullsCreateReviewRequestEvent::Approve => "APPROVE",
             types::PullsCreateReviewRequestEvent::RequestChanges => "REQUEST_CHANGES",
@@ -1076,6 +1088,7 @@ impl Handler for ops::PullsCreateReview {
             submitted_at: submitted_at.map(|time| crate::render::timestamp(&time)),
             user: Some(author.into()),
         };
+        // Source: <https://docs.github.com/en/rest/pulls/review-requests#get-all-requested-reviewers-for-a-pull-request>
         if event != "PENDING" {
             data.requested_reviewers
                 .retain(|reviewer| !reviewer.login.eq_ignore_ascii_case(&caller.login));

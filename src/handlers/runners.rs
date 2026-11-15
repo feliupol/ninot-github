@@ -27,6 +27,7 @@ fn authorize(state: &State, request: &ApiRequest) -> Result<String, ApiResponse>
         .account(request.param("org"))
         .filter(|account| account.kind == AccountKind::Organization)
         .ok_or_else(ApiResponse::not_found)?;
+    // Source: <https://docs.github.com/en/rest/actions/self-hosted-runners#create-a-registration-token-for-an-organization>
     if !caller.has_scope("admin:org") {
         return Err(ApiResponse::error(
             403,

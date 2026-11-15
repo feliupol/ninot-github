@@ -308,6 +308,8 @@ impl Handler for ops::ReposDeleteWebhook {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let id = hook_id(request)?;
         let mut state = lock(state);
+        // Deleting needs repository owner or admin access.
+        // Source: <https://docs.github.com/en/rest/repos/webhooks#delete-a-repository-webhook>
         let found = find_admin(&state, request)?;
         let hooks = hooks_mut(&mut state, &found);
         let index = hooks

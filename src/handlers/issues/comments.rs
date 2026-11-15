@@ -224,6 +224,8 @@ fn sort_comments(
     request: &ApiRequest,
     comments: &mut [types::IssueComment],
 ) -> Result<(), ApiResponse> {
+    // Without `sort`, comments are ordered by ascending ID.
+    // Source: <https://docs.github.com/en/rest/issues/comments#list-issue-comments-for-a-repository>
     let Some(sort) = request.query("sort") else {
         comments.sort_by_key(|comment| comment.id);
         return Ok(());

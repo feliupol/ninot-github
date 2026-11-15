@@ -219,6 +219,7 @@ fn json_body(request: &ApiRequest) -> Result<Value, ApiResponse> {
     if request.body.is_empty() {
         return Ok(Value::Object(serde_json::Map::new()));
     }
+    // Source: <https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api#problems-parsing-json>
     serde_json::from_slice(&request.body)
         .map_err(|_| ApiResponse::error(400, "Problems parsing JSON"))
 }

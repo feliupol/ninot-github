@@ -134,6 +134,7 @@ impl Handler for ops::ActionsCreateOrUpdateRepoSecret {
                 updated_at: timestamp,
             },
         );
+        // Source: OpenAPI actions/create-or-update-repo-secret 204
         if existed {
             Ok(ApiResponse::no_content())
         } else {

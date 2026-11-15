@@ -133,6 +133,7 @@ impl Handler for ops::ActionsGetWorkflowRun {
 }
 
 fn rerun_workflow(state: &Mutex<State>, request: &ApiRequest, failed_only: bool) -> ApiResult {
+    // Source: <https://docs.github.com/en/rest/actions/workflow-runs#re-run-a-workflow>
     request.require_scope(&["repo", "workflow"])?;
     if failed_only {
         let _body: Option<types::ActionsReRunWorkflowFailedJobsRequestBody> = request.json_as()?;

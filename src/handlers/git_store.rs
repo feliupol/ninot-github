@@ -74,6 +74,7 @@ pub(crate) fn locate_writable(
 }
 
 /// GitHub's answer for git data in a repository without commits.
+/// Source: <https://docs.github.com/en/rest/guides/using-the-rest-api-to-interact-with-your-git-database#overview>
 pub(crate) fn empty_repository() -> ApiResponse {
     ApiResponse::error(409, "Git Repository is empty.")
 }

@@ -20,6 +20,7 @@ fn invalid(field: &str) -> ApiResponse {
 }
 
 /// The teams of `org` that `login` can see, by slug.
+// Source: <https://docs.github.com/en/rest/teams/teams#list-teams>
 fn visible_teams<'a>(org: &'a Account, login: &str) -> Vec<&'a Team> {
     org.teams
         .values()
@@ -31,6 +32,7 @@ fn text(body: &Map<String, Value>, key: &str) -> Option<String> {
     body.get(key).and_then(Value::as_str).map(str::to_owned)
 }
 
+// Source: <https://docs.github.com/en/rest/teams/teams#update-a-team>
 fn forbidden() -> ApiResponse {
     ApiResponse::error(
         403,
@@ -82,6 +84,7 @@ impl Handler for ops::TeamsCreate {
         let body = object_body(request)?;
         let mut state = lock(state);
         let org = find_org(&state, request.param("org"))?;
+        // Source: <https://docs.github.com/en/rest/teams/teams#create-a-team>
         if org.role_of(&caller.login) == OrgRole::Outsider {
             return Err(ApiResponse::error(
                 403,
@@ -115,6 +118,7 @@ impl Handler for ops::TeamsCreate {
             None => None,
         };
         let privacy = text(&body, "privacy");
+        // Source: <https://docs.github.com/en/rest/teams/teams#update-a-team>
         if parent.is_some_and(|team| team.privacy == "secret")
             || (parent.is_some() && privacy.as_deref() == Some("secret"))
         {
@@ -154,6 +158,7 @@ impl Handler for ops::TeamsCreate {
         let mut team = Team::new(
             id,
             slug.clone(),
+            // Source: <https://docs.github.com/en/rest/teams/teams#create-a-team>
             if parent_id.is_some() {
                 "closed"
             } else {
@@ -169,6 +174,7 @@ impl Handler for ops::TeamsCreate {
             team.notification_setting = setting;
         }
         team.parent_id = parent_id;
+        // Source: <https://docs.github.com/en/rest/teams/teams#create-a-team>
         for login in maintainers.into_iter().chain([caller.login.to_lowercase()]) {
             team.members.insert(login.clone());
             team.maintainers.insert(login);
@@ -260,6 +266,7 @@ impl Handler for ops::TeamsUpdateInOrg {
             }
         };
         let privacy = text(&body, "privacy").unwrap_or_else(|| team.privacy.clone());
+        // Source: <https://docs.github.com/en/rest/teams/teams#update-a-team>
         if privacy == "secret" && (parent.is_some() || has_children) {
             return Err(invalid("privacy"));
         }
@@ -304,6 +311,7 @@ impl Handler for ops::TeamsDeleteInOrg {
         if !org.manages_team(&team.slug, &caller.login) {
             return Err(forbidden());
         }
+        // Source: <https://docs.github.com/en/rest/teams/teams#delete-a-team>
         let mut doomed = org.descendant_slugs(&team.slug);
         doomed.push(team.slug.clone());
         let org_login = org.login.clone();

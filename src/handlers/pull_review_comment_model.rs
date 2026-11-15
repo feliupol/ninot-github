@@ -76,6 +76,8 @@ impl Anchor {
         if self.path.is_empty() {
             return Err(missing("path"));
         }
+        // `line` is required unless `subject_type` is `file`.
+        // Source: <https://docs.github.com/en/rest/pulls/comments#create-a-review-comment-for-a-pull-request>
         if !self.file && self.line.is_none() && self.position.is_none() {
             return Err(missing("line"));
         }

@@ -136,6 +136,7 @@ impl Handler for ops::ChecksUpdate {
             let repo = found.repo_mut(&mut state);
             let count = {
                 let stored = repo.check_annotations.entry(id).or_default();
+                // Source: <https://docs.github.com/en/rest/checks/runs#update-a-check-run>
                 stored.extend(appended);
                 i64::try_from(stored.len()).unwrap_or(i64::MAX)
             };
@@ -205,6 +206,7 @@ impl Handler for ops::ChecksRerequestRun {
         let found = find_repo(&state, request)?;
         let app_id = require_checks_app(request)?;
         let run = find_run(found.repo(&state), id).ok_or_else(ApiResponse::not_found)?;
+        // Source: OpenAPI checks/rerequest-run 403
         if run.app.as_ref().map(|app| app.id) != Some(app_id) {
             return Err(checks_forbidden(request));
         }
@@ -213,6 +215,7 @@ impl Handler for ops::ChecksRerequestRun {
         };
         {
             let repo = found.repo_mut(&mut state);
+            // Source: <https://docs.github.com/en/rest/checks/runs#rerequest-a-check-run>
             if !checks_model::mark_rerequested(repo, suite_id) {
                 return Err(not_rerequestable());
             }
@@ -227,6 +230,7 @@ impl Handler for ops::ChecksRerequestRun {
     }
 }
 
+// Source: OpenAPI checks/rerequest-run 422
 fn not_rerequestable() -> ApiResponse {
     ApiResponse::unprocessable("Check run is not rerequestable")
 }
@@ -250,6 +254,7 @@ fn find_run_mut(repo: &mut Repo, id: i64) -> Option<&mut types::CheckRun> {
         .find(|run| run.id == id)
 }
 
+// Source: <https://docs.github.com/en/rest/checks/runs#create-a-check-run>
 fn create_phase(
     body: &types::ChecksCreateRequest,
     now: DateTime<Utc>,
@@ -277,6 +282,7 @@ fn create_phase(
     })
 }
 
+// Source: <https://docs.github.com/en/rest/checks/runs#update-a-check-run>
 fn update_phase(
     body: &types::ChecksUpdateRequest,
     current: &types::CheckRun,
@@ -411,6 +417,7 @@ fn update_annotations(
         .collect()
 }
 
+// Source: <https://docs.github.com/en/rest/checks/runs#update-a-check-run>
 fn annotation_input(draft: AnnotationDraft<'_>) -> Result<AnnotationInput, ApiResponse> {
     if draft.start_line < 1 || draft.end_line < draft.start_line {
         return Err(ApiResponse::validation_failed(

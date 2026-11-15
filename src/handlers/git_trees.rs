@@ -106,6 +106,8 @@ fn peel_to_tree(repo: &gix::Repository, spec: &str) -> Result<gix::ObjectId, Api
         .id)
 }
 
+/// A null `sha` deletes the entry; `sha` with `content` is an error.
+/// Source: <https://docs.github.com/en/rest/git/trees#create-a-tree>
 fn entry_sha_and_content(
     item: &types::GitCreateTreeRequestTreeItem,
 ) -> Result<TreeEntrySource, ApiResponse> {
@@ -139,6 +141,8 @@ impl Handler for ops::GitCreateTree {
         let repo = open_repo(&located.git_dir)?;
         let base = match &body.base_tree {
             Some(base) => peel_to_tree(&repo, base)?,
+            // Without `base_tree`, the tree holds only the given entries.
+            // Source: <https://docs.github.com/en/rest/git/trees#create-a-tree>
             None => gix::ObjectId::empty_tree(repo.object_hash()),
         };
         let mut editor = repo.edit_tree(base).map_err(ApiResponse::internal)?;
@@ -161,6 +165,7 @@ impl Handler for ops::GitCreateTree {
             let kind = tree_entry_kind(&mode, &type_)?;
             match entry_sha_and_content(item)? {
                 TreeEntrySource::Delete => {
+                    // Source: <https://docs.github.com/en/rest/git/trees#create-a-tree>
                     if editor.get(path).is_none() {
                         return Err(ApiResponse::unprocessable(&format!(
                             "The path {path} does not exist in the tree"
@@ -214,6 +219,8 @@ impl Handler for ops::GitGetTree {
         let located = locate(state, request)?;
         let tree_sha = request.param("tree_sha");
         let repo = open_repo(&located.git_dir)?;
+        // `tree_sha` may be a SHA or a ref name.
+        // Source: <https://docs.github.com/en/rest/git/trees#get-a-tree>
         let Some(id) = super::git_store::resolve_object(&repo, tree_sha)? else {
             drop(repo);
             find_existing_object(&located.git_dir, tree_sha)?;
@@ -231,6 +238,8 @@ impl Handler for ops::GitGetTree {
             .peel_to_tree()
             .map_err(|_| ApiResponse::validation_failed("Git", "sha", "invalid"))?
             .id;
+        // Any `recursive` value enables recursion.
+        // Source: <https://docs.github.com/en/rest/git/trees#get-a-tree>
         let recursive = request.query("recursive").is_some();
         let (sha, items) = list_tree(&repo, &located, request, tree_id, recursive)?;
         let url = tree_url(request, &located, &sha);

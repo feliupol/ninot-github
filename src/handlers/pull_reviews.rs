@@ -107,6 +107,8 @@ impl Handler for ops::PullsDeletePendingReview {
         let pull = found.pull_mut(&mut state, number(request)?)?;
         let id = review_id(request)?;
         let index = locate(pull, id, &caller.login)?;
+        // Submitted reviews cannot be deleted.
+        // Source: <https://docs.github.com/en/rest/pulls/reviews#delete-a-pending-review-for-a-pull-request>
         if pull.reviews[index].state != "PENDING" {
             return Err(ApiResponse::unprocessable(
                 "Can not delete a non-pending pull request review",
@@ -188,6 +190,7 @@ impl Handler for ops::PullsSubmitReview {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let caller = request.require_scope(&["repo", "public_repo"])?;
         let body = body_object(request)?;
+        // Source: <https://docs.github.com/en/rest/pulls/reviews#submit-a-review-for-a-pull-request>
         let event = text(&body, "event")?.ok_or_else(|| field("event", "missing_field"))?;
         let review_state = match event.as_str() {
             "APPROVE" => "APPROVED",
@@ -202,6 +205,7 @@ impl Handler for ops::PullsSubmitReview {
         let pull = found.pull_mut(&mut state, number)?;
         let index = locate(pull, review_id(request)?, &caller.login)?;
         let review = &mut pull.reviews[index];
+        // The status only. Source: OpenAPI pulls/submit-review 403
         if !authored_by(review, &caller.login) {
             return Err(forbidden());
         }
@@ -234,6 +238,7 @@ impl Handler for ops::PullsSubmitReview {
         let review = review.clone();
         let id = review.id;
         data.updated_at = now;
+        // Source: <https://docs.github.com/en/rest/pulls/review-requests#get-all-requested-reviewers-for-a-pull-request>
         data.requested_reviewers
             .retain(|reviewer| !reviewer.login.eq_ignore_ascii_case(&caller.login));
         let data = data.clone();

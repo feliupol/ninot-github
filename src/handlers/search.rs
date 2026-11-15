@@ -8,6 +8,7 @@ use crate::operation::ops;
 use crate::state::{Account, Issue, PullRequest, State, lock};
 
 /// A user-valued qualifier's login, where `@me` stands for the authenticated user.
+/// Source: <https://docs.github.com/en/search-github/searching-on-github/searching-issues-and-pull-requests#search-for-my-issues-and-pull-requests>
 fn login<'a>(value: &'a str, caller: &'a str) -> &'a str {
     if value.eq_ignore_ascii_case("@me") {
         caller
@@ -17,6 +18,7 @@ fn login<'a>(value: &'a str, caller: &'a str) -> &'a str {
 }
 
 /// Whether `login` is asked to review `pull` directly, as `user-review-requested:` matches.
+/// Source: <https://docs.github.com/en/search-github/searching-on-github/searching-issues-and-pull-requests#search-by-pull-request-review-status-and-reviewer>
 fn user_review_requested(pull: &crate::types::PullRequest, login: &str) -> bool {
     pull.requested_reviewers
         .iter()
@@ -25,6 +27,7 @@ fn user_review_requested(pull: &crate::types::PullRequest, login: &str) -> bool 
 
 /// Whether `login` is asked to review `pull` directly or through a team of the repository's
 /// organization `owner`, as `review-requested:` matches.
+/// Source: <https://docs.github.com/en/search-github/searching-on-github/searching-issues-and-pull-requests#search-by-pull-request-review-status-and-reviewer>
 pub(crate) fn review_requested(
     owner: &Account,
     pull: &crate::types::PullRequest,
@@ -38,6 +41,7 @@ pub(crate) fn review_requested(
 }
 
 /// Whether the team `org/slug` is asked to review `pull`, as `team-review-requested:` matches.
+/// Source: <https://docs.github.com/en/search-github/searching-on-github/searching-issues-and-pull-requests#search-by-pull-request-review-status-and-reviewer>
 fn team_review_requested(owner: &Account, pull: &crate::types::PullRequest, team: &str) -> bool {
     team.split_once('/').is_some_and(|(org, slug)| {
         org.eq_ignore_ascii_case(&owner.login)

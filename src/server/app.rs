@@ -84,7 +84,9 @@ impl App {
             && (full_path == "/api/graphql" || path == "/graphql");
         let client = self.client(&parts);
         let resource = match operation {
+            // Source: <https://docs.github.com/en/rest/rate-limit/rate-limit#get-rate-limit-status-for-the-authenticated-user>
             Some("rate-limit/get") => None,
+            // Source: <https://docs.github.com/en/rest/search/search#rate-limit>
             Some(id) if id.starts_with("search/") => Some(Resource::Search),
             Some(_) => Some(Resource::Core),
             // GraphQL answers anonymous callers with a 401 before running anything.
@@ -134,6 +136,8 @@ impl App {
     }
 
     /// Answers a request refused by the rate limits.
+    // Source: <https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api#exceeding-the-rate-limit>
+    // Source: cli/cli v2.101.0 pkg/cmd/skills/search/search.go:704
     fn refuse(&self, client: &Client, resource: Resource, refusal: Refusal) -> Response {
         let (mut response, window) = match refusal {
             Refusal::Primary(window) => {
@@ -163,6 +167,7 @@ impl App {
     }
 
     /// Who rate limits count a request against: its valid token, or else its peer address.
+    // Source: <https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api#primary-rate-limit-for-unauthenticated-users>
     fn client(&self, parts: &Parts) -> Client {
         let token = token_from_authorization(&parts.headers)
             .filter(|token| lock(&self.state).tokens.contains_key(token));
@@ -618,6 +623,7 @@ impl App {
                 scopes: vec!["app".to_owned()],
             }));
         }
+        // Source: <https://docs.github.com/en/rest/authentication/authenticating-to-the-rest-api#failed-login-limit>
         Err(ApiResponse::error(401, "Bad credentials"))
     }
 }
@@ -678,6 +684,7 @@ fn into_response(response: ApiResponse, caller: Option<&Caller>) -> Response {
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(response.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR));
     let headers = builder.headers_mut().unwrap();
+    // Source: cli/cli v2.101.0 pkg/cmd/auth/shared/oauth_scopes.go:56
     if let Some(caller) = caller {
         headers.insert(
             "x-oauth-scopes",

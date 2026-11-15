@@ -89,6 +89,7 @@ impl Handler for ops::GitGetRef {
         if refs.is_empty() {
             return Err(empty_repository());
         }
+        // Source: <https://docs.github.com/en/rest/git/refs#get-a-reference>
         let found = refs
             .iter()
             .find(|found| found.name == name)
@@ -104,6 +105,7 @@ impl Handler for ops::GitCreateRef {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         request.require_scope(&["repo", "public_repo"])?;
         let body: types::GitCreateRefRequest = request.json_as()?;
+        // Source: <https://docs.github.com/en/rest/git/refs#create-a-reference>
         if !body.ref_.starts_with("refs/")
             || body.ref_.split('/').count() < 3
             || gix::refs::FullName::try_from(body.ref_.clone()).is_err()
@@ -179,6 +181,8 @@ impl Handler for ops::GitListMatchingRefs {
         if refs.is_empty() {
             return Err(empty_repository());
         }
+        // Refs that start with the requested name match.
+        // Source: <https://docs.github.com/en/rest/git/refs#list-matching-references>
         let prefix = format!("refs/{}", request.param("ref"));
         let items = refs
             .iter()
@@ -573,6 +577,7 @@ struct Person {
 
 impl Person {
     fn named(name: &str, email: &str, date: Option<&String>) -> Result<Self, ApiResponse> {
+        // Source: <https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents>
         if name.trim().is_empty() || email.trim().is_empty() {
             return Err(ApiResponse::validation_failed(
                 "Commit",
@@ -690,6 +695,8 @@ impl Handler for ops::ReposCreateOrUpdateFileContents {
             Some(committer) => {
                 Person::named(&committer.name, &committer.email, committer.date.as_ref())?
             }
+            // Default committer: the authenticated user.
+            // Source: <https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents>
             None => Person {
                 name: user.name.clone().unwrap_or_else(|| user.login.clone()),
                 email: format!("{}+{}@users.noreply.github.com", user.id, user.login),
@@ -698,6 +705,8 @@ impl Handler for ops::ReposCreateOrUpdateFileContents {
         };
         let author = match &body.author {
             Some(author) => Person::named(&author.name, &author.email, author.date.as_ref())?,
+            // Default author: the committer.
+            // Source: <https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents>
             None => Person {
                 name: committer.name.clone(),
                 email: committer.email.clone(),
@@ -718,6 +727,8 @@ impl Handler for ops::ReposCreateOrUpdateFileContents {
         };
         let branch = body.branch.as_deref().unwrap_or(&located.default_branch);
         let path = request.param("path").trim_matches('/');
+        // PUT contents may initialize an empty repository.
+        // Source: <https://docs.github.com/en/rest/guides/using-the-rest-api-to-interact-with-your-git-database#overview>
         let existing = if git::is_empty(&located.git_dir).map_err(ApiResponse::internal)? {
             None
         } else {
@@ -830,6 +841,8 @@ impl Handler for ops::ReposCompareCommits {
         let base_sha = git::resolve_commit(&located.git_dir, base)
             .map_err(ApiResponse::internal)?
             .ok_or_else(|| ApiResponse::error(404, "base commit not found"))?;
+        // `owner:branch` names a branch elsewhere in the repository network.
+        // Source: <https://docs.github.com/en/rest/commits/commits#compare-two-commits>
         let head_sha = if let Some((owner, branch)) = head.split_once(':') {
             resolve_fork_network_branch(state, &located.found, &located.git_dir, owner, branch)?
                 .or(git::resolve_commit(&located.git_dir, head_branch)
@@ -851,6 +864,8 @@ impl Handler for ops::ReposCompareCommits {
         } else {
             types::CommitComparisonStatus::Diverged
         };
+        // Commits in chronological order, oldest first.
+        // Source: <https://docs.github.com/en/rest/commits/commits#compare-two-commits>
         let commits = ahead
             .iter()
             .map(|sha| git::commit(&located.git_dir, sha))
@@ -977,6 +992,7 @@ impl Handler for ops::GitUpdateRef {
         };
         let force = body.force.unwrap_or(false);
         if !force && !super::git_store::is_ancestor(&git_dir, &current.sha, &new_sha)? {
+            // Source: cli/cli v2.101.0 pkg/cmd/repo/sync/sync.go:20
             return Err(ApiResponse::unprocessable("Update is not a fast forward"));
         }
         git::create_ref(&git_dir, &reference, &new_sha, &super::BOT)

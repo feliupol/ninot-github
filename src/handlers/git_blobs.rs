@@ -74,6 +74,8 @@ impl Handler for ops::GitGetBlob {
             .map_err(ApiResponse::internal)?
             .data
             .clone();
+        // The raw media type returns the blob data; otherwise content is Base64.
+        // Source: <https://docs.github.com/en/rest/git/blobs#get-a-blob>
         if request.accept().contains("application/vnd.github.raw") {
             return Ok(ApiResponse::bytes(200, "application/octet-stream", bytes));
         }

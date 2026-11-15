@@ -34,6 +34,7 @@ impl Handler for ops::ChecksCreateSuite {
                 crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
             crate::webhooks::events::check_suite::requested_suite(&mut ctx, &suite);
         }
+        // Source: OpenAPI checks/create-suite 200
         let status = if created { 201 } else { 200 };
         Ok(ApiResponse::typed(
             status,
@@ -48,6 +49,7 @@ impl Handler for ops::ChecksSetSuitesPreferences {
         let body: types::ChecksSetSuitesPreferencesRequest = request.json_as()?;
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
+        // Source: <https://docs.github.com/en/rest/checks/suites#update-repository-preferences-for-check-suites>
         if !found.permission.admin {
             return Err(ApiResponse::error(
                 403,

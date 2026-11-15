@@ -57,6 +57,7 @@ impl Handler for ops::TeamsListMembersInOrg {
                 .filter(|login| role == "all" || !team.maintainers.contains(*login))
                 .collect(),
         };
+        // Source: <https://docs.github.com/en/rest/teams/members#list-team-members>
         if role != "maintainer" {
             let inherited = org
                 .descendant_slugs(&team.slug)
@@ -90,6 +91,7 @@ impl Handler for ops::TeamsGetMembershipForUserInOrg {
         )?;
         let username = request.param("username");
         let key = username.to_lowercase();
+        // Source: OpenAPI teams/get-membership-for-user-in-org 404
         let (membership_state, role) = if team.members.contains(&key) {
             let maintainer = team.maintainers.contains(&key);
             ("active", if maintainer { "maintainer" } else { "member" })
@@ -116,6 +118,7 @@ impl Handler for ops::TeamsAddOrUpdateMembershipForUserInOrg {
             request.param("team_slug"),
             &caller.login,
         )?;
+        // Source: <https://docs.github.com/en/rest/teams/members#add-or-update-team-membership-for-a-user>
         if !org.manages_team(&team.slug, &caller.login) {
             return Err(forbidden());
         }
@@ -129,6 +132,7 @@ impl Handler for ops::TeamsAddOrUpdateMembershipForUserInOrg {
         let active = org.members.contains(&key);
         let (org_login, slug) = (org.login.clone(), team.slug.clone());
         let org = state.account_mut(&org_login).expect("organization");
+        // Source: <https://docs.github.com/en/rest/teams/members#add-or-update-team-membership-for-a-user>
         if !active {
             org.pending
                 .entry(key.clone())
@@ -173,6 +177,7 @@ impl Handler for ops::TeamsRemoveMembershipForUserInOrg {
             request.param("team_slug"),
             &caller.login,
         )?;
+        // Source: <https://docs.github.com/en/rest/teams/members#remove-team-membership-for-a-user>
         if !org.manages_team(&team.slug, &caller.login) {
             return Err(forbidden());
         }

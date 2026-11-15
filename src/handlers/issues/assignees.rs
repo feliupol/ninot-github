@@ -17,6 +17,7 @@ use crate::state::{Account, State, lock};
 use crate::types;
 use crate::webhooks::events;
 
+/// Source: <https://docs.github.com/en/rest/issues/assignees#add-assignees-to-an-issue>
 const MAX_ASSIGNEES: usize = 10;
 
 impl Handler for ops::IssuesAddAssignees {
@@ -26,6 +27,8 @@ impl Handler for ops::IssuesAddAssignees {
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         let number = super::issue_number(request)?;
+        // Without push access the assignees are silently ignored.
+        // Source: <https://docs.github.com/en/rest/issues/assignees#add-assignees-to-an-issue>
         if !found.permission.push {
             return current_issue(&state, &found, number)
                 .map(|issue| ApiResponse::typed(201, &issue));
@@ -86,6 +89,8 @@ impl Handler for ops::IssuesRemoveAssignees {
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         let number = super::issue_number(request)?;
+        // Without push access the assignees are silently ignored.
+        // Source: <https://docs.github.com/en/rest/issues/assignees#remove-assignees-from-an-issue>
         if !found.permission.push {
             return current_issue(&state, &found, number)
                 .map(|issue| ApiResponse::typed(200, &issue));
@@ -277,6 +282,8 @@ pub(super) fn write_assignees(
     *assignees = users;
 }
 
+/// Users already assigned are not replaced.
+/// Source: <https://docs.github.com/en/rest/issues/assignees#add-assignees-to-an-issue>
 fn merge_assignees(
     existing: &[types::SimpleUser],
     added: Vec<types::SimpleUser>,

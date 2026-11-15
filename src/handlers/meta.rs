@@ -20,6 +20,7 @@ impl Handler for ops::MetaGetZen {
 }
 
 /// The caller's windows, without counting against them.
+// Source: <https://docs.github.com/en/rest/rate-limit/rate-limit#get-rate-limit-status-for-the-authenticated-user>
 impl Handler for ops::RateLimitGet {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let client = request

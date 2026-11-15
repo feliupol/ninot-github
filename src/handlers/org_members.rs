@@ -18,6 +18,7 @@ use crate::operation::ops;
 use crate::state::{Account, AccountKind, OrgRole, State, lock};
 
 /// Whether the caller may see concealed members of `org`.
+// Source: <https://docs.github.com/en/rest/orgs/members#list-organization-members>
 fn sees_all(request: &ApiRequest, org: &Account) -> bool {
     request.caller.as_ref().is_some_and(|caller| {
         ["read:org", "write:org", "admin:org"]
@@ -34,6 +35,7 @@ pub(super) fn two_factor_filter(request: &ApiRequest, org: &Account) -> Result<b
     let invalid = || ApiResponse::validation_failed("Organization", "filter", "invalid");
     match request.query("filter").unwrap_or("all") {
         "all" => Ok(false),
+        // Source: <https://docs.github.com/en/rest/orgs/members#list-organization-members>
         "2fa_disabled" | "2fa_insecure" => {
             let owner = request
                 .caller
@@ -80,6 +82,7 @@ impl Handler for ops::OrgsCheckMembershipForUser {
         let state = lock(state);
         let org = find_org(&state, request.param("org"))?;
         let username = request.param("username").to_lowercase();
+        // Source: OpenAPI orgs/check-membership-for-user 302
         if !sees_all(request, org) {
             let location = format!(
                 "{}/orgs/{}/public_members/{}",
@@ -109,6 +112,7 @@ impl Handler for ops::OrgsRemoveMember {
             return Err(owners_only());
         }
         let org = request.param("org").to_owned();
+        // Source: <https://docs.github.com/en/rest/orgs/members#remove-an-organization-member>
         state.remove_org_member(&org, request.param("username"));
         Ok(ApiResponse::no_content())
     }
@@ -147,6 +151,7 @@ impl Handler for ops::OrgsGetMembershipForUser {
         let state = lock(state);
         let org = find_org(&state, request.param("org"))?;
         let own = caller.login.eq_ignore_ascii_case(request.param("username"));
+        // Source: <https://docs.github.com/en/rest/orgs/members#get-organization-membership-for-a-user>
         if org.role_of(&caller.login) == OrgRole::Outsider && !own {
             return Err(ApiResponse::error(
                 403,
@@ -164,6 +169,7 @@ impl Handler for ops::OrgsSetMembershipForUser {
         let caller = scoped(request, Need::Admin)?;
         let body = object_body(request)?;
         let mut state = lock(state);
+        // Source: <https://docs.github.com/en/rest/orgs/members#set-organization-membership-for-a-user>
         if find_org(&state, request.param("org"))?.role_of(&caller.login) != OrgRole::Owner {
             return Err(owners_only());
         }
@@ -198,6 +204,7 @@ impl Handler for ops::OrgsRemoveMembershipForUser {
         let caller = scoped(request, Need::Admin)?;
         let mut state = lock(state);
         let org = find_org(&state, request.param("org"))?;
+        // Source: <https://docs.github.com/en/rest/orgs/members#remove-organization-membership-for-a-user>
         if org.role_of(&caller.login) != OrgRole::Owner {
             return Err(owners_only());
         }

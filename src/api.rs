@@ -88,6 +88,7 @@ impl ApiRequest {
         };
         serde_json::from_slice(body).map_err(|error| {
             if !error.is_data() || serde_json::from_slice::<serde::de::IgnoredAny>(body).is_err() {
+                // Source: <https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api#problems-parsing-json>
                 ApiResponse::error(400, "Problems parsing JSON")
             } else {
                 ApiResponse::unprocessable("Invalid request body")
@@ -162,6 +163,7 @@ impl ApiRequest {
         } else {
             Err(ApiResponse::error(
                 403,
+                // Source: <https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api#resource-not-accessible>
                 "Resource not accessible by integration",
             ))
         }
@@ -220,6 +222,7 @@ impl ApiResponse {
             .headers
             .typed_get::<IfNoneMatch>()
             .is_some_and(|condition| !condition.precondition_passes(&etag));
+        // Source: <https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api#use-conditional-requests>
         let response = if unchanged {
             Self {
                 status: 304,
@@ -294,6 +297,7 @@ impl ApiResponse {
     }
 
     /// A 422 validation failure naming the offending field.
+    // Source: <https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api#validation-failed>
     pub fn validation_failed(resource: &str, field: &str, code: &str) -> Self {
         Self::typed(
             422,
@@ -324,6 +328,7 @@ pub type ApiResult = Result<ApiResponse, ApiResponse>;
 
 /// Default and maximum `per_page`, as GitHub applies them.
 pub const PER_PAGE_DEFAULT: usize = 30;
+// Source: <https://docs.github.com/en/rest/using-the-rest-api/using-pagination-in-the-rest-api#changing-the-number-of-items-per-page>
 pub const PER_PAGE_MAX: usize = 100;
 
 /// Returns one page of `items` with GitHub's `Link` header.
@@ -390,6 +395,7 @@ pub fn page<T>(request: &ApiRequest, path: &str, items: Vec<T>) -> (Vec<T>, Opti
         )
     };
     let mut links = Vec::new();
+    // Source: <https://docs.github.com/en/rest/using-the-rest-api/using-pagination-in-the-rest-api#using-link-headers>
     if page < last {
         links.push(link(page + 1, "next"));
         links.push(link(last, "last"));

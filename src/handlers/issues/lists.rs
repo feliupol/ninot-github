@@ -92,6 +92,8 @@ impl Handler for ops::IssuesListForOrg {
         if !is_organization(&state, &org) {
             return Err(ApiResponse::not_found());
         }
+        // Issues endpoints may return pull requests too.
+        // Source: <https://docs.github.com/en/rest/issues/issues#list-organization-issues-assigned-to-the-authenticated-user>
         let criteria = criteria(request, Pulls::Included, TypeQuery::FromQuery)?;
         let rows = listed(&state, caller, Scope::Organization(org), &criteria);
         Ok(paginate(request, &request.path, rows))
@@ -101,6 +103,7 @@ impl Handler for ops::IssuesListForOrg {
 impl Handler for ops::IssuesListForAuthenticatedUser {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let caller = request.require_caller()?;
+        // Source: <https://docs.github.com/en/rest/issues/issues#list-user-account-issues-assigned-to-the-authenticated-user>
         let criteria = criteria(request, Pulls::Included, TypeQuery::Ignored)?;
         let rows = {
             let state = lock(state);

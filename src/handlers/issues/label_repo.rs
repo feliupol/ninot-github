@@ -32,6 +32,7 @@ impl Handler for ops::IssuesCreateLabel {
             }
         };
         let description = optional_description(body.get("description"))?;
+        // Source: cli/cli v2.101.0 pkg/cmd/label/create.go:192
         if super::catalog(found.repo(&state)).contains_key(&super::label_key(&name)) {
             return Err(ApiResponse::validation_failed(
                 "Label",
@@ -137,6 +138,7 @@ fn required_name(value: Option<&Value>) -> Result<String, ApiResponse> {
     }
 }
 
+/// Source: <https://docs.github.com/en/rest/issues/labels#create-a-label>
 fn normalize_color(value: &str) -> Result<String, ApiResponse> {
     let color = value.trim();
     let valid = color.len() == 6 && color.chars().all(|character| character.is_ascii_hexdigit());

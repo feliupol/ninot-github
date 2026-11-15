@@ -25,6 +25,7 @@ impl Handler for ops::IssuesLock {
         let found = find_repo(&state, request)?;
         let number = super::issue_number(request)?;
         ensure_subject(found.repo(&state), number)?;
+        // Source: <https://docs.github.com/en/rest/issues/issues#lock-an-issue>
         super::require_push(&found)?;
         let reason = lock_reason(&body)?;
         let actor = super::caller_user(&state, request, &caller.login)?;
@@ -50,6 +51,7 @@ impl Handler for ops::IssuesUnlock {
         let found = find_repo(&state, request)?;
         let number = super::issue_number(request)?;
         ensure_subject(found.repo(&state), number)?;
+        // Source: <https://docs.github.com/en/rest/issues/issues#unlock-an-issue>
         super::require_push(&found)?;
         let was_locked = super::record::snapshot(found.repo(&state), number)?.locked;
         let actor = super::caller_user(&state, request, &caller.login)?;

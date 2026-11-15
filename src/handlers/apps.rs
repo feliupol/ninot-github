@@ -122,6 +122,7 @@ pub(super) fn installation_model(
 
 impl Handler for ops::AppsGetRepoInstallation {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
+        // Source: <https://docs.github.com/en/rest/apps/apps#get-a-repository-installation-for-the-authenticated-app>
         request.require_scope(&["app"])?;
         let state = lock(state);
         let installation = state
@@ -150,6 +151,7 @@ impl Handler for ops::AppsGetRepoInstallation {
 
 impl Handler for ops::AppsCreateInstallationAccessToken {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
+        // Source: <https://docs.github.com/en/rest/apps/apps#create-an-installation-access-token-for-an-app>
         request.require_scope(&["app"])?;
         let body: types::AppsCreateInstallationAccessTokenRequest = request.json_as()?;
         let id = request
@@ -178,6 +180,7 @@ impl Handler for ops::AppsCreateInstallationAccessToken {
                 .repository_ids
                 .iter()
                 .all(|requested_id| *requested_id == repository_id);
+        // Source: <https://docs.github.com/en/rest/apps/apps#create-an-installation-access-token-for-an-app>
         if !repository_is_supported {
             return Err(ApiResponse::unprocessable(
                 "Requested repositories exceed the installation grant",
@@ -196,6 +199,7 @@ impl Handler for ops::AppsCreateInstallationAccessToken {
                     types::AppPermissionsSecrets::Read
                 ) | (Some(types::AppPermissionsSecrets::Write), _)
             );
+            // Source: <https://docs.github.com/en/rest/apps/apps#create-an-installation-access-token-for-an-app>
             if !within_grant {
                 return Err(ApiResponse::unprocessable(
                     "Requested permissions exceed the installation grant",

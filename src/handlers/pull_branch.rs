@@ -27,6 +27,8 @@ impl Handler for ops::PullsCheckIfMerged {
             .and_then(|repo| repo.pull_requests.get(&number))
             .and_then(|pull| pull.data.as_ref())
             .ok_or_else(ApiResponse::not_found)?;
+        // Source: OpenAPI pulls/check-if-merged 204
+        // Source: OpenAPI pulls/check-if-merged 404
         if pull.merged {
             Ok(ApiResponse::no_content())
         } else {
@@ -68,6 +70,7 @@ impl Handler for ops::PullsUpdateBranch {
         };
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
+        // The status only. Source: OpenAPI pulls/update-branch 403
         if !found.permission.push {
             return Err(ApiResponse::error(
                 403,
@@ -106,6 +109,7 @@ impl Handler for ops::PullsUpdateBranch {
         let base = git::resolve_commit(&git_dir, &format!("refs/heads/{base_ref}"))
             .map_err(ApiResponse::internal)?
             .ok_or_else(|| ApiResponse::unprocessable("base branch does not exist"))?;
+        // Source: <https://docs.github.com/en/rest/pulls/pulls#update-a-pull-request-branch>
         if expected.is_some_and(|sha| sha != head) {
             return Err(ApiResponse::unprocessable(
                 "expected head sha didn't match current head ref.",

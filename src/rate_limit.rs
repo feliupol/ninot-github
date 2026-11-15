@@ -47,11 +47,14 @@ impl Default for Limits {
         let hour = Duration::from_secs(3600);
         let minute = Duration::from_secs(60);
         Self {
+            // Source: <https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api#primary-rate-limit-for-authenticated-users>
+            // Source: <https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api#primary-rate-limit-for-unauthenticated-users>
             core: Quota {
                 authenticated: 5000,
                 anonymous: 60,
                 window: hour,
             },
+            // Source: <https://docs.github.com/en/rest/search/search#rate-limit>
             search: Quota {
                 authenticated: 30,
                 anonymous: 10,
@@ -62,6 +65,7 @@ impl Default for Limits {
                 anonymous: 0,
                 window: hour,
             },
+            // Source: <https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api#about-secondary-rate-limits>
             concurrent: 100,
             content_creation_per_minute: 80,
         }
@@ -90,6 +94,7 @@ impl Window {
     }
 
     /// `X-RateLimit-*` headers describing this window.
+    // Source: <https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api#checking-the-status-of-your-rate-limit>
     pub fn headers(&self, resource: Resource) -> Vec<(String, String)> {
         [
             ("x-ratelimit-limit", self.limit.to_string()),

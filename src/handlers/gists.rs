@@ -10,6 +10,7 @@ use crate::types;
 
 impl Handler for ops::GistsCreate {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
+        // Source: cli/cli v2.101.0 pkg/cmd/gist/create/create.go:283
         request.require_scope(&["gist"])?;
         let body: types::GistsCreateRequest = request.json_as()?;
         if body.files.is_empty() {

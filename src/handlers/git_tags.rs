@@ -60,6 +60,8 @@ fn render_tag(
     })
 }
 
+/// Writes the tag object only; the `refs/tags` reference is not created.
+/// Source: <https://docs.github.com/en/rest/git/tags#create-a-tag-object>
 impl Handler for ops::GitCreateTag {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let (caller, located) = locate_writable(state, request)?;

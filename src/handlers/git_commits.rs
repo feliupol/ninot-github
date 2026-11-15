@@ -93,6 +93,8 @@ impl Handler for ops::GitCreateCommit {
         drop(state);
         let author = match &body.author {
             Some(author) => signature_from_request(&author.name, &author.email, author.date, now)?,
+            // Default author: the authenticated user and the current date.
+            // Source: <https://docs.github.com/en/rest/git/commits#create-a-commit>
             None => default.signature(),
         };
         let committer = match &body.committer {
@@ -101,6 +103,8 @@ impl Handler for ops::GitCreateCommit {
                 let email = committer.email.as_deref().unwrap_or(&default.email);
                 signature_from_request(name, email, committer.date, now)?
             }
+            // Default committer: the author.
+            // Source: <https://docs.github.com/en/rest/git/commits#create-a-commit>
             None => author.clone(),
         };
         let mut extra_headers = Vec::new();

@@ -12,6 +12,7 @@ use crate::render;
 use crate::state::{AccountKind, OrgRole, State, lock};
 
 /// The longest organization description GitHub accepts.
+// Source: <https://docs.github.com/en/rest/orgs/orgs#update-an-organization>
 const DESCRIPTION_LIMIT: usize = 160;
 
 impl Handler for ops::OrgsList {
@@ -30,6 +31,7 @@ impl Handler for ops::OrgsList {
             .accounts()
             .filter(|account| account.kind == AccountKind::Organization && account.id > since)
             .collect();
+        // Source: <https://docs.github.com/en/rest/orgs/orgs#list-organizations>
         orgs.sort_by_key(|org| org.id);
         let more = orgs.len() > per_page;
         orgs.truncate(per_page);
@@ -40,6 +42,7 @@ impl Handler for ops::OrgsList {
             .collect();
         let response = ApiResponse::json(200, Value::Array(body));
         Ok(match next {
+            // Source: <https://docs.github.com/en/rest/orgs/orgs#list-organizations>
             Some(last) if more => response.with_header(
                 "link",
                 format!(
@@ -57,6 +60,7 @@ impl Handler for ops::OrgsUpdate {
         let caller = scoped(request, Need::Admin)?;
         let body = object_body(request)?;
         let mut state = lock(state);
+        // Source: <https://docs.github.com/en/rest/orgs/orgs#update-an-organization>
         if find_org(&state, request.param("org"))?.role_of(&caller.login) != OrgRole::Owner {
             return Err(owners_only());
         }
@@ -113,6 +117,7 @@ impl Handler for ops::OrgsListAppInstallations {
         let caller = scoped(request, Need::Read)?;
         let state = lock(state);
         let org = find_org(&state, request.param("org"))?;
+        // Source: <https://docs.github.com/en/rest/orgs/orgs#list-app-installations-for-an-organization>
         if org.role_of(&caller.login) != OrgRole::Owner {
             return Err(owners_only());
         }

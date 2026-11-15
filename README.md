@@ -229,6 +229,24 @@ cargo xtask completion check
 `gh-coverage report|check|update`). The Python package is tested with
 `maturin develop -m python/Cargo.toml` and `pytest -q python/tests`.
 
+## Behaviour references
+
+The OpenAPI description fixes paths, parameters and response shapes. Anything it leaves open
+needs a source, because it is GitHub's behaviour and not ours to invent. That covers which of the
+documented statuses a handler returns, derived fields (such as `mergeable_state` or
+`reviewDecision`), ordering, permission rules and validation messages. Code that decides one of
+these has a comment with a `Source:` line naming where the behaviour comes from:
+
+- a docs.github.com page, with its anchor:
+  `Source: <https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request>`
+- an OpenAPI operation and status: `Source: OpenAPI pulls/merge 405`
+- the GitHub CLI at a pinned tag, for behaviour a client depends on:
+  `Source: cli/cli v2.101.0 pkg/cmd/pr/merge/http.go:89`
+
+Put the comment on the item, or on the statement when the item has more than one such choice.
+If you cannot find a source, do not invent the behaviour. Leave it out, or ask in the pull
+request.
+
 ## License
 
 MIT

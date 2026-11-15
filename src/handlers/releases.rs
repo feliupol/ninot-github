@@ -16,6 +16,8 @@ use ninot_common::git;
 /// Finds the repository and requires push access when `write` is set.
 fn find(state: &State, request: &ApiRequest, write: bool) -> Result<Found, ApiResponse> {
     let found = find_repo(state, request)?;
+    // Users with push access can create, edit and delete releases.
+    // Source: <https://docs.github.com/en/rest/releases/releases#create-a-release>
     if write && !found.permission.push {
         return Err(ApiResponse::error(
             403,
@@ -104,6 +106,8 @@ fn render_release(
 
 /// Releases the caller may see: drafts only with push access, newest first.
 fn visible<'a>(repo: &'a Repo, found: &Found) -> impl Iterator<Item = &'a Release> {
+    // Drafts only for users with push access.
+    // Source: <https://docs.github.com/en/rest/releases/releases#list-releases>
     let push = found.permission.push;
     repo.releases
         .iter()
@@ -232,6 +236,8 @@ impl Handler for ops::ReposGetLatestRelease {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let state = lock(state);
         let found = find(&state, request, false)?;
+        // Skips drafts and prereleases.
+        // Source: <https://docs.github.com/en/rest/releases/releases#get-the-latest-release>
         let release = found
             .repo(&state)
             .releases
@@ -251,6 +257,8 @@ impl Handler for ops::ReposGetReleaseByTag {
         let state = lock(state);
         let found = find(&state, request, false)?;
         let tag = request.param("tag");
+        // Only published releases.
+        // Source: <https://docs.github.com/en/rest/releases/releases#get-a-release-by-tag-name>
         let release = found
             .repo(&state)
             .releases
@@ -448,6 +456,7 @@ impl Handler for ops::ReposUploadReleaseAsset {
             .iter_mut()
             .find(|release| release.id == id)
             .ok_or_else(ApiResponse::not_found)?;
+        // Source: OpenAPI repos/upload-release-asset 422
         if release.assets.iter().any(|asset| asset.name == name) {
             return Err(ApiResponse::validation_failed(
                 "ReleaseAsset",
@@ -498,6 +507,7 @@ impl Handler for ops::ReposGetReleaseAsset {
         let found = find(&state, request, false)?;
         let (release, asset) =
             find_asset(found.repo(&state), &found, id).ok_or_else(ApiResponse::not_found)?;
+        // Source: <https://docs.github.com/en/rest/releases/assets#get-a-release-asset>
         if request.accept().contains("application/octet-stream") {
             return Ok(ApiResponse::bytes(
                 200,

@@ -226,6 +226,7 @@ fn query_repository(env: &Env, _: &Map, args: &Map) -> Result<Json, Error> {
         }
         _ => (owner.to_owned(), name.to_owned()),
     };
+    // Source: cli/cli v2.101.0 api/queries_repo.go:309
     visible_repository(env, &state, &owner, &name).ok_or_else(|| {
         not_found(format!(
             "Could not resolve to a Repository with the name '{owner}/{name}'."
@@ -244,6 +245,7 @@ fn repository_owner(env: &Env, _: &Map, args: &Map) -> Result<Json, Error> {
 /// `Query.user`.
 fn user(env: &Env, _: &Map, args: &Map) -> Result<Json, Error> {
     let login = string_arg(args, "login");
+    // Source: cli/cli v2.101.0 pkg/cmd/project/shared/queries/queries.go:1270
     account_of_kind(env, login, AccountKind::User).ok_or_else(|| {
         not_found(format!(
             "Could not resolve to a User with the login of '{login}'."
@@ -254,6 +256,8 @@ fn user(env: &Env, _: &Map, args: &Map) -> Result<Json, Error> {
 /// `Query.organization`.
 fn organization(env: &Env, _: &Map, args: &Map) -> Result<Json, Error> {
     let login = string_arg(args, "login");
+    // Source: cli/cli v2.101.0 api/queries_repo.go:25
+    // Source: cli/cli v2.101.0 pkg/cmd/project/shared/queries/queries.go:1270
     account_of_kind(env, login, AccountKind::Organization).ok_or_else(|| {
         not_found(format!(
             "Could not resolve to an Organization with the login of '{login}'."
@@ -1029,6 +1033,7 @@ fn graphql_pull_node(
         || (data.created_at.to_rfc3339(), 1),
         |commit| (commit.committer.date, commit.parents.len()),
     );
+    // Source: <https://docs.github.com/en/graphql/reference/pulls#enum-pullrequeststate>
     let state = if data.merged {
         "MERGED".to_owned()
     } else {
@@ -1053,6 +1058,7 @@ fn graphql_pull_node(
         "url":data.html_url,
         "headRefName":data.head.ref_,
         "baseRefName":data.base.ref_,
+        // Source: <https://docs.github.com/en/graphql/reference/pulls#enum-mergeablestate>
         "mergeable":match data.mergeable {Some(true)=>"MERGEABLE", Some(false)=>"CONFLICTING", None=>"UNKNOWN"},
         "autoMergeRequest":auto_merge,
         "author":{"__typename":if data.user.type_ == "Bot" {"Bot"} else {"User"}, "login":data.user.login},

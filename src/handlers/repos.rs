@@ -82,8 +82,11 @@ pub fn find_repo(state: &State, request: &ApiRequest) -> Result<Found, ApiRespon
             status: None,
             url: Some(location.clone()),
         };
+        // Source: OpenAPI repos/get 301
         return Err(ApiResponse::typed(301, &body).with_header("location", location));
     }
+    // 404, not 403, so private repositories are not confirmed to exist.
+    // Source: <https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api#404-not-found-for-an-existing-resource>
     Err(ApiResponse::not_found())
 }
 
@@ -497,6 +500,8 @@ impl Handler for ops::ReposUpdate {
 impl Handler for ops::ReposDelete {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let mut state = lock(state);
+        // Deleting needs admin access and, for classic tokens, the `delete_repo` scope.
+        // Source: <https://docs.github.com/en/rest/repos/repos#delete-a-repository>
         let found = find_admin_repo(&state, request)?;
         if !request.require_caller()?.has_scope("delete_repo") {
             return Err(ApiResponse::error(

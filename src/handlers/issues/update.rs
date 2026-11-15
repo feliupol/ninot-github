@@ -62,6 +62,8 @@ fn load_issue(
         .ok_or_else(ApiResponse::not_found)?;
     let author =
         super::author_login(&issue.data).is_some_and(|author| author.eq_ignore_ascii_case(login));
+    // Issue owners and users with push access or Triage role can edit an issue.
+    // Source: <https://docs.github.com/en/rest/issues/issues#update-an-issue>
     if !found.permission.push && !author {
         return Err(ApiResponse::error(
             403,
@@ -134,6 +136,8 @@ fn parse_labels(
     body: &Map<String, Value>,
     loaded: &Loaded,
 ) -> Result<Option<Vec<types::Label>>, ApiResponse> {
+    // Without push access label changes are silently dropped.
+    // Source: <https://docs.github.com/en/rest/issues/issues#update-an-issue>
     if !found.permission.push {
         return Ok(None);
     }
@@ -179,6 +183,8 @@ fn parse_assignees(
     found: &Found,
     body: &Map<String, Value>,
 ) -> Result<Option<Vec<types::SimpleUser>>, ApiResponse> {
+    // Without push access assignee changes are silently dropped.
+    // Source: <https://docs.github.com/en/rest/issues/issues#update-an-issue>
     if !found.permission.push {
         return Ok(None);
     }
@@ -216,6 +222,8 @@ fn parse_milestone(
     found: &Found,
     body: &Map<String, Value>,
 ) -> Result<Option<Option<types::NullableMilestone>>, ApiResponse> {
+    // Without push access milestone changes are silently dropped.
+    // Source: <https://docs.github.com/en/rest/issues/issues#update-an-issue>
     if !found.permission.push {
         return Ok(None);
     }

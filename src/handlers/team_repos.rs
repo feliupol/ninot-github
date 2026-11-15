@@ -49,6 +49,7 @@ fn org_repo<'s>(
         .ok_or_else(ApiResponse::not_found)?;
     let account = state.account(owner).ok_or_else(ApiResponse::not_found)?;
     let repo = account.repo(name).ok_or_else(ApiResponse::not_found)?;
+    // Source: <https://docs.github.com/en/rest/teams/teams#add-or-update-team-repository-permissions>
     if !account.login.eq_ignore_ascii_case(&org.login) {
         return Err(ApiResponse::validation_failed(
             "Team",
@@ -103,9 +104,11 @@ impl Handler for ops::TeamsCheckPermissionsForRepoInOrg {
             .then(|| team.repos.get(&request.param("repo").to_lowercase()))
             .flatten()
             .and_then(|role| Some((org.repo(request.param("repo"))?, role)));
+        // Source: OpenAPI teams/check-permissions-for-repo-in-org 404
         let Some((repo, role)) = on_team else {
             return Err(ApiResponse::not_found());
         };
+        // Source: OpenAPI teams/check-permissions-for-repo-in-org 204
         if !request.accept().contains(REPOSITORY_MEDIA_TYPE) {
             return Ok(ApiResponse::no_content());
         }
@@ -143,6 +146,7 @@ impl Handler for ops::TeamsAddOrUpdateRepoPermissionsInOrg {
             &caller.login,
         )?;
         let (repo, permission) = org_repo(&state, request, org)?;
+        // Source: <https://docs.github.com/en/rest/teams/teams#add-or-update-team-repository-permissions>
         if !permission.admin {
             return Err(ApiResponse::error(
                 403,
@@ -187,6 +191,7 @@ impl Handler for ops::TeamsRemoveRepoInOrg {
             &caller.login,
         )?;
         let (repo, permission) = org_repo(&state, request, org)?;
+        // Source: <https://docs.github.com/en/rest/teams/teams#remove-a-repository-from-a-team>
         if !permission.admin && !org.manages_team(&team.slug, &caller.login) {
             return Err(ApiResponse::error(
                 403,

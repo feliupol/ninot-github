@@ -122,6 +122,8 @@ impl Handler for ops::PullsListReviewCommentsForRepo {
                 ));
             }
         };
+        // Ascending by id by default.
+        // Source: <https://docs.github.com/en/rest/pulls/comments#list-review-comments-in-a-repository>
         comments.sort_by(|left, right| {
             let order = if sort == "updated" {
                 left.updated_at.cmp(&right.updated_at)
@@ -220,6 +222,8 @@ impl Handler for ops::PullsCreateReviewComment {
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         let number = pull_number(request)?;
+        // With `in_reply_to`, every field but `body` is ignored.
+        // Source: <https://docs.github.com/en/rest/pulls/comments#create-a-review-comment-for-a-pull-request>
         if let Some(parent) = reply_to {
             return reply(
                 &mut state,
@@ -332,7 +336,10 @@ fn reply(
         .iter()
         .find(|comment| comment.id == parent && !hidden(pull, comment, login))
         .cloned()
+        // Source: OpenAPI pulls/create-reply-for-review-comment 404
         .ok_or_else(ApiResponse::not_found)?;
+    // Replies to replies are not supported; the 422 status is unsourced.
+    // Source: <https://docs.github.com/en/rest/pulls/comments#create-a-reply-for-a-review-comment>
     if parent.in_reply_to_id.is_some() {
         return Err(ApiResponse::validation_failed(
             "PullRequestReviewComment",

@@ -128,6 +128,7 @@ impl Handler for ops::IssuesRemoveLabel {
             .iter()
             .any(|label| super::label_key(&label.name) == key)
         {
+            // Source: <https://docs.github.com/en/rest/issues/labels#remove-a-label-from-an-issue>
             return Err(ApiResponse::not_found());
         }
         super::require_push(&found)?;
@@ -176,6 +177,8 @@ pub(super) fn require_labels(
     Ok(chosen)
 }
 
+/// Accepts a `labels` object, a bare string or a bare array.
+/// Source: <https://docs.github.com/en/rest/issues/labels#set-labels-for-an-issue>
 fn requested_names(body: &Value) -> Result<Vec<String>, ApiResponse> {
     match body {
         Value::String(name) => Ok(vec![trimmed_name(name)?]),
