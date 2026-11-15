@@ -142,7 +142,7 @@ team and a runner.
 
 ## Status
 
-REST operations: 156 / 1231 (12.7%).
+REST operations: 170 / 1231 (13.8%).
 
 | Tag | Implemented | Total | % |
 | --- | ---: | ---: | ---: |
@@ -181,7 +181,7 @@ REST operations: 156 / 1231 (12.7%).
 | packages | 0 | 27 | 0.0% |
 | private-registries | 0 | 6 | 0.0% |
 | projects | 0 | 26 | 0.0% |
-| pulls | 13 | 34 | 38.2% |
+| pulls | 27 | 34 | 79.4% |
 | rate-limit | 1 | 1 | 100.0% |
 | reactions | 0 | 15 | 0.0% |
 | repos | 36 | 203 | 17.7% |

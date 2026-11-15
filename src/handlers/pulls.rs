@@ -1025,7 +1025,9 @@ impl Handler for ops::PullsCreateReview {
             types::PullsCreateReviewRequestEvent::RequestChanges => "REQUEST_CHANGES",
             types::PullsCreateReviewRequestEvent::Comment => "COMMENT",
         });
-        if event != "APPROVE" && body.body.as_deref().unwrap_or_default().is_empty() {
+        if !matches!(event, "APPROVE" | "PENDING")
+            && body.body.as_deref().unwrap_or_default().is_empty()
+        {
             return Err(ApiResponse::error(
                 422,
                 "body is required for this review event",
@@ -1043,6 +1045,11 @@ impl Handler for ops::PullsCreateReview {
             .parse::<u64>()
             .map_err(|_| ApiResponse::not_found())?;
         let id = state.next_id();
+        let comment_ids = body
+            .comments
+            .iter()
+            .map(|_| state.next_id())
+            .collect::<Vec<_>>();
         let repo = state
             .account_mut(&found.owner)
             .and_then(|account| account.repo_mut(&found.name))
@@ -1081,6 +1088,20 @@ impl Handler for ops::PullsCreateReview {
             "{}/{}/{}/pull/{}#pullrequestreview-{id}",
             request.web_url, found.owner, found.name, number
         );
+        let items = comment_ids
+            .iter()
+            .copied()
+            .zip(&body.comments)
+            .collect::<Vec<_>>();
+        let inline = super::pull_reviews::attach_comments(
+            request,
+            &found,
+            number,
+            &author,
+            crate::render::id(id),
+            &data.head.sha,
+            &items,
+        )?;
         let review = types::PullRequestReview {
             author_association: types::AuthorAssociation::Owner,
             body: body.body.unwrap_or_default(),
@@ -1106,10 +1127,19 @@ impl Handler for ops::PullsCreateReview {
                 .retain(|reviewer| !reviewer.login.eq_ignore_ascii_case(&caller.login));
         }
         pull.reviews.push(review.clone());
+        pull.review_comments.extend(inline.iter().cloned());
+        if let Some(data) = &mut pull.data {
+            data.review_comments = pull.review_comments.len() as i64;
+        }
         let pull_data = pull.data.clone();
         if let Some(pull_data) = pull_data {
             let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
             events::pull_request_review::submitted(&mut ctx, &pull_data, &review);
+            if event != "PENDING" {
+                for comment in &inline {
+                    events::pull_request_review_comment::created(&mut ctx, &pull_data, comment);
+                }
+            }
         }
         Ok(ApiResponse::typed(200, &review))
     }

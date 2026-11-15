@@ -31,6 +31,10 @@ mod git_trees;
 mod hooks;
 mod issues;
 mod meta;
+mod pull_branch;
+mod pull_review_comment_model;
+mod pull_review_comments;
+mod pull_reviews;
 mod pulls;
 pub mod releases;
 pub mod repos;
@@ -148,6 +152,20 @@ registry![
     ops::PullsRemoveRequestedReviewers,
     ops::PullsListCommits,
     ops::PullsListFiles,
+    ops::PullsListReviewCommentsForRepo,
+    ops::PullsGetReviewComment,
+    ops::PullsUpdateReviewComment,
+    ops::PullsDeleteReviewComment,
+    ops::PullsCreateReviewComment,
+    ops::PullsCreateReplyForReviewComment,
+    ops::PullsCheckIfMerged,
+    ops::PullsGetReview,
+    ops::PullsUpdateReview,
+    ops::PullsDeletePendingReview,
+    ops::PullsListCommentsForReview,
+    ops::PullsDismissReview,
+    ops::PullsSubmitReview,
+    ops::PullsUpdateBranch,
     ops::IssuesListEventsForTimeline,
     ops::IssuesListEvents,
     ops::IssuesListEventsForRepo,
