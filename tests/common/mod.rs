@@ -2,6 +2,8 @@
 
 #![allow(dead_code)]
 
+pub mod spec_urls;
+
 use ninot_github::Server;
 use reqwest::blocking::{Client, RequestBuilder};
 use reqwest::redirect::Policy;
@@ -41,6 +43,11 @@ impl<'a> Api<'a> {
     }
 
     fn send(&self, request: RequestBuilder) -> Reply {
+        let described = request
+            .try_clone()
+            .and_then(|request| request.build().ok())
+            .map(|request| format!("{} {}", request.method(), request.url()))
+            .unwrap_or_default();
         let request = match &self.token {
             Some(token) => request.header("Authorization", format!("token {token}")),
             None => request,
@@ -54,6 +61,7 @@ impl<'a> Api<'a> {
         } else {
             serde_json::from_str(&text).unwrap_or(Value::String(text))
         };
+        spec_urls::assert_spec_urls(Some(self.server.url()), &described, &body);
         Reply {
             status,
             headers,
@@ -250,13 +258,23 @@ impl Receiver {
 
     /// A captured request that has not been taken yet, if any.
     pub fn try_next(&self) -> Option<Captured> {
-        self.requests.try_recv().ok()
+        self.requests.try_recv().ok().map(checked)
     }
 
     /// The next captured request, or a panic after five seconds.
     pub fn next(&self) -> Captured {
-        self.requests
+        let captured = self
+            .requests
             .recv_timeout(std::time::Duration::from_secs(5))
-            .expect("no webhook request arrived")
+            .expect("no webhook request arrived");
+        checked(captured)
     }
+}
+
+/// `captured`, after checking the API URLs of its JSON body against the spec.
+fn checked(captured: Captured) -> Captured {
+    if let Ok(body) = serde_json::from_slice::<Value>(&captured.body) {
+        spec_urls::assert_spec_urls(None, "webhook delivery", &body);
+    }
+    captured
 }

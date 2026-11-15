@@ -225,6 +225,8 @@ fn main() {
         ninot_common::spec::operations(&spec),
     )
     .expect("cannot write the generated operations");
+    fs::write(out.join("multi_segment.rs"), multi_segment_params(&spec))
+        .expect("cannot write the multi-segment parameters");
 
     let types = api_types(&spec);
     let file = syn::parse2(types).expect("the generated types are not valid Rust");
@@ -247,6 +249,45 @@ fn main() {
         syn::parse2(webhook_types(typed)).expect("the generated webhook types are not valid Rust");
     fs::write(out.join("webhook_types.rs"), prettyplease::unparse(&file))
         .expect("cannot write the generated webhook types");
+}
+
+/// The Rust source of `MULTI_SEGMENT`: every `(path template, parameter)` the spec marks
+/// `x-multi-segment`, whose value may span `/`, such as `ref` in `/repos/{owner}/{repo}/git/refs/{ref}`.
+fn multi_segment_params(spec: &Value) -> String {
+    let parameters = &spec["components"]["parameters"];
+    let mut found = BTreeSet::new();
+    for (path, item) in spec["paths"].as_object().expect("spec paths") {
+        let operations = item.as_object().expect("spec path item");
+        for parameter in operations
+            .values()
+            .filter_map(|operation| operation.get("parameters"))
+            .flat_map(|list| list.as_array().expect("operation parameters"))
+        {
+            let parameter = match parameter["$ref"].as_str() {
+                Some(reference) => {
+                    let name = reference
+                        .strip_prefix("#/components/parameters/")
+                        .expect("parameter references point at components");
+                    &parameters[name]
+                }
+                None => parameter,
+            };
+            let multi = parameter["x-multi-segment"].as_bool() == Some(true)
+                || parameter["schema"]["x-multi-segment"].as_bool() == Some(true);
+            if parameter["in"] == "path" && multi {
+                let name = parameter["name"].as_str().expect("parameter name");
+                found.insert((path.clone(), name.to_owned()));
+            }
+        }
+    }
+    let entries: String = found
+        .iter()
+        .map(|(path, name)| format!("    ({path:?}, {name:?}),\n"))
+        .collect();
+    format!(
+        "/// `(path template, parameter)` pairs whose value may span `/`.\n\
+         pub(crate) static MULTI_SEGMENT: &[(&str, &str)] = &[\n{entries}];\n"
+    )
 }
 
 /// The schemas under `dir` as definitions of one document, keyed by [`definition_name`], with
