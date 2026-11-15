@@ -6,6 +6,7 @@ mod account;
 pub(crate) mod actions_service;
 mod hook;
 mod issue_event;
+mod org;
 mod release;
 mod repo;
 mod runner;
@@ -14,9 +15,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-pub use account::{Account, AccountKind, Team};
+pub use account::{Account, AccountKind, OrgProfile, Team};
 pub use hook::{Delivery, Hook};
 pub use issue_event::{IssueEvent, IssueEventKind, IssueEventLabel};
+pub use org::OrgRole;
+pub(crate) use org::TEAM_PERMISSIONS;
 pub use release::{Asset, Release};
 pub use repo::{
     CheckSuiteRecord, Issue, Milestone, Permission, PullRequest, Repo, ReviewThread,
@@ -176,8 +179,10 @@ impl State {
     /// Adds an organization whose members administer its repositories.
     pub fn add_org(&mut self, login: &str, members: &[&str]) -> &mut Account {
         let org = self.add_account(login, AccountKind::Organization);
-        org.members
-            .extend(members.iter().map(|member| member.to_lowercase()));
+        for member in members {
+            org.members.insert(member.to_lowercase());
+            org.owners.insert(member.to_lowercase());
+        }
         org
     }
 
@@ -197,11 +202,7 @@ impl State {
         let team = org
             .teams
             .entry(slug.to_lowercase())
-            .or_insert_with(|| Team {
-                id,
-                slug: slug.to_lowercase(),
-                members: BTreeSet::new(),
-            });
+            .or_insert_with(|| Team::new(id, slug.to_lowercase(), "closed"));
         team.members
             .extend(members.iter().map(|member| member.to_lowercase()));
         team
@@ -220,6 +221,10 @@ impl State {
                     kind,
                     created_at: now(),
                     members: BTreeSet::new(),
+                    owners: BTreeSet::new(),
+                    pending: BTreeMap::new(),
+                    public_members: BTreeSet::new(),
+                    profile: OrgProfile::default(),
                     teams: BTreeMap::new(),
                     repos: BTreeMap::new(),
                     runners: BTreeMap::new(),

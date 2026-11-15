@@ -632,6 +632,11 @@ impl State {
             if account.is_administered_by(&caller.login) {
                 return Some(Permission::ADMIN);
             }
+            if let Some(permission) = account.member_permission(&caller.login, name)
+                && (permission.pull || permission.push || permission.admin)
+            {
+                return Some(permission);
+            }
         }
         (!repo.private).then_some(Permission::READ)
     }

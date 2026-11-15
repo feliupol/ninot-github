@@ -77,6 +77,49 @@ fn app_permissions(secrets: Option<types::AppPermissionsSecrets>) -> types::AppP
     }
 }
 
+/// The installation as the API shows it.
+pub(super) fn installation_model(
+    request: &ApiRequest,
+    state: &State,
+    installation: &crate::state::Installation,
+) -> types::Installation {
+    let account = state
+        .account(&installation.owner)
+        .expect("installation owner exists");
+    let timestamp = crate::time::now_utc();
+    types::Installation {
+        access_tokens_url: format!(
+            "{}/app/installations/{}/access_tokens",
+            request.api_url, installation.id
+        ),
+        account: Some(types::InstallationAccount::SimpleUser(
+            crate::render::simple_user(request, account),
+        )),
+        app_id: crate::render::id(installation.app_id),
+        app_slug: app_slug(installation.app_id),
+        client_id: None,
+        contact_email: None,
+        created_at: timestamp,
+        events: Vec::new(),
+        has_multiple_single_files: Some(false),
+        html_url: format!(
+            "{}/settings/installations/{}",
+            request.web_url, installation.id
+        ),
+        id: crate::render::id(installation.id),
+        permissions: app_permissions(installation.secrets_permission),
+        repositories_url: format!("{}/installation/repositories", request.api_url),
+        repository_selection: types::InstallationRepositorySelection::Selected,
+        single_file_name: None,
+        single_file_paths: Vec::new(),
+        suspended_at: None,
+        suspended_by: None,
+        target_id: crate::render::id(account.id),
+        target_type: account.kind.as_str().to_owned(),
+        updated_at: timestamp,
+    }
+}
+
 impl Handler for ops::AppsGetRepoInstallation {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         request.require_scope(&["app"])?;
@@ -94,43 +137,13 @@ impl Handler for ops::AppsGetRepoInstallation {
             })
             .cloned()
             .ok_or_else(ApiResponse::not_found)?;
-        let account = state
-            .account(&installation.owner)
-            .expect("installation owner exists");
-        let timestamp = crate::time::now_utc();
         Ok(ApiResponse::typed(
             200,
-            &types::AppsGetRepoInstallationResponse(types::Installation {
-                access_tokens_url: format!(
-                    "{}/app/installations/{}/access_tokens",
-                    request.api_url, installation.id
-                ),
-                account: Some(types::InstallationAccount::SimpleUser(
-                    crate::render::simple_user(request, account),
-                )),
-                app_id: crate::render::id(installation.app_id),
-                app_slug: app_slug(installation.app_id),
-                client_id: None,
-                contact_email: None,
-                created_at: timestamp,
-                events: Vec::new(),
-                has_multiple_single_files: Some(false),
-                html_url: format!(
-                    "{}/settings/installations/{}",
-                    request.web_url, installation.id
-                ),
-                id: crate::render::id(installation.id),
-                permissions: app_permissions(installation.secrets_permission),
-                repositories_url: format!("{}/installation/repositories", request.api_url),
-                repository_selection: types::InstallationRepositorySelection::Selected,
-                single_file_name: None,
-                single_file_paths: Vec::new(),
-                suspended_at: None,
-                suspended_by: None,
-                target_id: crate::render::id(account.id),
-                target_type: account.kind.as_str().to_owned(),
-                updated_at: timestamp,
-            }),
+            &types::AppsGetRepoInstallationResponse(installation_model(
+                request,
+                &state,
+                &installation,
+            )),
         ))
     }
 }

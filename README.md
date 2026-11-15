@@ -142,7 +142,7 @@ team and a runner.
 
 ## Status
 
-REST operations: 170 / 1231 (13.8%).
+REST operations: 195 / 1231 (15.8%).
 
 | Tag | Implemented | Total | % |
 | --- | ---: | ---: | ---: |
@@ -177,7 +177,7 @@ REST operations: 170 / 1231 (13.8%).
 | meta | 2 | 5 | 40.0% |
 | migrations | 0 | 22 | 0.0% |
 | oidc | 0 | 8 | 0.0% |
-| orgs | 1 | 116 | 0.9% |
+| orgs | 11 | 116 | 9.5% |
 | packages | 0 | 27 | 0.0% |
 | private-registries | 0 | 6 | 0.0% |
 | projects | 0 | 26 | 0.0% |
@@ -188,7 +188,7 @@ REST operations: 170 / 1231 (13.8%).
 | search | 2 | 7 | 28.6% |
 | secret-scanning | 0 | 17 | 0.0% |
 | security-advisories | 0 | 10 | 0.0% |
-| teams | 0 | 32 | 0.0% |
+| teams | 15 | 32 | 46.9% |
 | users | 2 | 47 | 4.3% |
 
 GitHub CLI leaf commands: 18 / 205 (8.8%).

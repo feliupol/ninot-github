@@ -31,6 +31,9 @@ mod git_trees;
 mod hooks;
 mod issues;
 mod meta;
+mod org_members;
+mod org_support;
+mod orgs;
 mod pull_branch;
 mod pull_review_comment_model;
 mod pull_review_comments;
@@ -41,6 +44,9 @@ pub mod repos;
 pub(crate) mod runner_service;
 mod runners;
 pub(crate) mod search;
+mod team_members;
+mod team_repos;
+mod teams;
 pub(crate) mod timeline;
 mod users;
 
@@ -238,4 +244,29 @@ registry![
     ops::ActionsUpdateSelfHostedRunnerGroupForOrg,
     ops::ActionsDeleteSelfHostedRunnerGroupFromOrg,
     ops::ActionsSetSelfHostedRunnersInGroupForOrg,
+    ops::OrgsList,
+    ops::OrgsUpdate,
+    ops::OrgsListAppInstallations,
+    ops::OrgsListMembers,
+    ops::OrgsCheckMembershipForUser,
+    ops::OrgsRemoveMember,
+    ops::OrgsGetMembershipForUser,
+    ops::OrgsSetMembershipForUser,
+    ops::OrgsRemoveMembershipForUser,
+    ops::OrgsListOutsideCollaborators,
+    ops::TeamsList,
+    ops::TeamsCreate,
+    ops::TeamsGetByName,
+    ops::TeamsUpdateInOrg,
+    ops::TeamsDeleteInOrg,
+    ops::TeamsListMembersInOrg,
+    ops::TeamsGetMembershipForUserInOrg,
+    ops::TeamsAddOrUpdateMembershipForUserInOrg,
+    ops::TeamsRemoveMembershipForUserInOrg,
+    ops::TeamsListReposInOrg,
+    ops::TeamsCheckPermissionsForRepoInOrg,
+    ops::TeamsAddOrUpdateRepoPermissionsInOrg,
+    ops::TeamsRemoveRepoInOrg,
+    ops::TeamsListChildInOrg,
+    ops::TeamsListForAuthenticatedUser,
 ];
