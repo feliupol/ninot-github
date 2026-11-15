@@ -1,0 +1,4 @@
+https://github.com/octokit/fixtures/tree/cb8bc9dafc55a3837be4434ff4ba7acf3d9cadde/scenarios/api.github.com
+MIT licence, Copyright (c) GitHub: LICENSE.md, from https://github.com/octokit/fixtures/blob/cb8bc9dafc55a3837be4434ff4ba7acf3d9cadde/LICENSE.md
+Each <scenario>.json is that scenario's normalized-fixture.json, with every request's
+authorization header replaced by "account", the fixture user it acted as.
