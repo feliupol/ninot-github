@@ -146,10 +146,17 @@ pub fn enqueue(
             }),
             duration_ms: 0,
         });
-        if mismatch.is_none()
-            && let Some(queue) = &state.webhook_queue
-        {
-            let _ = queue.send(id);
+        // The sender thread only stops on its own once the state is gone, so a closed queue
+        // means it died.
+        let stopped = mismatch.is_none()
+            && state
+                .webhook_queue
+                .as_ref()
+                .is_some_and(|queue| queue.send(id).is_err());
+        if stopped {
+            let error = "ninot-github's webhook sender has stopped, so the delivery was not sent";
+            eprintln!("ninot-github: {error}");
+            state.deliveries.last_mut().expect("recorded above").error = Some(error.to_owned());
         }
     }
 }
@@ -413,6 +420,24 @@ mod tests {
             None,
         );
         assert_eq!(state.deliveries[0].error, None);
+    }
+
+    #[test]
+    fn a_delivery_the_stopped_sender_cannot_take_is_recorded_with_an_error() {
+        let mut state = state_with_hook(false);
+        let (queue, queued) = mpsc::channel();
+        drop(queued);
+        state.webhook_queue = Some(queue);
+        enqueue(
+            &mut state,
+            "alice",
+            "tool",
+            "ping",
+            &serde_json::json!({ "hook_id": "1" }),
+            None,
+        );
+        let error = state.deliveries[0].error.as_deref().unwrap();
+        assert!(error.contains("webhook sender has stopped"), "{error}");
     }
 
     #[test]

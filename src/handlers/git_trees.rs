@@ -216,7 +216,7 @@ impl Handler for ops::GitGetTree {
         let repo = open_repo(&located.git_dir)?;
         let Some(id) = super::git_store::resolve_object(&repo, tree_sha)? else {
             drop(repo);
-            let _ = find_existing_object(&located.git_dir, tree_sha)?;
+            find_existing_object(&located.git_dir, tree_sha)?;
             return Err(ApiResponse::not_found());
         };
         let tree_id = repo

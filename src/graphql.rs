@@ -526,7 +526,7 @@ fn query_node(env: &Env, _: &Map, args: &Map) -> Result<Json, Error> {
             for (number, pull) in &repo.pull_requests {
                 let expected = node_id("PullRequest", pull_id(repo.id, *number));
                 if id == expected || pull.data.as_ref().is_some_and(|data| data.node_id == id) {
-                    return Ok(graphql_pull_node(env, account, repo, *number, pull));
+                    return graphql_pull_node(env, account, repo, *number, pull);
                 }
             }
         }
@@ -869,7 +869,7 @@ fn search(env: &Env, _: &Map, args: &Map) -> Result<Json, Error> {
                 {
                     continue;
                 }
-                nodes.push(graphql_pull_node(env, account, repo, *number, pull));
+                nodes.push(graphql_pull_node(env, account, repo, *number, pull)?);
             }
             if !want_pr {
                 for (number, issue) in &repo.issues {
@@ -949,9 +949,9 @@ fn graphql_pull_node(
     repo: &Repo,
     number: u64,
     pull: &crate::state::PullRequest,
-) -> Json {
+) -> Result<Json, Error> {
     let Some(data) = pull.data.as_ref() else {
-        return Json::Null;
+        return Ok(Json::Null);
     };
     let review_nodes: Vec<Json> = pull
         .reviews
@@ -1025,14 +1025,10 @@ fn graphql_pull_node(
         }
     });
     // Report Git commit metadata when stored, or the seeded PR creation time otherwise.
-    let (committed_at, parent_count) = repo
-        .git_dir
-        .as_ref()
-        .and_then(|git_dir| git::commit(git_dir, sha).ok())
-        .map_or_else(
-            || (data.created_at.to_rfc3339(), 1),
-            |commit| (commit.committer.date, commit.parents.len()),
-        );
+    let (committed_at, parent_count) = stored_commit(repo.git_dir.as_deref(), sha)?.map_or_else(
+        || (data.created_at.to_rfc3339(), 1),
+        |commit| (commit.committer.date, commit.parents.len()),
+    );
     let state = if data.merged {
         "MERGED".to_owned()
     } else {
@@ -1046,7 +1042,7 @@ fn graphql_pull_node(
         .iter()
         .map(|comment| json!({"__typename":"IssueComment","body":comment.body}))
         .collect();
-    json!({
+    Ok(json!({
         "__typename":"PullRequest",
         "id":node_id("PullRequest", pull_id(repo.id, number)),
         "databaseId":pull_id(repo.id, number),
@@ -1069,7 +1065,31 @@ fn graphql_pull_node(
         "comments":{"__typename":"IssueCommentConnection","nodes":issue_comments,"totalCount":pull.issue_comments.len(),"pageInfo":{"hasPreviousPage":false,"hasNextPage":false,"startCursor":null,"endCursor":null}},
         "commits":{"__typename":"PullRequestCommitConnection", "nodes":commit_nodes},
         "repositoryUrl":format!("{}/{}",env.web_url,account.login),
-    })
+    }))
+}
+
+/// Commit `sha` from git storage at `git_dir`; `None` without storage or for a seeded sha the
+/// storage does not contain. A failed read is an error.
+fn stored_commit(
+    git_dir: Option<&std::path::Path>,
+    sha: &str,
+) -> Result<Option<git::Commit>, Error> {
+    let Some(git_dir) = git_dir else {
+        return Ok(None);
+    };
+    let read_error =
+        |error: &dyn std::fmt::Display| Error::new(format!("could not read commit {sha}: {error}"));
+    let Ok(id) = gix::ObjectId::from_hex(sha.as_bytes()) else {
+        return Ok(None);
+    };
+    let stored = gix::open_opts(git_dir, gix::open::Options::isolated())
+        .map_err(|error| read_error(&error))?;
+    if !stored.has_object(id) {
+        return Ok(None);
+    }
+    git::commit(git_dir, sha)
+        .map(Some)
+        .map_err(|error| read_error(&error))
 }
 
 /// The numeric id inside a node id produced by [`node_id`].
@@ -1661,6 +1681,39 @@ mod tests {
     fn node_ids_round_trip_for_kinds_ending_in_a_digit() {
         assert_eq!(database_id(&node_id("ProjectV2", 4)), Some(4));
         assert_eq!(database_id(&node_id("ProjectV2Item", 17)), Some(17));
+    }
+
+    #[test]
+    fn stored_commit_falls_back_only_without_storage_or_commit() {
+        let dir =
+            std::env::temp_dir().join(format!("ninot-github-stored-commit-{}", std::process::id()));
+        let git_dir = dir.join("repo.git");
+        std::fs::create_dir_all(&git_dir).unwrap();
+        git::init_bare(&git_dir, "main").unwrap();
+        git::commit_readme(&git_dir, "main", "repo", &crate::handlers::BOT).unwrap();
+        let sha = git::resolve_commit(&git_dir, "refs/heads/main")
+            .unwrap()
+            .unwrap();
+
+        assert!(stored_commit(None, &sha).unwrap().is_none());
+        let missing = "0000000000000000000000000000000000000000";
+        assert!(stored_commit(Some(&git_dir), missing).unwrap().is_none());
+        assert_eq!(
+            stored_commit(Some(&git_dir), &sha).unwrap().unwrap().sha,
+            sha
+        );
+
+        let object = git_dir.join("objects").join(&sha[..2]).join(&sha[2..]);
+        let mut permissions = std::fs::metadata(&object).unwrap().permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        std::fs::set_permissions(&object, permissions).unwrap();
+        std::fs::write(&object, b"not a zlib stream").unwrap();
+        let Err(error) = stored_commit(Some(&git_dir), &sha) else {
+            panic!("a corrupt commit object reads as an error");
+        };
+        assert!(error.message.contains(&sha), "{}", error.message);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

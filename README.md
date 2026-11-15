@@ -67,18 +67,18 @@ Server
 `user`, `org`, `repository` and `runner` look up ones that already exist. A repository
 handle creates and fetches its issues, pull requests, commits, workflow runs, jobs, Actions
 secrets and projects. The same types are re-exported from the crate root, except
-`WorkflowJob` and `ActionsSecret`, which live in [`server`](src/server.rs).
+`WorkflowJob` and `ActionsSecret`, which live in [`server`](src/server/mod.rs).
 
 ## Git hosting
 
 Each repository is a real git repository served over smart HTTP at
 `{url}/{owner}/{repo}.git`. Authenticate with Basic auth, username `x-access-token` and the
-token as the password. [`Repository::commit_file`](src/server.rs) writes a commit through
+token as the password. [`Repository::commit_file`](src/server/seed.rs) writes a commit through
 `git` on a fixture path when the test does not want to drive a work tree.
 
 ## Fault injection
 
-[`Server::add_fault`](src/server.rs) installs a [`Rule`](src/faults.rs) of a [`Target`](src/faults.rs)
+[`Server::add_fault`](src/server/mod.rs) installs a [`Rule`](src/faults.rs) of a [`Target`](src/faults.rs)
 and a [`Fault`](src/faults.rs). Targets are every request, one `operationId`, a git service
 (`upload-pack` or `receive-pack`), or a path prefix. Faults are a delay, an HTTP status, a
 secondary rate limit, a dropped connection, or a truncated body. `clear_faults` removes the
@@ -91,14 +91,14 @@ The default limits are GitHub's: core 5000 per hour authenticated and 60 anonymo
 30 and 10 per minute, GraphQL 5000 and 0 per hour, 100 requests in flight, and 80
 content-creating REST requests per minute. Set them with
 `Options { rate_limits, .. }`. A client over the concurrent or content-creation cap gets a
-secondary rate limit (`403` and `retry-after`). [`Server::advance_clock`](src/server.rs)
+secondary rate limit (`403` and `retry-after`). [`Server::advance_clock`](src/server/mod.rs)
 expires windows without waiting.
 
 ## Webhooks
 
 `POST /repos/{owner}/{repo}/hooks` creates a hook. Deliveries are POSTed to its URL and, when
 the hook has a secret, signed with `X-Hub-Signature-256` (HMAC-SHA256, `sha256=` prefix).
-[`Server::deliveries`](src/server.rs) returns them; `wait_for_deliveries` waits until enough
+[`Server::deliveries`](src/server/mod.rs) returns them; `wait_for_deliveries` waits until enough
 have finished.
 
 ## GitHub CLI over TLS
@@ -124,7 +124,7 @@ its parent object and, when that key is absent, returns
 ## Actions runner
 
 A registered self-hosted runner can take a job queued with
-[`Repository::queue_script_job`](src/server.rs). Registration uses the registration-token
+[`Repository::queue_script_job`](src/server/seed.rs). Registration uses the registration-token
 endpoint, and the runner's own calls are served under `/_services/`. The runner drops the
 port of its `--url`, so it has to reach the fake on port 443. Details, including
 `NINOT_RUNNER_E2E`, are in [docs/actions-runner.md](docs/actions-runner.md).
