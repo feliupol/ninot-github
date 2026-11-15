@@ -2313,6 +2313,7 @@ name = "ninot-github"
 version = "2026.46.0"
 dependencies = [
  "async-graphql",
+ "async-graphql-parser",
  "axum",
  "base64 0.22.1",
  "bytes",

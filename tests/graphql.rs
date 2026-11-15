@@ -4,7 +4,9 @@ mod common;
 
 use common::Api;
 use ninot_github::Server;
-use ninot_github::fixtures::{IssueSeed, SeedField};
+use ninot_github::fixtures::{
+    IssueSeed, LabelSeed, PullRequestSeed, ReviewSeed, SeedField, UserSeed,
+};
 use serde_json::{Value, json};
 
 fn query(api: &Api, query: &str, variables: Value) -> Value {
@@ -279,5 +281,149 @@ fn searched_pull_requests_resolve_their_repository_fields() {
     assert_eq!(
         reply["data"]["search"]["nodes"][0]["repository"],
         json!({"nameWithOwner": "admin/project", "autoMergeAllowed": true, "viewerPermission": "ADMIN"})
+    );
+}
+
+/// Seeds pull request 9 of `acme/project` with `reviews`, each `(login, state)`, in order.
+/// alice and bob own `acme` and can push; carol cannot.
+fn reviewed_pull(server: &Server, reviews: &[(&str, &str)]) {
+    server.add_org("acme", &["alice", "bob"]);
+    let repository = server
+        .create_repository("acme", "project", false, None, None, "main")
+        .unwrap();
+    let pull = repository
+        .create_pull_request(9, PullRequestSeed::default())
+        .unwrap();
+    for (login, state) in reviews {
+        pull.create_review(ReviewSeed {
+            state: SeedField::present((*state).to_owned()),
+            user: SeedField::present(Some(UserSeed {
+                login: SeedField::present((*login).to_owned()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        })
+        .unwrap();
+    }
+}
+
+fn review_decision(server: &Server) -> Value {
+    let reply = query(
+        &Api::admin(server),
+        "{repository(owner: \"acme\", name: \"project\"){pullRequest(number: 9){reviewDecision}}}",
+        json!({}),
+    );
+    assert!(reply.get("errors").is_none(), "{reply}");
+    reply["data"]["repository"]["pullRequest"]["reviewDecision"].clone()
+}
+
+#[test]
+fn review_decision_counts_each_reviewers_latest_review() {
+    let server = Server::start().unwrap();
+    reviewed_pull(
+        &server,
+        &[("alice", "CHANGES_REQUESTED"), ("alice", "APPROVED")],
+    );
+    assert_eq!(review_decision(&server), "APPROVED");
+}
+
+#[test]
+fn review_decision_is_changes_requested_while_any_reviewer_requests_changes() {
+    let server = Server::start().unwrap();
+    reviewed_pull(
+        &server,
+        &[("alice", "APPROVED"), ("bob", "CHANGES_REQUESTED")],
+    );
+    assert_eq!(review_decision(&server), "CHANGES_REQUESTED");
+}
+
+#[test]
+fn review_decision_ignores_reviewers_who_cannot_push() {
+    let server = Server::start().unwrap();
+    reviewed_pull(
+        &server,
+        &[("carol", "APPROVED"), ("carol", "CHANGES_REQUESTED")],
+    );
+    assert_eq!(review_decision(&server), Value::Null);
+}
+
+#[test]
+fn review_decision_ignores_comments_after_an_approval() {
+    let server = Server::start().unwrap();
+    reviewed_pull(&server, &[("alice", "APPROVED"), ("alice", "COMMENTED")]);
+    assert_eq!(review_decision(&server), "APPROVED");
+}
+
+#[test]
+fn repository_pull_request_resolves_the_pull_requests_fields() {
+    let server = Server::start().unwrap();
+    let repository = server
+        .create_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+    repository
+        .create_pull_request(
+            9,
+            PullRequestSeed {
+                title: SeedField::present("Typed".to_owned()),
+                draft: SeedField::present(true),
+                labels: SeedField::present(vec![LabelSeed {
+                    id: SeedField::present(1),
+                    name: SeedField::present("bug".to_owned()),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let reply = query(
+        &Api::admin(&server),
+        "{repository(owner: \"admin\", name: \"project\"){pullRequest(number: 9){number title isDraft state labels(first: 10){totalCount nodes{name}} reviewRequests(first: 10){pageInfo{hasNextPage}}}}}",
+        json!({}),
+    );
+    assert!(reply.get("errors").is_none(), "{reply}");
+    assert_eq!(
+        reply["data"]["repository"]["pullRequest"],
+        json!({
+            "number": 9,
+            "title": "Typed",
+            "isDraft": true,
+            "state": "OPEN",
+            "labels": {"totalCount": 1, "nodes": [{"name": "bug"}]},
+            "reviewRequests": {"pageInfo": {"hasNextPage": false}},
+        })
+    );
+}
+
+#[test]
+fn searched_issues_are_graphql_issues() {
+    let server = Server::start().unwrap();
+    let repository = server
+        .create_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+    repository
+        .create_issue(
+            7,
+            IssueSeed {
+                title: SeedField::present("No body".to_owned()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let reply = query(
+        &Api::admin(&server),
+        "{search(query: \"repo:admin/project\", type: ISSUE, first: 10){nodes{... on Issue{id number body state url labels(first: 10){totalCount}}}}}",
+        json!({}),
+    );
+    assert!(reply.get("errors").is_none(), "{reply}");
+    assert_eq!(
+        reply["data"]["search"]["nodes"][0],
+        json!({
+            "id": "I_admin_project_7",
+            "number": 7,
+            "body": "",
+            "state": "OPEN",
+            "url": format!("{}/admin/project/issues/7", server.url()),
+            "labels": {"totalCount": 0},
+        })
     );
 }

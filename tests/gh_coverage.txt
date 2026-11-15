@@ -7,6 +7,7 @@ command auth token
 command label create
 command label delete
 command label edit
+command pr ready
 command pr view
 command release create
 command release delete
@@ -48,6 +49,8 @@ flag label edit --color
 flag label edit --description
 flag label edit --name
 flag label edit --repo
+flag pr ready --repo
+flag pr ready --undo
 flag pr view --jq
 flag pr view --json
 flag pr view --repo
@@ -109,7 +112,9 @@ graphql Organization.login
 graphql PageInfo.endCursor
 graphql PageInfo.hasNextPage
 graphql PullRequest.id
+graphql PullRequest.isDraft
 graphql PullRequest.number
+graphql PullRequest.state
 graphql Query.repository
 graphql Query.repositoryOwner
 graphql Query.viewer

@@ -1,6 +1,7 @@
 //! Generates typed REST request and response models from the pinned GitHub OpenAPI description,
-//! and webhook payload types from the pinned octokit/webhooks schemas. The operation table comes
-//! from [`ninot_common::spec`].
+//! webhook payload types from the pinned octokit/webhooks schemas, and GraphQL enums and input
+//! objects from the pinned GraphQL schema. The operation table comes from
+//! [`ninot_common::spec`].
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -14,6 +15,9 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 const SPEC: &str = "spec/api.github.com.json";
+
+/// GitHub's GraphQL schema, pinned by `scripts/update-graphql-spec.sh`.
+const GRAPHQL_SCHEMA: &str = "spec/schema.docs.graphql";
 
 /// Corrections to component schemas where the spec is looser than GitHub.
 const OVERRIDES: &str = "spec/overrides.json";
@@ -227,6 +231,7 @@ fn main() {
     println!("cargo::rerun-if-changed={SPEC}");
     println!("cargo::rerun-if-changed={OVERRIDES}");
     println!("cargo::rerun-if-changed={WEBHOOK_SCHEMAS}");
+    println!("cargo::rerun-if-changed={GRAPHQL_SCHEMA}");
     let mut spec: Value =
         serde_json::from_slice(&fs::read(SPEC).expect("cannot read the pinned spec"))
             .expect("the pinned spec is not valid JSON");
@@ -276,6 +281,224 @@ fn main() {
         syn::parse2(webhook_types(typed)).expect("the generated webhook types are not valid Rust");
     fs::write(out.join("webhook_types.rs"), prettyplease::unparse(&file))
         .expect("cannot write the generated webhook types");
+
+    let sdl = fs::read_to_string(GRAPHQL_SCHEMA).expect("cannot read the pinned GraphQL schema");
+    let file =
+        syn::parse2(graphql_types(&sdl)).expect("the generated GraphQL types are not valid Rust");
+    fs::write(out.join("graphql_types.rs"), prettyplease::unparse(&file))
+        .expect("cannot write the generated GraphQL types");
+}
+
+/// Input objects the GraphQL resolvers deserialize their arguments into. Their Rust types, and
+/// those of every input object they reference, are generated into `graphql_types`.
+const GRAPHQL_INPUTS: [&str; 10] = [
+    "AddCommentInput",
+    "AddPullRequestReviewThreadReplyInput",
+    "ConvertPullRequestToDraftInput",
+    "CreateRepositoryInput",
+    "DisablePullRequestAutoMergeInput",
+    "EnablePullRequestAutoMergeInput",
+    "MarkPullRequestReadyForReviewInput",
+    "RepositoryOrder",
+    "ResolveReviewThreadInput",
+    "UpdateProjectV2ItemFieldValueInput",
+];
+
+/// Rust types for every enum of GitHub's GraphQL schema and for [`GRAPHQL_INPUTS`], serialized
+/// with the schema's names.
+fn graphql_types(sdl: &str) -> TokenStream {
+    use async_graphql_parser::types::{BaseType, Type, TypeKind, TypeSystemDefinition};
+
+    let document = async_graphql_parser::parse_schema(sdl).expect("the GraphQL schema parses");
+    let mut enums = BTreeMap::new();
+    let mut inputs = BTreeMap::new();
+    for definition in document.definitions {
+        let TypeSystemDefinition::Type(definition) = definition else {
+            continue;
+        };
+        let definition = definition.node;
+        let name = definition.name.node.to_string();
+        let description = definition.description.map(|text| text.node);
+        match definition.kind {
+            TypeKind::Enum(enumeration) => {
+                let values: Vec<(String, Option<String>)> = enumeration
+                    .values
+                    .into_iter()
+                    .map(|value| {
+                        let value = value.node;
+                        (
+                            value.value.node.to_string(),
+                            value.description.map(|text| text.node),
+                        )
+                    })
+                    .collect();
+                enums.insert(name, (description, values));
+            }
+            TypeKind::InputObject(input) => {
+                let fields: Vec<(String, Type, Option<String>)> = input
+                    .fields
+                    .into_iter()
+                    .map(|field| {
+                        let field = field.node;
+                        (
+                            field.name.node.to_string(),
+                            field.ty.node,
+                            field.description.map(|text| text.node),
+                        )
+                    })
+                    .collect();
+                inputs.insert(name, (description, fields));
+            }
+            _ => {}
+        }
+    }
+
+    fn named(ty: &Type) -> &str {
+        match &ty.base {
+            BaseType::Named(name) => name.as_str(),
+            BaseType::List(item) => named(item),
+        }
+    }
+    let mut wanted: BTreeSet<String> = BTreeSet::new();
+    let mut pending: Vec<String> = GRAPHQL_INPUTS
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect();
+    while let Some(name) = pending.pop() {
+        let (_, fields) = inputs
+            .get(&name)
+            .unwrap_or_else(|| panic!("{name} is not an input object of the GraphQL schema"));
+        if wanted.insert(name) {
+            pending.extend(
+                fields
+                    .iter()
+                    .map(|(_, ty, _)| named(ty).to_owned())
+                    .filter(|name| inputs.contains_key(name)),
+            );
+        }
+    }
+
+    let doc = |text: &Option<String>| {
+        text.as_deref()
+            .map(|text| quote::quote! { #[doc = #text] })
+            .unwrap_or_default()
+    };
+    let mut items = TokenStream::new();
+    for (name, (description, values)) in &enums {
+        let ident = quote::format_ident!("{name}");
+        let doc = doc(description);
+        let variants = values.iter().map(|(value, description)| {
+            let variant = enum_variant(value);
+            let doc = description
+                .as_deref()
+                .map(|text| quote::quote! { #[doc = #text] })
+                .unwrap_or_default();
+            quote::quote! { #doc #[serde(rename = #value)] #variant }
+        });
+        let arms = values.iter().map(|(value, _)| {
+            let variant = enum_variant(value);
+            quote::quote! { Self::#variant => #value }
+        });
+        items.extend(quote::quote! {
+            #doc
+            #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+            pub enum #ident { #(#variants,)* }
+            impl #ident {
+                /// The value as the schema spells it.
+                pub const fn as_str(self) -> &'static str {
+                    match self { #(#arms,)* }
+                }
+            }
+        });
+    }
+    for name in &wanted {
+        let (description, fields) = &inputs[name];
+        let ident = quote::format_ident!("{name}");
+        let type_doc = doc(description);
+        let fields = fields.iter().map(|(field, ty, description)| {
+            let doc = doc(description);
+            let rust = graphql_input_type(ty, &enums, &inputs);
+            let member = quote::format_ident!("r#{}", snake_case(field));
+            quote::quote! { #doc #[serde(rename = #field)] pub #member: #rust }
+        });
+        items.extend(quote::quote! {
+            #type_doc
+            #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+            pub struct #ident { #(#fields,)* }
+        });
+    }
+    quote::quote! {
+        use serde::{Deserialize, Serialize};
+        #items
+    }
+}
+
+/// The Rust variant for a GraphQL enum value such as `CHANGES_REQUESTED`: `ChangesRequested`.
+fn enum_variant(value: &str) -> proc_macro2::Ident {
+    let mut name = String::new();
+    for word in value.split('_').filter(|word| !word.is_empty()) {
+        let mut chars = word.chars();
+        name.extend(chars.next().map(|first| first.to_ascii_uppercase()));
+        name.extend(chars.map(|rest| rest.to_ascii_lowercase()));
+    }
+    if name.starts_with(|first: char| first.is_ascii_digit()) || name == "Self" {
+        name.insert(0, '_');
+    }
+    quote::format_ident!("{name}")
+}
+
+/// `snake_case` for a GraphQL field name such as `pullRequestId`.
+fn snake_case(name: &str) -> String {
+    let mut snake = String::new();
+    for character in name.chars() {
+        if character.is_ascii_uppercase() {
+            if !snake.is_empty() {
+                snake.push('_');
+            }
+            snake.push(character.to_ascii_lowercase());
+        } else {
+            snake.push(character);
+        }
+    }
+    snake
+}
+
+/// The Rust type of an input field: nullable fields are `Option`, lists are `Vec`, and custom
+/// scalars are strings except `CustomPropertyValue`, which is any JSON value.
+fn graphql_input_type<E, I>(
+    ty: &async_graphql_parser::types::Type,
+    enums: &BTreeMap<String, E>,
+    inputs: &BTreeMap<String, I>,
+) -> TokenStream {
+    use async_graphql_parser::types::BaseType;
+
+    let base = match &ty.base {
+        BaseType::List(item) => {
+            let item = graphql_input_type(item, enums, inputs);
+            quote::quote! { Vec<#item> }
+        }
+        BaseType::Named(name) => match name.as_str() {
+            "Int" => quote::quote! { i64 },
+            "Float" => quote::quote! { f64 },
+            "Boolean" => quote::quote! { bool },
+            "CustomPropertyValue" => quote::quote! { serde_json::Value },
+            name if enums.contains_key(name) => {
+                let ident = quote::format_ident!("{name}");
+                quote::quote! { #ident }
+            }
+            // Boxed: input objects may contain themselves.
+            name if inputs.contains_key(name) => {
+                let ident = quote::format_ident!("{name}");
+                quote::quote! { Box<#ident> }
+            }
+            _ => quote::quote! { String },
+        },
+    };
+    if ty.nullable {
+        quote::quote! { Option<#base> }
+    } else {
+        base
+    }
 }
 
 /// The Rust source of `MULTI_SEGMENT`: every `(path template, parameter)` the spec marks

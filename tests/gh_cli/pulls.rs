@@ -362,7 +362,6 @@ fn pr_edit_changes_the_title_body_and_base() {
 }
 
 #[test]
-#[ignore = "not implemented: GraphQL PullRequest.state and isDraft, which `gh pr ready` reads first"]
 fn pr_ready_toggles_draft() {
     let server = tls_server();
     let config = TempDir::new();

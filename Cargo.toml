@@ -52,6 +52,7 @@ zip = { version = "9", default-features = false, features = ["deflate"] }
 response-log = []
 
 [build-dependencies]
+async-graphql-parser = "7.2"
 ninot-common = { version = "2026.45.2", features = ["build"] }
 schemars = "0.8"
 typify = "0.8"
