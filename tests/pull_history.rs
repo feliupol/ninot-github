@@ -840,3 +840,70 @@ fn thread_replies_are_reviews_but_not_timeline_entries() {
     assert_eq!(kinds(&timeline), ["reviewed"]);
     assert_eq!(timeline[0]["id"], review_ids[0]);
 }
+
+#[test]
+fn files_of_an_api_created_pull_request_come_from_git() {
+    let server = Server::start().unwrap();
+    let repository = server
+        .create_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+    commit(
+        &repository,
+        "main",
+        "kept.txt",
+        "one\ntwo\n",
+        "2026-01-01T00:00:00Z",
+    );
+    commit(
+        &repository,
+        "feature",
+        "kept.txt",
+        "one\n2\nthree\n",
+        "2026-01-02T00:00:00Z",
+    );
+    let head = commit(
+        &repository,
+        "feature",
+        "new.txt",
+        "added\n",
+        "2026-01-03T00:00:00Z",
+    );
+    let api = Api::admin(&server);
+    let created = api.post(
+        "/repos/admin/project/pulls",
+        json!({"title": "Feature", "head": "feature", "base": "main"}),
+    );
+    assert_eq!(created.status, 201, "{:?}", created.body);
+
+    let files = api.get("/repos/admin/project/pulls/1/files");
+    assert_eq!(files.status, 200, "{:?}", files.body);
+    let base = server.url();
+    assert_eq!(
+        files.body,
+        json!([
+            {
+                "sha": files.body[0]["sha"],
+                "filename": "kept.txt",
+                "status": "modified",
+                "additions": 2,
+                "deletions": 1,
+                "changes": 3,
+                "blob_url": format!("{base}/admin/project/blob/{head}/kept.txt"),
+                "raw_url": format!("{base}/admin/project/raw/{head}/kept.txt"),
+                "contents_url": format!("{base}/repos/admin/project/contents/kept.txt?ref={head}"),
+            },
+            {
+                "sha": files.body[1]["sha"],
+                "filename": "new.txt",
+                "status": "added",
+                "additions": 1,
+                "deletions": 0,
+                "changes": 1,
+                "blob_url": format!("{base}/admin/project/blob/{head}/new.txt"),
+                "raw_url": format!("{base}/admin/project/raw/{head}/new.txt"),
+                "contents_url": format!("{base}/repos/admin/project/contents/new.txt?ref={head}"),
+            },
+        ])
+    );
+    assert_eq!(files.body[1]["sha"].as_str().map(str::len), Some(40));
+}

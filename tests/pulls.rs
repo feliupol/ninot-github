@@ -151,6 +151,47 @@ fn seeded_label_and_review_comment_urls_follow_github_shapes() {
 }
 
 #[test]
+fn issue_comments_on_a_pull_request_link_to_the_pull_request() {
+    let server = Server::start().unwrap();
+    let repository = server
+        .create_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+    repository
+        .create_pull_request(9, PullRequestSeed::default())
+        .unwrap();
+    let api = common::Api::admin(&server);
+
+    let comment = api.post(
+        "/repos/admin/project/issues/9/comments",
+        json!({"body": "Looks right"}),
+    );
+    assert_eq!(comment.status, 201, "{:?}", comment.body);
+    let id = comment.body["id"].as_u64().unwrap();
+    assert_eq!(
+        comment.body["html_url"],
+        format!("{}/admin/project/pull/9#issuecomment-{id}", server.url())
+    );
+}
+
+#[test]
+fn review_decisions_are_graphql_enum_values() {
+    let server = Server::start().unwrap();
+    let repository = server
+        .create_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+    let pull = repository
+        .create_pull_request(9, PullRequestSeed::default())
+        .unwrap();
+    pull.set_review_decision(Some("APPROVED".to_owned()))
+        .unwrap();
+    pull.set_review_decision(None).unwrap();
+    let error = pull
+        .set_review_decision(Some("approved-ish".to_owned()))
+        .unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+}
+
+#[test]
 fn sync_routes_read_git_state_and_mutate_the_same_pull_request_world() {
     use std::path::Path;
 

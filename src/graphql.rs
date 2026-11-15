@@ -41,7 +41,7 @@ use crate::api::{ApiResponse, Caller};
 use crate::handlers::repos::init_storage;
 use crate::render::node_id;
 use crate::server::Hit;
-use crate::state::{Account, AccountKind, Repo, State, lock};
+use crate::state::{Account, AccountKind, Repo, ReviewDecision, State, lock};
 use ninot_common::git;
 
 mod projects;
@@ -1020,21 +1020,24 @@ fn graphql_pull_node(
         .as_ref()
         .map(|enabled_at| json!({"enabledAt":enabled_at}))
         .unwrap_or(Json::Null);
-    let decision = pull.review_decision.clone().or_else(|| {
-        if review_nodes
-            .iter()
-            .any(|review| review["state"] == "CHANGES_REQUESTED")
-        {
-            Some("CHANGES_REQUESTED".to_owned())
-        } else if review_nodes
-            .iter()
-            .any(|review| review["state"] == "APPROVED")
-        {
-            Some("APPROVED".to_owned())
-        } else {
-            None
-        }
-    });
+    let decision = pull
+        .review_decision
+        .or_else(|| {
+            if review_nodes
+                .iter()
+                .any(|review| review["state"] == "CHANGES_REQUESTED")
+            {
+                Some(ReviewDecision::ChangesRequested)
+            } else if review_nodes
+                .iter()
+                .any(|review| review["state"] == "APPROVED")
+            {
+                Some(ReviewDecision::Approved)
+            } else {
+                None
+            }
+        })
+        .map(ReviewDecision::as_str);
     // Report Git commit metadata when stored, or the seeded PR creation time otherwise.
     let (committed_at, parent_count) = stored_commit(repo.git_dir.as_deref(), sha)?.map_or_else(
         || (data.created_at.to_rfc3339(), 1),

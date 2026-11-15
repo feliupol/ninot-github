@@ -371,7 +371,8 @@ pub struct PullRequestSeed {
     /// Who merged the pull request; the author by default.
     #[serde(default, skip_serializing_if = "SeedField::is_missing")]
     pub merged_by: SeedField<UserSeed>,
-    /// Files listed by `GET /pulls/{number}/files`. Unless seeded too, `changed_files`,
+    /// Files listed by `GET /pulls/{number}/files`, instead of those git has between base and
+    /// head. Unless seeded too, `changed_files`,
     /// `additions` and `deletions` are their count and sums.
     #[serde(default, skip_serializing_if = "SeedField::is_missing")]
     pub files: SeedField<Vec<PullRequestFileSeed>>,
@@ -1313,9 +1314,9 @@ pub(crate) fn seeded_pull_request(
             pull.changed_files = count;
             pull.additions = additions;
             pull.deletions = deletions;
-            files
+            Some(files)
         }
-        SeedField::Missing => Vec::new(),
+        SeedField::Missing => None,
     };
     let merger = match seed.merged_by {
         SeedField::Present(user_seed) => simple_user(state, request, user_seed)?,
@@ -1344,8 +1345,8 @@ pub(crate) fn seeded_pull_request(
 pub(crate) struct SeededPullRequest {
     /// The REST model.
     pub data: types::PullRequest,
-    /// Files the pull request changes.
-    pub files: Vec<types::DiffEntry>,
+    /// Files the seed lists; without them `GET /pulls/{number}/files` reads them from git.
+    pub files: Option<Vec<types::DiffEntry>>,
     /// `merged` and `closed` events the seed implies.
     pub events: Vec<crate::state::TimelineEvent>,
 }

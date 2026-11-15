@@ -121,7 +121,7 @@ pub struct PullRequest {
     /// Review threads returned by GraphQL, including their persisted comment history.
     pub review_threads: Vec<ReviewThread>,
     /// Explicit review decision when seeded; otherwise derived from current reviews.
-    pub review_decision: Option<String>,
+    pub review_decision: Option<ReviewDecision>,
     /// Timestamp used by the GraphQL `autoMergeRequest` projection.
     pub auto_merge_enabled_at: Option<chrono::DateTime<chrono::Utc>>,
     /// Timeline events recording who changed the pull request and when, oldest first.
@@ -131,9 +131,36 @@ pub struct PullRequest {
     /// in [`Self::events`].
     pub issue_events: Vec<IssueEvent>,
     /// When each commit first reached the head branch, by sha; orders `committed` events.
-    pub pushed_at: BTreeMap<String, DateTime<Utc>>,
-    /// Files returned by `GET /pulls/{number}/files`.
-    pub files: Vec<crate::types::DiffEntry>,
+    pub pushed_at: BTreeMap<super::Sha, DateTime<Utc>>,
+    /// Files a fixture seeded for `GET /pulls/{number}/files`; without them the files come from
+    /// git.
+    pub seeded_files: Option<Vec<crate::types::DiffEntry>>,
+}
+
+/// A pull request's GraphQL `reviewDecision`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReviewDecision {
+    Approved,
+    ChangesRequested,
+    ReviewRequired,
+}
+
+impl ReviewDecision {
+    /// The GraphQL enum value, such as `CHANGES_REQUESTED`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Approved => "APPROVED",
+            Self::ChangesRequested => "CHANGES_REQUESTED",
+            Self::ReviewRequired => "REVIEW_REQUIRED",
+        }
+    }
+
+    /// Parses a GraphQL enum value.
+    pub fn parse(text: &str) -> Option<Self> {
+        [Self::Approved, Self::ChangesRequested, Self::ReviewRequired]
+            .into_iter()
+            .find(|decision| decision.as_str() == text)
+    }
 }
 
 /// What a stored timeline event records, named as the timeline's `event` field names it.

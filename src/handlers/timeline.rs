@@ -18,7 +18,7 @@ use super::repos::find_repo;
 use crate::api::{ApiRequest, ApiResponse, ApiResult, paginate};
 use crate::operation::ops;
 use crate::render::{self, node_id};
-use crate::state::{PullRequest, Repo, State, TimelineEvent, TimelineEventKind, lock};
+use crate::state::{PullRequest, Repo, Sha, State, TimelineEvent, TimelineEventKind, lock};
 use crate::types;
 use crate::urls::RepoUrls;
 
@@ -80,6 +80,7 @@ pub(crate) fn record_head_update(
         .map(String::as_str)
         .collect::<Vec<_>>();
     for sha in git::new_commits(git_dir, new_sha, &excluded)? {
+        let sha = Sha::parse(&sha).map_err(io::Error::other)?;
         pull.pushed_at.entry(sha).or_insert(at);
     }
     let forced = match &old {
@@ -379,7 +380,7 @@ fn pull_timeline(urls: &RepoUrls, repo: &Repo, pull: &PullRequest) -> io::Result
     {
         let at = pull
             .pushed_at
-            .get(&commit.sha)
+            .get(commit.sha.as_str())
             .copied()
             .unwrap_or(data.created_at);
         let order = i64::try_from(index).unwrap_or(i64::MAX) - i64::MAX;
@@ -489,10 +490,128 @@ impl Handler for ops::PullsListCommits {
     }
 }
 
+/// The files a pull request changes, as `git diff base...head` lists them: the head tree against
+/// the merge base of base and head. Empty when the repository has no git storage or git does not
+/// know the head. Renames are listed as a removal and an addition, and `patch` is omitted.
+///
+/// # Errors
+///
+/// Returns git failures reading the repository.
+pub(crate) fn pull_files(
+    git_dir: Option<&Path>,
+    urls: &RepoUrls,
+    data: &types::PullRequest,
+) -> io::Result<Vec<types::DiffEntry>> {
+    let Some(git_dir) = git_dir else {
+        return Ok(Vec::new());
+    };
+    let Some(head) = git::resolve_commit(git_dir, &data.head.sha)? else {
+        return Ok(Vec::new());
+    };
+    let base = match git::resolve_commit(git_dir, &data.base.sha)? {
+        Some(base) => Some(base),
+        None => git::resolve_commit(git_dir, &format!("refs/heads/{}", data.base.ref_))?,
+    };
+    let repo = gix::open_opts(git_dir, gix::open::Options::isolated()).map_err(io::Error::other)?;
+    let id = |sha: &str| gix::ObjectId::from_hex(sha.as_bytes()).map_err(io::Error::other);
+    let head_id = id(&head)?;
+    let tree_of = |commit: gix::ObjectId| -> io::Result<gix::Tree<'_>> {
+        repo.find_commit(commit)
+            .map_err(io::Error::other)?
+            .tree()
+            .map_err(io::Error::other)
+    };
+    let old_tree = match base {
+        Some(base) => {
+            let base = repo
+                .merge_base(id(&base)?, head_id)
+                .map_or(id(&base)?, |found| found.detach());
+            tree_of(base)?
+        }
+        None => repo.empty_tree(),
+    };
+    let new_tree = tree_of(head_id)?;
+    let mut options = gix::diff::Options::default().with_rewrites(None);
+    options.track_path();
+    let changes = repo
+        .diff_tree_to_tree(&old_tree, &new_tree, options)
+        .map_err(io::Error::other)?;
+    let blob = |object: gix::ObjectId| -> io::Result<Vec<u8>> {
+        Ok(repo
+            .find_object(object)
+            .map_err(io::Error::other)?
+            .detach()
+            .data)
+    };
+    let mut files = Vec::new();
+    for change in changes {
+        use gix::object::tree::diff::ChangeDetached as Change;
+        if change.entry_mode().is_tree() {
+            continue;
+        }
+        let (status, old, new) = match &change {
+            Change::Addition { id, .. } => (types::DiffEntryStatus::Added, None, Some(*id)),
+            Change::Deletion { id, .. } => (types::DiffEntryStatus::Removed, Some(*id), None),
+            Change::Modification {
+                previous_id, id, ..
+            } => (
+                types::DiffEntryStatus::Modified,
+                Some(*previous_id),
+                Some(*id),
+            ),
+            Change::Rewrite { source_id, id, .. } => (
+                types::DiffEntryStatus::Modified,
+                Some(*source_id),
+                Some(*id),
+            ),
+        };
+        let before = old.map(blob).transpose()?.unwrap_or_default();
+        let after = new.map(blob).transpose()?.unwrap_or_default();
+        let (additions, deletions) = line_changes(&before, &after);
+        let filename = change.location().to_string();
+        let sha = new.or(old).map(|object| object.to_string());
+        files.push(types::DiffEntry {
+            additions,
+            blob_url: urls.blob_html(&head, &filename),
+            changes: additions + deletions,
+            contents_url: urls.contents(&filename, &head),
+            deletions,
+            patch: None,
+            previous_filename: None,
+            raw_url: urls.raw(&head, &filename),
+            sha,
+            status,
+            filename,
+        });
+    }
+    files.sort_by(|left, right| left.filename.cmp(&right.filename));
+    Ok(files)
+}
+
+/// Lines added and removed between two blobs; none for binary content, as GitHub counts it.
+fn line_changes(before: &[u8], after: &[u8]) -> (i64, i64) {
+    use gix::diff::blob::{Algorithm, Diff, InternedInput, sources::byte_lines};
+    if before.contains(&0) || after.contains(&0) {
+        return (0, 0);
+    }
+    let input = InternedInput::new(byte_lines(before), byte_lines(after));
+    let diff = Diff::compute(Algorithm::Histogram, &input);
+    (
+        i64::from(diff.count_additions()),
+        i64::from(diff.count_removals()),
+    )
+}
+
 impl Handler for ops::PullsListFiles {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
-        let files = with_pull(state, request, "pull_number", |_, pull, _| {
-            Ok(pull.files.clone())
+        let files = with_pull(state, request, "pull_number", |repo, pull, urls| {
+            if let Some(files) = &pull.seeded_files {
+                return Ok(files.clone());
+            }
+            let Some(data) = &pull.data else {
+                return Ok(Vec::new());
+            };
+            pull_files(repo.git_dir.as_deref(), urls, data).map_err(ApiResponse::internal)
         })?;
         Ok(paginate(request, &request.path, files))
     }

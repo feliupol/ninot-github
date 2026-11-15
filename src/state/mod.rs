@@ -24,8 +24,9 @@ pub use org::OrgRole;
 pub(crate) use org::TEAM_PERMISSIONS;
 pub use release::{Asset, Release};
 pub use repo::{
-    CheckSuiteRecord, Issue, Milestone, Permission, PullRequest, Repo, ReviewThread,
-    ReviewThreadComment, Settings, StoredActionsSecret, TimelineEvent, TimelineEventKind,
+    CheckSuiteRecord, Issue, Milestone, Permission, PullRequest, Repo, ReviewDecision,
+    ReviewThread, ReviewThreadComment, Settings, StoredActionsSecret, TimelineEvent,
+    TimelineEventKind,
 };
 pub(crate) use runner::RunnerTokenKind;
 pub(crate) use runner::{CreateRunnerError, RunnerSpec, valid_label_name, valid_runner_name};
@@ -321,7 +322,7 @@ impl State {
         owner: &str,
         repo: &str,
         number: u64,
-        decision: Option<String>,
+        decision: Option<ReviewDecision>,
     ) {
         self.pull_request_entry(owner, repo, number).review_decision = decision;
     }

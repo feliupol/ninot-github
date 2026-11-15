@@ -867,13 +867,12 @@ impl Handler for ops::IssuesCreateComment {
         let id = state.next_id();
         let repo_urls = request.urls().repo(&found.owner, &found.name);
         let issue_urls = repo_urls.issue(number);
-        let exists = state
+        let repo = state
             .account(&found.owner)
-            .and_then(|account| account.repo(&found.name))
-            .is_some_and(|repo| {
-                repo.issues.contains_key(&number) || repo.pull_requests.contains_key(&number)
-            });
-        if !exists {
+            .and_then(|account| account.repo(&found.name));
+        let on_issue = repo.is_some_and(|repo| repo.issues.contains_key(&number));
+        let on_pull = repo.is_some_and(|repo| repo.pull_requests.contains_key(&number));
+        if !on_issue && !on_pull {
             return Err(ApiResponse::not_found());
         }
         let created_at = crate::time::now_utc();
@@ -883,7 +882,11 @@ impl Handler for ops::IssuesCreateComment {
             body_html: None,
             body_text: None,
             created_at,
-            html_url: issue_urls.comment_html(id),
+            html_url: if on_issue {
+                issue_urls.comment_html(id)
+            } else {
+                repo_urls.pull(number).comment_html(id)
+            },
             id: crate::render::id(id),
             issue_url: issue_urls.api,
             minimized: None,

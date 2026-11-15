@@ -740,7 +740,7 @@ impl Repository {
         }
         let data = {
             let entry = state.add_pull_request(&self.owner, &self.name, number, pull.data);
-            entry.files = pull.files;
+            entry.seeded_files = pull.files;
             for event in pull.events {
                 entry
                     .apply_event(event)
@@ -1085,8 +1085,19 @@ impl PullRequest {
         Ok(thread_id)
     }
 
-    /// Sets the explicit GraphQL review decision for this pull request.
+    /// Sets the explicit GraphQL review decision for this pull request: `APPROVED`,
+    /// `CHANGES_REQUESTED` or `REVIEW_REQUIRED`.
     pub fn set_review_decision(&self, decision: Option<String>) -> io::Result<()> {
+        let decision = decision
+            .map(|text| {
+                crate::state::ReviewDecision::parse(&text).ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("unknown review decision {text}"),
+                    )
+                })
+            })
+            .transpose()?;
         self.repository.ensure_running()?;
         let mut state = lock(&self.repository.app.state);
         require_pull_request(&state, &self.repository, self.number)?;
