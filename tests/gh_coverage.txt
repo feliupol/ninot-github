@@ -4,6 +4,10 @@ command api
 command auth setup-git
 command auth status
 command auth token
+command label create
+command label delete
+command label edit
+command pr view
 command release create
 command release delete
 command release delete-asset
@@ -18,6 +22,7 @@ command repo edit
 command repo list
 command repo rename
 command repo view
+command run list
 flag api --field
 flag api --header
 flag api --include
@@ -33,6 +38,19 @@ flag auth status --active
 flag auth status --hostname
 flag auth status --json
 flag auth status --show-token
+flag label create --color
+flag label create --description
+flag label create --force
+flag label create --repo
+flag label delete --repo
+flag label delete --yes
+flag label edit --color
+flag label edit --description
+flag label edit --name
+flag label edit --repo
+flag pr view --jq
+flag pr view --json
+flag pr view --repo
 flag release create --notes
 flag release create --prerelease
 flag release create --repo
@@ -53,6 +71,7 @@ flag release upload --repo
 flag release view --json
 flag release view --repo
 flag repo create --add-readme
+flag repo create --description
 flag repo create --private
 flag repo create --public
 flag repo create --push
@@ -75,14 +94,22 @@ flag repo rename --repo
 flag repo rename --yes
 flag repo view --jq
 flag repo view --json
+flag run list --json
+flag run list --repo
 git git-receive-pack
 git git-upload-pack
 git info/refs
+graphql ConvertPullRequestToDraftPayload.pullRequest
 graphql CreateRepositoryPayload.repository
+graphql MarkPullRequestReadyForReviewPayload.pullRequest
+graphql Mutation.convertPullRequestToDraft
 graphql Mutation.createRepository
+graphql Mutation.markPullRequestReadyForReview
 graphql Organization.login
 graphql PageInfo.endCursor
 graphql PageInfo.hasNextPage
+graphql PullRequest.id
+graphql PullRequest.number
 graphql Query.repository
 graphql Query.repositoryOwner
 graphql Query.viewer
@@ -99,6 +126,7 @@ graphql Repository.name
 graphql Repository.nameWithOwner
 graphql Repository.owner
 graphql Repository.parent
+graphql Repository.pullRequest
 graphql Repository.rebaseMergeAllowed
 graphql Repository.release
 graphql Repository.squashMergeAllowed
@@ -111,11 +139,19 @@ graphql RepositoryConnection.pageInfo
 graphql RepositoryConnection.totalCount
 graphql User.login
 graphql User.repositories
+rest actions/list-workflow-runs-for-repo
 rest git/get-ref
 rest git/list-matching-refs
+rest issues/create-label
+rest issues/delete-label
+rest issues/get-label
+rest issues/list-labels-for-repo
+rest issues/update-label
 rest meta/get-zen
 rest meta/root
 rest orgs/get
+rest pulls/create
+rest pulls/get
 rest rate-limit/get
 rest repos/create-for-authenticated-user
 rest repos/create-in-org

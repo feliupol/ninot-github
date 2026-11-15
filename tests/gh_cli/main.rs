@@ -7,7 +7,13 @@
 //! `cargo xtask gh-coverage` turns into a report and a ratchet.
 #![cfg(unix)]
 
+mod actions;
+#[path = "../common/mod.rs"]
 mod common;
+mod graphql;
+mod issues;
+mod labels;
+mod pulls;
 
 use std::fs::File;
 use std::io::Write as _;
@@ -65,7 +71,21 @@ impl Drop for Fake {
 /// Runs `gh` against `server` with an isolated configuration, returning stdout or panicking
 /// with stderr.
 fn gh(server: &Server, config: &Path, args: &[&str]) -> String {
-    let output = gh_output(server, config, args);
+    gh_as(server, config, server.admin_token(), args)
+}
+
+/// Runs `gh` and parses its stdout as JSON.
+fn gh_json(server: &Server, config: &Path, args: &[&str]) -> Value {
+    serde_json::from_str(&gh(server, config, args)).unwrap()
+}
+
+fn gh_output(server: &Server, config: &Path, args: &[&str]) -> std::process::Output {
+    gh_output_as(server, config, server.admin_token(), args)
+}
+
+/// Runs `gh` authenticated with `token`, returning stdout or panicking with stderr.
+fn gh_as(server: &Server, config: &Path, token: &str, args: &[&str]) -> String {
+    let output = gh_output_as(server, config, token, args);
     assert!(
         output.status.success(),
         "gh {} failed: {}",
@@ -75,14 +95,15 @@ fn gh(server: &Server, config: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
-/// Runs `gh` and parses its stdout as JSON.
-fn gh_json(server: &Server, config: &Path, args: &[&str]) -> Value {
-    serde_json::from_str(&gh(server, config, args)).unwrap()
-}
-
-fn gh_output(server: &Server, config: &Path, args: &[&str]) -> std::process::Output {
+fn gh_output_as(
+    server: &Server,
+    config: &Path,
+    token: &str,
+    args: &[&str],
+) -> std::process::Output {
     log_coverage(json!({ "test": test_name(), "gh": args }));
     isolated(Command::new("gh"), server, config)
+        .env("GH_ENTERPRISE_TOKEN", token)
         .args(args)
         .current_dir(config)
         .output()
@@ -1093,4 +1114,70 @@ fn api_request_options() {
     let gone = gh_output(&server, &config.0, &["api", "repos/acme/two"]);
     assert!(!gone.status.success());
     assert!(String::from_utf8_lossy(&gone.stderr).contains("HTTP 404"));
+}
+
+/// Creates the public repository `admin/tool` with a README, and pushes one branch per name in
+/// `branches`, each adding `{branch}.txt` on top of `main`. Returns the clone.
+fn repo_with_branches(server: &Server, config: &Path, branches: &[&str]) -> std::path::PathBuf {
+    let host = server.url().strip_prefix("https://").unwrap();
+    gh(
+        server,
+        config,
+        &["repo", "create", "admin/tool", "--public", "--add-readme"],
+    );
+    gh(server, config, &["auth", "setup-git", "--hostname", host]);
+    gh(server, config, &["repo", "clone", "admin/tool", "work"]);
+    let work = config.join("work");
+    for branch in branches {
+        git(
+            server,
+            config,
+            &work,
+            &["checkout", "-q", "-b", branch, "main"],
+        );
+        std::fs::write(work.join(format!("{branch}.txt")), format!("{branch}\n")).unwrap();
+        git(server, config, &work, &["add", "."]);
+        git(
+            server,
+            config,
+            &work,
+            &["commit", "-q", "-m", &format!("Add {branch}")],
+        );
+        git(server, config, &work, &["push", "-q", "origin", branch]);
+    }
+    git(server, config, &work, &["checkout", "-q", "main"]);
+    work
+}
+
+/// Opens a pull request from `head` into `main` through REST and returns its number.
+fn open_pull(server: &Server, config: &Path, head: &str, draft: bool) -> String {
+    gh(
+        server,
+        config,
+        &[
+            "api",
+            "repos/admin/tool/pulls",
+            "-f",
+            &format!("title=Add {head}"),
+            "-f",
+            &format!("head={head}"),
+            "-f",
+            "base=main",
+            "-f",
+            "body=Adds a file.",
+            "-F",
+            &format!("draft={draft}"),
+            "--jq",
+            ".number",
+        ],
+    )
+    .trim()
+    .to_owned()
+}
+
+/// Runs `gh api` and returns its output, trimmed; `query` is passed to `--jq`.
+fn api(server: &Server, config: &Path, path: &str, query: &str) -> String {
+    gh(server, config, &["api", path, "--jq", query])
+        .trim()
+        .to_owned()
 }
