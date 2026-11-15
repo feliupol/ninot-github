@@ -2327,6 +2327,7 @@ dependencies = [
  "jsonschema",
  "mime",
  "ninot-common",
+ "ninot-github",
  "prettyplease",
  "proc-macro2",
  "quote",

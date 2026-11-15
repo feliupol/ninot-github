@@ -460,6 +460,12 @@ impl App {
                 request.caller.as_ref(),
             ));
         }
+        #[cfg(feature = "response-log")]
+        if (200..300).contains(&response.status)
+            && let Body::Json(body) = &response.body
+        {
+            super::response_log::record(operation, response.status, body);
+        }
         served(into_response(response, request.caller.as_ref()))
     }
 

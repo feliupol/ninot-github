@@ -31,6 +31,8 @@ use crate::webhooks;
 
 mod app;
 mod auth;
+#[cfg(feature = "response-log")]
+mod response_log;
 mod seed;
 
 use app::dispatch;

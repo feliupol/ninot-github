@@ -226,7 +226,7 @@ cargo xtask completion check
 ```
 
 `cargo xtask` is the maintainer alias (`completion check|update`,
-`gh-coverage report|check|update`). The Python package is tested with
+`gh-coverage report|check|update`, `example-shapes report|check|update`). The Python package is tested with
 `maturin develop -m python/Cargo.toml` and `pytest -q python/tests`.
 
 `cargo xtask gh-coverage check` reads what the last `cargo test --test gh_cli` run exercised.
@@ -236,6 +236,14 @@ listed in `tests/gh_coverage_exemptions.txt` as `operationId: reason`. An exempt
 operation that is exercised, or no longer implemented, fails the check too, so the list only
 shrinks. A new handler therefore needs a `gh_cli` test, or an exemption that says why, for
 example that gh never calls the endpoint.
+
+`cargo xtask example-shapes check` compares the successful JSON responses the last
+`cargo test --all-targets --workspace` run logged (the tests enable the `response-log` feature,
+which writes them under `target/tmp/example-shapes/`) with the examples the spec documents for
+each implemented operation: same keys, JSON types and nesting, and enum values from the schema.
+Optional keys count as missing only when every logged body omits them. It fails when the
+findings differ from `tests/example_shapes.txt`, so the list of mismatches only shrinks; `update`
+rewrites the file and `report` prints them per operation.
 
 ## Behaviour references
 
