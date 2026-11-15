@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::api::ApiRequest;
 use crate::render;
 use crate::state::{
-    Account, CheckRunApp, CheckRunRecord, CommitStatusRecord, Permission, Repo, SeededCheckRun,
-    State, StatusState,
+    Account, CheckRunApp, CheckRunRecord, CommitStatusRecord, JobRecord, SeededCheckRun, State,
+    StatusState, WorkflowRunRecord,
 };
 use crate::time;
 use crate::types;
@@ -37,32 +37,7 @@ pub struct ActionsSecretSeed {
     pub key_id: String,
 }
 
-/// Permissions granted to a GitHub App installation for repository Actions secrets.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ActionsSecretsPermission {
-    /// Permit reading the public key and secret metadata.
-    Read,
-    /// Permit reading metadata and creating, updating, or deleting secrets.
-    Write,
-}
-
-impl ActionsSecretsPermission {
-    /// Converts this fixture permission to GitHub's installation metadata enum.
-    pub fn as_api(self) -> crate::types::AppPermissionsSecrets {
-        match self {
-            Self::Read => crate::types::AppPermissionsSecrets::Read,
-            Self::Write => crate::types::AppPermissionsSecrets::Write,
-        }
-    }
-
-    /// Scopes granted to an installation token for this permission.
-    pub fn token_scopes(self) -> &'static [&'static str] {
-        match self {
-            Self::Read => &["actions:secrets:read"],
-            Self::Write => &["actions:secrets:read", "actions:secrets:write"],
-        }
-    }
-}
+pub use crate::state::ActionsSecretsPermission;
 
 macro_rules! apply {
     ($target:expr, $seed:expr) => {
@@ -851,99 +826,46 @@ pub struct CommitStatusSeed {
     pub updated_at: SeedField<String>,
 }
 
-/// Builds a complete default workflow run for the existing repository.
-pub(crate) fn workflow_run(
-    request: &ApiRequest,
-    account: &Account,
-    repo: &Repo,
-    id: i64,
-    head_sha: String,
-) -> types::WorkflowRun {
-    let repo_urls = request.urls().repo(&account.login, &repo.name);
-    let urls = repo_urls.workflow_run(id);
+/// A default workflow run: a completed `CI` push run, created now.
+pub(crate) fn workflow_run(id: u64, head_sha: String) -> WorkflowRunRecord {
     let now = crate::time::now_utc();
-    let minimal_repo = render::minimal_repository(
-        request,
-        account,
-        repo,
-        Permission {
-            admin: true,
-            push: true,
-            pull: true,
-        },
-    );
-    types::WorkflowRun {
-        actor: None,
-        artifacts_url: urls.api("/artifacts"),
-        cancel_url: urls.api("/cancel"),
-        check_suite_id: None,
-        check_suite_node_id: None,
-        check_suite_url: repo_urls.check_suite(id).api,
-        conclusion: None,
-        created_at: now,
-        display_title: "CI".to_owned(),
-        event: "push".to_owned(),
-        head_branch: Some("main".to_owned()),
-        head_commit: None,
-        head_repository: minimal_repo.clone(),
-        head_repository_id: Some(render::id(repo.id)),
-        head_sha,
-        html_url: urls.html.clone(),
+    WorkflowRunRecord {
         id,
-        jobs_url: urls.api("/jobs"),
-        logs_url: urls.api("/logs"),
         name: Some("CI".to_owned()),
-        node_id: render::node_id("WorkflowRun", node_id(id)),
+        display_title: "CI".to_owned(),
         path: ".github/workflows/ci.yml".to_owned(),
-        previous_attempt_url: None,
-        pull_requests: Some(Vec::new()),
-        referenced_workflows: None,
-        repository: minimal_repo,
-        rerun_url: urls.api("/rerun"),
-        run_attempt: Some(1),
-        run_number: id,
-        run_started_at: Some(now),
-        status: Some("completed".to_owned()),
-        triggering_actor: None,
-        updated_at: now,
-        url: urls.api.clone(),
         workflow_id: id,
-        workflow_url: repo_urls.workflow("ci.yml"),
+        run_number: id,
+        run_attempt: 1,
+        event: "push".to_owned(),
+        status: Some("completed".to_owned()),
+        conclusion: None,
+        head_branch: Some("main".to_owned()),
+        head_sha,
+        html_url: None,
+        created_at: now,
+        updated_at: now,
+        run_started_at: Some(now),
     }
 }
 
-/// Builds a complete default job associated with a workflow run.
-pub(crate) fn job(request: &ApiRequest, run: &types::WorkflowRun, id: i64) -> types::Job {
-    let owner = &run.repository.owner.login;
-    let repo = &run.repository.name;
-    let repo_urls = request.urls().repo(owner, repo);
-    let run_id = run.id;
-    let urls = repo_urls.workflow_job(run_id, id);
+/// A default job: completed, named `Job`, created now.
+pub(crate) fn job(id: u64) -> JobRecord {
     let now = crate::time::now_utc();
-    types::Job {
-        check_run_url: repo_urls.check_run(id).api,
-        completed_at: Some(now),
-        conclusion: None,
-        created_at: now,
-        head_branch: run.head_branch.clone(),
-        head_sha: run.head_sha.clone(),
-        html_url: Some(urls.html),
+    JobRecord {
         id,
-        labels: Vec::new(),
         name: "Job".to_owned(),
-        node_id: render::node_id("WorkflowJob", node_id(id)),
-        run_attempt: Some(1),
-        run_id,
-        run_url: repo_urls.workflow_run(run_id).api,
-        runner_group_id: None,
-        runner_group_name: None,
+        status: types::JobStatus::Completed,
+        conclusion: None,
+        run_attempt: 1,
+        labels: Vec::new(),
         runner_id: None,
         runner_name: None,
-        started_at: now,
-        status: types::JobStatus::Completed,
+        runner_group_id: None,
         steps: Vec::new(),
-        url: urls.api,
-        workflow_name: run.name.clone(),
+        created_at: now,
+        started_at: now,
+        completed_at: Some(now),
     }
 }
 
@@ -1326,7 +1248,7 @@ pub(crate) struct SeededPullRequest {
     /// Files the seed lists; without them `GET /pulls/{number}/files` reads them from git.
     pub files: Option<Vec<types::DiffEntry>>,
     /// `merged` and `closed` events the seed implies.
-    pub events: Vec<crate::state::TimelineEvent>,
+    pub events: Vec<crate::state::NewTimelineEvent>,
 }
 
 /// The seed fields that decide whether and when a pull request was merged or closed.
@@ -1350,7 +1272,7 @@ fn closing_events(
     state: &mut State,
     pull: &mut types::PullRequest,
     seed: ClosingSeed,
-) -> io::Result<Vec<crate::state::TimelineEvent>> {
+) -> io::Result<Vec<crate::state::NewTimelineEvent>> {
     let merged_at = match seed.merged_at {
         SeedField::Present(value) => Some(parse_timestamp(&value, "pull request merged_at")?),
         SeedField::Missing => None,
@@ -1403,7 +1325,7 @@ fn closing_events(
     };
     let mut events = Vec::new();
     if merged {
-        events.push(crate::state::TimelineEvent {
+        events.push(crate::state::NewTimelineEvent {
             id: state.next_id(),
             kind: crate::state::TimelineEventKind::Merged,
             actor: actor.clone(),
@@ -1413,7 +1335,7 @@ fn closing_events(
             requested_team: None,
         });
     }
-    events.push(crate::state::TimelineEvent {
+    events.push(crate::state::NewTimelineEvent {
         id: state.next_id(),
         kind: crate::state::TimelineEventKind::Closed,
         actor,
@@ -1611,28 +1533,28 @@ fn apply_branch(
 }
 
 /// Completes an Actions run from typed sparse fixture fields.
-pub(crate) fn seeded_workflow_run(
-    request: &ApiRequest,
-    account: &Account,
-    repo: &Repo,
-    seed: WorkflowRunSeed,
-) -> io::Result<types::WorkflowRun> {
-    let id = model_id_or_input(field_or(seed.id, 1), "workflow run")?;
+pub(crate) fn seeded_workflow_run(seed: WorkflowRunSeed) -> io::Result<WorkflowRunRecord> {
+    let id = field_or(seed.id, 1);
+    model_id_or_input(id, "workflow run")?;
     let head_sha = field_or(seed.head_sha, default_sha());
-    let mut run = workflow_run(request, account, repo, id, head_sha);
+    let mut run = workflow_run(id, head_sha);
     apply!(run.name, seed.name);
     apply!(run.head_branch, seed.head_branch);
-    apply!(run.html_url, seed.html_url);
+    if let SeedField::Present(url) = seed.html_url {
+        run.html_url = Some(url);
+    }
     apply!(run.event, seed.event);
     apply!(run.status, seed.status);
     apply!(run.conclusion, seed.conclusion);
     apply!(run.display_title, seed.display_title);
     apply!(run.path, seed.path);
     if let SeedField::Present(value) = seed.workflow_id {
-        run.workflow_id = model_id_or_input(value, "workflow")?;
+        model_id_or_input(value, "workflow")?;
+        run.workflow_id = value;
     }
     if let SeedField::Present(value) = seed.run_number {
-        run.run_number = model_id_or_input(value, "workflow run number")?;
+        model_id_or_input(value, "workflow run number")?;
+        run.run_number = value;
     }
     apply_time(
         seed.created_at,
@@ -1648,17 +1570,12 @@ pub(crate) fn seeded_workflow_run(
 }
 
 /// Completes an Actions job from typed sparse fixture fields.
-pub(crate) fn seeded_job(
-    request: &ApiRequest,
-    run: &types::WorkflowRun,
-    seed: JobSeed,
-    index: usize,
-) -> io::Result<types::Job> {
+pub(crate) fn seeded_job(seed: JobSeed, index: usize) -> io::Result<JobRecord> {
     let id = match seed.id {
         SeedField::Present(id) => model_id_or_input(id, "workflow job")?,
         SeedField::Missing => indexed_model_id(index, "workflow job")?,
     };
-    let mut job = job(request, run, id);
+    let mut job = job(node_id(id));
     apply!(job.name, seed.name);
     if let SeedField::Present(value) = seed.conclusion {
         job.conclusion = value

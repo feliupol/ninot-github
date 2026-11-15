@@ -12,7 +12,7 @@ use serde_json::Value;
 
 use super::super::Handler;
 use crate::api::{ApiRequest, ApiResponse, ApiResult, paginate};
-use crate::handlers::repos::find_repo;
+use crate::handlers::repos::{Found, find_repo};
 use crate::operation::ops;
 use crate::state::{Milestone, Repo, State, lock};
 use crate::types::{self, NullableMilestoneState};
@@ -189,7 +189,7 @@ impl Handler for ops::IssuesListLabelsForMilestone {
         Ok(paginate(
             request,
             &request.path,
-            milestone_labels(repo, number),
+            milestone_labels(&state, request, &found, number),
         ))
     }
 }
@@ -209,9 +209,15 @@ fn render_number(
     super::render_stored(repo, request, owner, name, &milestone)
 }
 
-fn milestone_labels(repo: &Repo, number: u64) -> Vec<types::Label> {
+fn milestone_labels(
+    state: &State,
+    request: &ApiRequest,
+    found: &Found,
+    number: u64,
+) -> Vec<types::Label> {
+    let repo = found.repo(state);
     let target = crate::render::id(number);
-    let catalog = super::catalog(repo);
+    let catalog = super::catalog(state, request, found);
     let mut found = BTreeMap::new();
     for issue in repo.issues.values() {
         if issue

@@ -88,7 +88,7 @@ fn parse_change(
     Ok(Change {
         title: parse_title(body)?,
         body: parse_body(body)?,
-        labels: parse_labels(state, found, body, loaded)?,
+        labels: parse_labels(state, request, found, body, loaded)?,
         assignees: parse_assignees(state, request, found, body)?,
         milestone: parse_milestone(state, request, found, body)?,
         transition: parse_transition(state, caller, body, loaded, found, number)?,
@@ -132,6 +132,7 @@ fn parse_body(body: &Map<String, Value>) -> Result<Option<Option<String>>, ApiRe
 
 fn parse_labels(
     state: &State,
+    request: &ApiRequest,
     found: &Found,
     body: &Map<String, Value>,
     loaded: &Loaded,
@@ -145,8 +146,7 @@ fn parse_labels(
         return Ok(None);
     };
     let names = label_names(value)?;
-    let repo = found.repo(state);
-    super::labels::require_labels(repo, &names, &loaded.labels).map(Some)
+    super::labels::require_labels(state, request, found, &names, &loaded.labels).map(Some)
 }
 
 fn label_names(value: &Value) -> Result<Vec<String>, ApiResponse> {

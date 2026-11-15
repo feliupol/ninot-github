@@ -5,6 +5,7 @@
 mod account;
 pub(crate) mod actions_service;
 mod checks;
+mod gist;
 mod hook;
 mod issue_event;
 mod key;
@@ -12,6 +13,7 @@ mod org;
 mod release;
 mod repo;
 mod runner;
+mod workflow;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
@@ -22,6 +24,7 @@ pub use checks::{
     CheckAnnotationRecord, CheckRunApp, CheckRunRecord, CommitStatusRecord, SeededCheckRun,
     StatusState, combined_state, latest_per_context,
 };
+pub use gist::Gist;
 pub use hook::{Delivery, Hook};
 pub use issue_event::{IssueEvent, IssueEventKind, IssueEventLabel};
 pub use key::{InvalidSha, Name, NameMap, Sha, fold};
@@ -29,13 +32,14 @@ pub use org::OrgRole;
 pub(crate) use org::TEAM_PERMISSIONS;
 pub use release::{Asset, Release};
 pub use repo::{
-    CheckSuiteRecord, Issue, Milestone, Permission, PullRequest, Repo, ReviewDecision,
-    ReviewThread, ReviewThreadComment, Settings, StoredActionsSecret, TimelineEvent,
-    TimelineEventKind,
+    ActionsPublicKey, CheckSuiteRecord, Issue, LabelRecord, Milestone, NewTimelineEvent,
+    Permission, PullRequest, Repo, ReviewDecision, ReviewThread, ReviewThreadComment, Settings,
+    StoredActionsSecret, TimelineEvent, TimelineEventKind,
 };
 pub(crate) use runner::RunnerTokenKind;
 pub(crate) use runner::{CreateRunnerError, RunnerSpec, valid_label_name, valid_runner_name};
 pub use runner::{Runner, RunnerGroup, RunnerLabel};
+pub use workflow::{JobRecord, WorkflowRunRecord};
 
 use crate::api::Caller;
 pub use crate::time::now;
@@ -56,7 +60,7 @@ pub struct State {
     /// Projects v2, keyed by their database id.
     pub projects: BTreeMap<u64, Project>,
     /// Gists created through the Gists API, returned by later list requests.
-    pub gists: Vec<crate::types::GistSimple>,
+    pub gists: Vec<Gist>,
     /// Next gist id, kept separately because GitHub gist ids are strings.
     pub last_gist_id: u64,
     /// One-time registration and removal tokens for self-hosted runners, by secret.
@@ -111,6 +115,41 @@ pub struct ProjectItem {
     pub single_select_values: BTreeMap<u64, u64>,
 }
 
+/// Permissions granted to a GitHub App installation for repository Actions secrets.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ActionsSecretsPermission {
+    /// Permit reading the public key and secret metadata.
+    Read,
+    /// Permit reading metadata and creating, updating, or deleting secrets.
+    Write,
+}
+
+impl ActionsSecretsPermission {
+    /// Converts this fixture permission to GitHub's installation metadata enum.
+    pub fn as_api(self) -> crate::types::AppPermissionsSecrets {
+        match self {
+            Self::Read => crate::types::AppPermissionsSecrets::Read,
+            Self::Write => crate::types::AppPermissionsSecrets::Write,
+        }
+    }
+
+    /// The permission GitHub's installation metadata enum names.
+    pub(crate) fn from_api(permission: crate::types::AppPermissionsSecrets) -> Self {
+        match permission {
+            crate::types::AppPermissionsSecrets::Read => Self::Read,
+            crate::types::AppPermissionsSecrets::Write => Self::Write,
+        }
+    }
+
+    /// Scopes granted to an installation token for this permission.
+    pub fn token_scopes(self) -> &'static [&'static str] {
+        match self {
+            Self::Read => &["actions:secrets:read"],
+            Self::Write => &["actions:secrets:read", "actions:secrets:write"],
+        }
+    }
+}
+
 /// A GitHub App installation scoped to one repository.
 #[derive(Clone)]
 pub struct Installation {
@@ -120,7 +159,7 @@ pub struct Installation {
     /// GitHub App that owns the installation. The default app is 1.
     pub app_id: u64,
     /// Actions secrets access granted to tokens minted for this installation.
-    pub secrets_permission: Option<crate::types::AppPermissionsSecrets>,
+    pub secrets_permission: Option<ActionsSecretsPermission>,
 }
 
 impl State {
@@ -130,7 +169,7 @@ impl State {
         owner: &str,
         repository: &str,
         id: u64,
-        secrets_permission: Option<crate::types::AppPermissionsSecrets>,
+        secrets_permission: Option<ActionsSecretsPermission>,
     ) {
         self.insert_installation(owner, repository, id, 1, secrets_permission);
     }
@@ -146,7 +185,7 @@ impl State {
         repository: &str,
         id: u64,
         app_id: u64,
-        secrets_permission: Option<crate::types::AppPermissionsSecrets>,
+        secrets_permission: Option<ActionsSecretsPermission>,
     ) {
         assert!(
             self.account(owner)
@@ -491,14 +530,14 @@ impl State {
         &mut self,
         owner: &str,
         name: &str,
-        run: crate::types::WorkflowRun,
-        jobs: Vec<crate::types::Job>,
+        run: WorkflowRunRecord,
+        jobs: Vec<JobRecord>,
     ) {
         let repo = self
             .account_mut(owner)
             .and_then(|account| account.repo_mut(name))
             .unwrap_or_else(|| panic!("no repository {owner}/{name}"));
-        let id = u64::try_from(run.id).expect("workflow run id is non-negative");
+        let id = run.id;
         repo.workflow_runs.push(run);
         repo.workflow_jobs.insert(id, jobs);
     }

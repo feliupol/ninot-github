@@ -60,7 +60,6 @@ impl State {
     /// Returns the workflow run id and the job id.
     pub(crate) fn queue_script_job(
         &mut self,
-        request: &crate::api::ApiRequest,
         owner: &str,
         repo: &str,
         labels: &[String],
@@ -69,22 +68,12 @@ impl State {
         let run_id = self.next_id();
         let job_id = self.next_id();
         let message_id = self.next_id();
-        let account = self
-            .account(owner)
-            .ok_or_else(|| std::io::Error::other("repository owner does not exist"))?;
-        let repository = account
-            .repo(repo)
+        self.account(owner)
+            .and_then(|account| account.repo(repo))
             .ok_or_else(|| std::io::Error::other("repository does not exist"))?;
-        let head_sha = "0".repeat(40);
-        let mut run = crate::fixtures::workflow_run(
-            request,
-            account,
-            repository,
-            i64::try_from(run_id).unwrap(),
-            head_sha,
-        );
+        let mut run = crate::fixtures::workflow_run(run_id, "0".repeat(40));
         run.status = Some("queued".to_owned());
-        let mut job = crate::fixtures::job(request, &run, i64::try_from(job_id).unwrap());
+        let mut job = crate::fixtures::job(job_id);
         job.status = types::JobStatus::Queued;
         job.completed_at = None;
         job.name = "job".to_owned();
@@ -202,9 +191,9 @@ impl State {
             run.status = Some("in_progress".to_owned());
             stored.status = types::JobStatus::InProgress;
             stored.started_at = crate::time::now_utc();
-            stored.runner_id = Some(i64::try_from(runner.id).unwrap());
+            stored.runner_id = Some(runner.id);
             stored.runner_name = Some(runner.name.clone());
-            stored.runner_group_id = Some(i64::try_from(runner.group_id).unwrap());
+            stored.runner_group_id = Some(runner.group_id);
         });
         Ok(job)
     }
@@ -271,7 +260,7 @@ impl State {
     fn update_job(
         &mut self,
         job: &ServiceJob,
-        change: impl FnOnce(&mut types::WorkflowRun, &mut types::Job),
+        change: impl FnOnce(&mut super::WorkflowRunRecord, &mut super::JobRecord),
     ) {
         let Some(repo) = self
             .account_mut(&job.owner)
@@ -279,15 +268,17 @@ impl State {
         else {
             return;
         };
-        let run_id = i64::try_from(job.run_id).unwrap();
-        let job_id = i64::try_from(job.job_id).unwrap();
-        let Some(run) = repo.workflow_runs.iter_mut().find(|run| run.id == run_id) else {
+        let Some(run) = repo
+            .workflow_runs
+            .iter_mut()
+            .find(|run| run.id == job.run_id)
+        else {
             return;
         };
         let Some(stored) = repo
             .workflow_jobs
             .get_mut(&job.run_id)
-            .and_then(|jobs| jobs.iter_mut().find(|stored| stored.id == job_id))
+            .and_then(|jobs| jobs.iter_mut().find(|stored| stored.id == job.job_id))
         else {
             return;
         };

@@ -144,7 +144,7 @@ pub(crate) fn record_changes(
         events.push(IssueEvent::new(
             state.next_id(),
             kind,
-            actor.clone(),
+            actor.login.clone(),
             crate::time::now_utc(),
         ));
     }
@@ -174,7 +174,7 @@ pub(crate) fn record_locked(
     let mut event = IssueEvent::new(
         state.next_id(),
         IssueEventKind::Locked,
-        actor,
+        actor.login,
         crate::time::now_utc(),
     );
     event.lock_reason = reason;
@@ -191,7 +191,7 @@ pub(crate) fn record_unlocked(
     let event = IssueEvent::new(
         state.next_id(),
         IssueEventKind::Unlocked,
-        actor,
+        actor.login,
         crate::time::now_utc(),
     );
     append(found.repo_mut(state), number, vec![event]);
@@ -203,7 +203,12 @@ fn with_label(
     kind: IssueEventKind,
     label: &types::Label,
 ) -> IssueEvent {
-    let mut event = IssueEvent::new(state.next_id(), kind, actor.clone(), crate::time::now_utc());
+    let mut event = IssueEvent::new(
+        state.next_id(),
+        kind,
+        actor.login.clone(),
+        crate::time::now_utc(),
+    );
     event.label = Some(IssueEventLabel {
         name: label.name.clone(),
         color: label.color.clone(),
@@ -217,8 +222,13 @@ fn with_assignee(
     kind: IssueEventKind,
     assignee: &types::SimpleUser,
 ) -> IssueEvent {
-    let mut event = IssueEvent::new(state.next_id(), kind, actor.clone(), crate::time::now_utc());
-    event.assignee = Some(assignee.clone());
+    let mut event = IssueEvent::new(
+        state.next_id(),
+        kind,
+        actor.login.clone(),
+        crate::time::now_utc(),
+    );
+    event.assignee = Some(assignee.login.clone());
     event
 }
 
@@ -228,7 +238,12 @@ fn with_milestone(
     kind: IssueEventKind,
     title: &str,
 ) -> IssueEvent {
-    let mut event = IssueEvent::new(state.next_id(), kind, actor.clone(), crate::time::now_utc());
+    let mut event = IssueEvent::new(
+        state.next_id(),
+        kind,
+        actor.login.clone(),
+        crate::time::now_utc(),
+    );
     event.milestone_title = Some(title.to_owned());
     event
 }

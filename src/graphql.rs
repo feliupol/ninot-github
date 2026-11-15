@@ -589,7 +589,7 @@ fn set_pull_request_draft(env: &Env, args: &Map, draft: bool) -> Result<Json, Er
                                 env.caller.login
                             ))
                         })?;
-                        pull.apply_event(crate::state::TimelineEvent {
+                        pull.apply_event(crate::state::NewTimelineEvent {
                             id: event_id,
                             kind: if draft {
                                 crate::state::TimelineEventKind::ConvertToDraft

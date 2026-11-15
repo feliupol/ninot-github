@@ -23,17 +23,22 @@ use serde_json::Value;
 use crate::api::{ApiRequest, ApiResponse};
 use crate::handlers::repos::Found;
 use crate::render::{self, MilestoneRender};
-use crate::state::{Account, AccountKind, Milestone, Repo, State};
+use crate::state::{Account, AccountKind, LabelRecord, Milestone, Repo, State};
 use crate::types;
 
 /// Every label a repository currently has: stored labels, then labels that exist only as copies
 /// on an issue or pull request. Stored labels win when both have the same name.
-pub(crate) fn repository_labels(repo: &Repo) -> Vec<types::Label> {
-    catalog(repo).into_values().collect()
+pub(crate) fn repository_labels(
+    state: &State,
+    request: &ApiRequest,
+    found: &Found,
+) -> Vec<types::Label> {
+    catalog(state, request, found).into_values().collect()
 }
 
-/// Labels keyed by lowercase name.
-fn catalog(repo: &Repo) -> BTreeMap<String, types::Label> {
+/// Labels keyed by lowercase name. Copies keep the fields they were copied with.
+fn catalog(state: &State, request: &ApiRequest, found: &Found) -> BTreeMap<String, types::Label> {
+    let repo = found.repo(state);
     let mut labels = BTreeMap::new();
     for label in repo
         .issues
@@ -48,10 +53,39 @@ fn catalog(repo: &Repo) -> BTreeMap<String, types::Label> {
     {
         labels.entry(label_key(&label.name)).or_insert(label);
     }
-    for (key, label) in &repo.labels {
-        labels.insert(key.clone(), label.clone());
+    for label in repo.labels.values() {
+        labels.insert(
+            label_key(&label.name),
+            render_label(state, request, found, label),
+        );
     }
     labels
+}
+
+/// A stored label as the label endpoints return it.
+fn render_label(
+    state: &State,
+    request: &ApiRequest,
+    found: &Found,
+    label: &LabelRecord,
+) -> types::Label {
+    types::Label {
+        archived_at: label.archived_at,
+        archived_by: label
+            .archived_by
+            .as_deref()
+            .map(|login| render::referenced_user(state, request, login)),
+        color: label.color.clone(),
+        default: label.default,
+        description: label.description.clone(),
+        id: render::id(label.id),
+        name: label.name.clone(),
+        node_id: label.node_id.clone(),
+        url: request
+            .urls()
+            .repo(&found.owner, &found.name)
+            .label(&label.name),
+    }
 }
 
 pub(super) fn label_from_issue_item(label: &types::IssueLabelsItem) -> Option<types::Label> {

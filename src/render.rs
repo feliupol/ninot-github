@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use url::Url;
 
 use crate::api::ApiRequest;
-use crate::state::{Account, AccountKind, Milestone, Permission, Repo};
+use crate::state::{Account, AccountKind, Milestone, Permission, Repo, State};
 use crate::types;
 use crate::webhook_types;
 
@@ -485,6 +485,29 @@ pub fn simple_user(request: &ApiRequest, account: &Account) -> types::SimpleUser
         url: urls.api,
         user_view_type: Some("public".to_owned()),
     }
+}
+
+/// [`simple_user`] of the account `login`, which events and records reference.
+///
+/// # Panics
+/// When no account has that login; accounts are never deleted.
+pub fn referenced_user(state: &State, request: &ApiRequest, login: &str) -> types::SimpleUser {
+    let account = state
+        .account(login)
+        .unwrap_or_else(|| panic!("referenced account {login} exists"));
+    simple_user(request, account)
+}
+
+/// [`team_simple`] of the team `id` of `org`; `None` once the team is deleted.
+pub fn referenced_team(
+    state: &State,
+    request: &ApiRequest,
+    org: &str,
+    id: u64,
+) -> Option<types::TeamSimple> {
+    let org = state.account(org)?;
+    let team = org.teams.values().find(|team| team.id == id)?;
+    Some(team_simple(request, org, team))
 }
 
 /// A team of the organization `org`, as pull requests list their requested teams.
@@ -1367,5 +1390,93 @@ fn webhook_custom_property(
                 .collect(),
         ),
         _ => unreachable!("rendered custom properties are strings, string arrays or null"),
+    }
+}
+
+/// A workflow run of `owner`'s `repo`, as the Actions API returns it.
+pub fn workflow_run(
+    request: &ApiRequest,
+    owner: &Account,
+    repo: &Repo,
+    run: &crate::state::WorkflowRunRecord,
+) -> types::WorkflowRun {
+    let repo_urls = request.urls().repo(&owner.login, &repo.name);
+    let urls = repo_urls.workflow_run(run.id);
+    let minimal_repo = minimal_repository(request, owner, repo, Permission::ADMIN);
+    types::WorkflowRun {
+        actor: None,
+        artifacts_url: urls.api("/artifacts"),
+        cancel_url: urls.api("/cancel"),
+        check_suite_id: None,
+        check_suite_node_id: None,
+        check_suite_url: repo_urls.check_suite(run.id).api,
+        conclusion: run.conclusion.clone(),
+        created_at: run.created_at,
+        display_title: run.display_title.clone(),
+        event: run.event.clone(),
+        head_branch: run.head_branch.clone(),
+        head_commit: None,
+        head_repository: minimal_repo.clone(),
+        head_repository_id: Some(id(repo.id)),
+        head_sha: run.head_sha.clone(),
+        html_url: run.html_url.clone().unwrap_or_else(|| urls.html.clone()),
+        id: id(run.id),
+        jobs_url: urls.api("/jobs"),
+        logs_url: urls.api("/logs"),
+        name: run.name.clone(),
+        node_id: node_id("WorkflowRun", run.id),
+        path: run.path.clone(),
+        previous_attempt_url: None,
+        pull_requests: Some(Vec::new()),
+        referenced_workflows: None,
+        repository: minimal_repo,
+        rerun_url: urls.api("/rerun"),
+        run_attempt: Some(id(run.run_attempt)),
+        run_number: id(run.run_number),
+        run_started_at: run.run_started_at,
+        status: run.status.clone(),
+        triggering_actor: None,
+        updated_at: run.updated_at,
+        url: urls.api.clone(),
+        workflow_id: id(run.workflow_id),
+        // The fake serves no workflow files; every run names `ci.yml`.
+        workflow_url: repo_urls.workflow("ci.yml"),
+    }
+}
+
+/// A job of `run` in `owner/name`, as the Actions API returns it.
+pub fn workflow_job(
+    request: &ApiRequest,
+    owner: &str,
+    name: &str,
+    run: &crate::state::WorkflowRunRecord,
+    job: &crate::state::JobRecord,
+) -> types::Job {
+    let repo_urls = request.urls().repo(owner, name);
+    let urls = repo_urls.workflow_job(run.id, job.id);
+    types::Job {
+        check_run_url: repo_urls.check_run(job.id).api,
+        completed_at: job.completed_at,
+        conclusion: job.conclusion,
+        created_at: job.created_at,
+        head_branch: run.head_branch.clone(),
+        head_sha: run.head_sha.clone(),
+        html_url: Some(urls.html),
+        id: id(job.id),
+        labels: job.labels.clone(),
+        name: job.name.clone(),
+        node_id: node_id("WorkflowJob", job.id),
+        run_attempt: Some(id(job.run_attempt)),
+        run_id: id(run.id),
+        run_url: repo_urls.workflow_run(run.id).api,
+        runner_group_id: job.runner_group_id.map(id),
+        runner_group_name: None,
+        runner_id: job.runner_id.map(id),
+        runner_name: job.runner_name.clone(),
+        started_at: job.started_at,
+        status: job.status,
+        steps: job.steps.clone(),
+        url: urls.api,
+        workflow_name: run.name.clone(),
     }
 }

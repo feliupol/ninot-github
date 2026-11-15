@@ -18,7 +18,9 @@ use super::repos::find_repo;
 use crate::api::{ApiRequest, ApiResponse, ApiResult, paginate};
 use crate::operation::ops;
 use crate::render::{self, node_id};
-use crate::state::{PullRequest, Repo, Sha, State, TimelineEvent, TimelineEventKind, lock};
+use crate::state::{
+    NewTimelineEvent, PullRequest, Repo, Sha, State, TimelineEvent, TimelineEventKind, lock,
+};
 use crate::types;
 use crate::urls::RepoUrls;
 
@@ -88,7 +90,7 @@ pub(crate) fn record_head_update(
         None => true,
     };
     if forced {
-        pull.apply_event(TimelineEvent {
+        pull.apply_event(NewTimelineEvent {
             id: event_id,
             kind: TimelineEventKind::HeadRefForcePushed,
             actor,
@@ -186,17 +188,26 @@ fn entry(value: &impl serde::Serialize) -> Value {
     serde_json::to_value(value).expect("timeline events serialize to JSON")
 }
 
-/// A stored event as the timeline renders it.
-fn stored_event(repo: &RepoUrls, event: &TimelineEvent) -> Value {
+/// A stored event as the timeline renders it, with its people as their accounts are now.
+fn stored_event(people: &People, repo: &RepoUrls, event: &TimelineEvent) -> Value {
     let id = render::id(event.id);
     let url = repo.issue_event(event.id);
     let commit_url = event.commit_id.as_ref().map(|sha| repo.commit(sha).api);
     let kind = event.kind.name();
     let node = node_id(kind, event.id);
     let created_at = crate::time::format(&event.created_at);
+    let actor = people.user(&event.actor);
+    let requested_reviewer = event
+        .requested_reviewer
+        .as_deref()
+        .map(|login| people.user(login));
+    let requested_team = event
+        .requested_team
+        .and_then(|id| people.team(id))
+        .map(|team| super::pulls::full_team(&team));
     match event.kind {
         TimelineEventKind::ReviewRequested => entry(&types::ReviewRequestedIssueEvent {
-            actor: event.actor.clone(),
+            actor: actor.clone(),
             commit_id: None,
             commit_url: None,
             created_at,
@@ -204,13 +215,13 @@ fn stored_event(repo: &RepoUrls, event: &TimelineEvent) -> Value {
             id,
             node_id: node,
             performed_via_github_app: None,
-            requested_reviewer: event.requested_reviewer.clone(),
-            requested_team: event.requested_team.as_ref().map(super::pulls::full_team),
-            review_requester: event.actor.clone(),
+            requested_reviewer: requested_reviewer.clone(),
+            requested_team: requested_team.clone(),
+            review_requester: actor.clone(),
             url,
         }),
         TimelineEventKind::ReviewRequestRemoved => entry(&types::ReviewRequestRemovedIssueEvent {
-            actor: event.actor.clone(),
+            actor: actor.clone(),
             commit_id: None,
             commit_url: None,
             created_at,
@@ -218,14 +229,14 @@ fn stored_event(repo: &RepoUrls, event: &TimelineEvent) -> Value {
             id,
             node_id: node,
             performed_via_github_app: None,
-            requested_reviewer: event.requested_reviewer.clone(),
-            requested_team: event.requested_team.as_ref().map(super::pulls::full_team),
-            review_requester: event.actor.clone(),
+            requested_reviewer: requested_reviewer.clone(),
+            requested_team: requested_team.clone(),
+            review_requester: actor.clone(),
             url,
         }),
         _ => {
             let mut row = entry(&types::StateChangeIssueEvent {
-                actor: event.actor.clone(),
+                actor,
                 commit_id: event.commit_id.clone(),
                 commit_url,
                 created_at,
@@ -367,7 +378,30 @@ fn committed_event(repo: &RepoUrls, commit: &git::Commit) -> Value {
 ///
 /// `committed` events carry no timestamp; they are placed when their commit first reached the
 /// head branch, or at the pull request's creation for commits that were there from the start.
-fn pull_timeline(urls: &RepoUrls, repo: &Repo, pull: &PullRequest) -> io::Result<Vec<Value>> {
+/// Renders the accounts and teams stored timeline events reference.
+struct People<'a> {
+    state: &'a State,
+    request: &'a ApiRequest,
+    /// Login of the organization whose teams are requested.
+    owner: &'a str,
+}
+
+impl People<'_> {
+    fn user(&self, login: &str) -> types::SimpleUser {
+        render::referenced_user(self.state, self.request, login)
+    }
+
+    fn team(&self, id: u64) -> Option<types::TeamSimple> {
+        render::referenced_team(self.state, self.request, self.owner, id)
+    }
+}
+
+fn pull_timeline(
+    people: &People,
+    urls: &RepoUrls,
+    repo: &Repo,
+    pull: &PullRequest,
+) -> io::Result<Vec<Value>> {
     let Some(data) = &pull.data else {
         return Ok(Vec::new());
     };
@@ -390,7 +424,7 @@ fn pull_timeline(urls: &RepoUrls, repo: &Repo, pull: &PullRequest) -> io::Result
         (
             event.created_at,
             render::id(event.id),
-            stored_event(urls, event),
+            stored_event(people, urls, event),
         )
     }));
     rows.extend(
@@ -466,7 +500,12 @@ impl Handler for ops::IssuesListEventsForTimeline {
                     .pull_requests
                     .get(&number)
                     .ok_or_else(ApiResponse::not_found)?;
-                pull_timeline(&urls, repo, pull).map_err(ApiResponse::internal)?
+                let people = People {
+                    state: &guard,
+                    request,
+                    owner: &found.owner,
+                };
+                pull_timeline(&people, &urls, repo, pull).map_err(ApiResponse::internal)?
             }
         };
         Ok(paginate(request, &request.path, rows))

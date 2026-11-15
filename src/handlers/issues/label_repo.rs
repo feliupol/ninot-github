@@ -13,7 +13,7 @@ use crate::api::{ApiRequest, ApiResponse, ApiResult};
 use crate::handlers::repos::{Found, find_repo};
 use crate::operation::ops;
 use crate::render;
-use crate::state::{State, lock};
+use crate::state::{LabelRecord, Name, NameMap, State, lock};
 use crate::types;
 
 impl Handler for ops::IssuesCreateLabel {
@@ -33,18 +33,19 @@ impl Handler for ops::IssuesCreateLabel {
         };
         let description = optional_description(body.get("description"))?;
         // Source: cli/cli v2.101.0 pkg/cmd/label/create.go:192
-        if super::catalog(found.repo(&state)).contains_key(&super::label_key(&name)) {
+        if super::catalog(&state, request, &found).contains_key(&super::label_key(&name)) {
             return Err(ApiResponse::validation_failed(
                 "Label",
                 "name",
                 "already_exists",
             ));
         }
-        let label = new_label(&mut state, request, &found, &name, &color, description);
+        let record = new_label(&mut state, &name, &color, description);
+        let label = super::render_label(&state, request, &found, &record);
         found
             .repo_mut(&mut state)
             .labels
-            .insert(super::label_key(&label.name), label.clone());
+            .insert(Name::new(&record.name), record);
         Ok(ApiResponse::typed(201, &label).with_header("location", label.url.clone()))
     }
 }
@@ -54,7 +55,7 @@ impl Handler for ops::IssuesGetLabel {
         let state = lock(state);
         let found = find_repo(&state, request)?;
         let key = super::label_key(&super::decode_param(request.param("name")));
-        let label = super::catalog(found.repo(&state))
+        let label = super::catalog(&state, request, &found)
             .get(&key)
             .cloned()
             .ok_or_else(ApiResponse::not_found)?;
@@ -69,7 +70,7 @@ impl Handler for ops::IssuesUpdateLabel {
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         let key = super::label_key(&super::decode_param(request.param("name")));
-        if !super::catalog(found.repo(&state)).contains_key(&key) {
+        if !super::catalog(&state, request, &found).contains_key(&key) {
             return Err(ApiResponse::not_found());
         }
         super::require_push(&found)?;
@@ -85,12 +86,12 @@ impl Handler for ops::IssuesDeleteLabel {
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         let key = super::label_key(&super::decode_param(request.param("name")));
-        if !super::catalog(found.repo(&state)).contains_key(&key) {
+        if !super::catalog(&state, request, &found).contains_key(&key) {
             return Err(ApiResponse::not_found());
         }
         super::require_push(&found)?;
         let repo = found.repo_mut(&mut state);
-        repo.labels.remove(&key);
+        repo.labels.remove_name(&key);
         let now = crate::time::now_utc();
         for issue in repo.issues.values_mut() {
             let before = issue.data.labels.len();
@@ -124,7 +125,7 @@ struct LabelPatch {
     description: Option<String>,
     description_set: bool,
     archived: Option<bool>,
-    archiver: Option<types::SimpleUser>,
+    archiver: Option<String>,
 }
 
 fn required_name(value: Option<&Value>) -> Result<String, ApiResponse> {
@@ -173,23 +174,20 @@ fn bounded_description(text: &str) -> Result<String, ApiResponse> {
 
 fn new_label(
     state: &mut State,
-    request: &ApiRequest,
-    found: &Found,
     name: &str,
     color: &str,
     description: Option<String>,
-) -> types::Label {
+) -> LabelRecord {
     let id = state.next_id();
-    types::Label {
+    LabelRecord {
+        id,
+        node_id: render::node_id("Label", id),
+        name: name.to_owned(),
+        color: color.to_owned(),
+        description,
+        default: false,
         archived_at: None,
         archived_by: None,
-        color: color.to_owned(),
-        default: false,
-        description,
-        id: render::id(id),
-        name: name.to_owned(),
-        node_id: render::node_id("Label", id),
-        url: request.urls().repo(&found.owner, &found.name).label(name),
     }
 }
 
@@ -200,7 +198,7 @@ fn label_patch(
     body: &Map<String, Value>,
     key: &str,
 ) -> Result<LabelPatch, ApiResponse> {
-    let current = super::catalog(found.repo(state))
+    let current = super::catalog(state, request, found)
         .get(key)
         .cloned()
         .ok_or_else(ApiResponse::not_found)?;
@@ -216,7 +214,7 @@ fn label_patch(
         }
     };
     let new_key = super::label_key(&name);
-    if new_key != key && super::catalog(found.repo(state)).contains_key(&new_key) {
+    if new_key != key && super::catalog(state, request, found).contains_key(&new_key) {
         return Err(ApiResponse::validation_failed(
             "Label",
             "name",
@@ -242,11 +240,14 @@ fn label_patch(
         }
     };
     let archiver = if archived == Some(true) {
-        Some(super::caller_user(
-            state,
-            request,
-            &request.caller.as_ref().expect("scoped").login,
-        )?)
+        Some(
+            super::caller_user(
+                state,
+                request,
+                &request.caller.as_ref().expect("scoped").login,
+            )?
+            .login,
+        )
     } else {
         None
     };
@@ -267,35 +268,28 @@ fn store_patch(
     key: &str,
     patch: LabelPatch,
 ) -> Result<types::Label, ApiResponse> {
-    let stored = found.repo_mut(state).labels.remove(key);
-    let mut label = match stored {
-        Some(label) => label,
-        None => super::catalog(found.repo(state))
+    let mut record = match found.repo(state).labels.get_name(key) {
+        Some(record) => record.clone(),
+        None => super::catalog(state, request, found)
             .remove(key)
+            .map(LabelRecord::from)
             .ok_or_else(ApiResponse::not_found)?,
     };
-    label.name.clone_from(&patch.name);
-    label.color = patch.color;
+    record.name.clone_from(&patch.name);
+    record.color = patch.color;
     if patch.description_set {
-        label.description = patch.description;
+        record.description = patch.description;
     }
-    apply_archive(&mut label, patch.archived, patch.archiver);
-    label.url = request
-        .urls()
-        .repo(&found.owner, &found.name)
-        .label(&label.name);
+    apply_archive(&mut record, patch.archived, patch.archiver);
+    let label = super::render_label(state, request, found, &record);
     let repo = found.repo_mut(state);
     rewrite_copies(repo, key, &label);
-    repo.labels
-        .insert(super::label_key(&label.name), label.clone());
+    repo.labels.remove_name(key);
+    repo.labels.insert(Name::new(&record.name), record);
     Ok(label)
 }
 
-fn apply_archive(
-    label: &mut types::Label,
-    archived: Option<bool>,
-    archiver: Option<types::SimpleUser>,
-) {
+fn apply_archive(label: &mut LabelRecord, archived: Option<bool>, archiver: Option<String>) {
     match archived {
         Some(true) if label.archived_at.is_none() => {
             label.archived_at = Some(crate::time::now_utc());

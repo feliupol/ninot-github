@@ -7,7 +7,7 @@ use super::issues::{label_from_issue_item, label_from_pull};
 use super::repos::find_repo;
 use crate::api::{ApiRequest, ApiResponse, ApiResult, paginate};
 use crate::operation::ops;
-use crate::state::{State, TimelineEvent, TimelineEventKind, lock};
+use crate::state::{NewTimelineEvent, State, TimelineEventKind, lock};
 use crate::types;
 use crate::webhooks::events::{self, Ctx};
 
@@ -224,7 +224,7 @@ impl Handler for ops::PullsUpdate {
         let now = crate::time::now_utc();
         data.updated_at = now;
         if let Some(kind) = transition {
-            pull.apply_event(TimelineEvent {
+            pull.apply_event(NewTimelineEvent {
                 id: event_id,
                 kind,
                 actor,
@@ -483,11 +483,7 @@ impl Handler for ops::IssuesListLabelsForRepo {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let state = lock(state);
         let found = find_repo(&state, request)?;
-        let repo = state
-            .account(&found.owner)
-            .and_then(|account| account.repo(&found.name))
-            .expect("find_repo found the repository");
-        let labels = super::issues::repository_labels(repo);
+        let labels = super::issues::repository_labels(&state, request, &found);
         Ok(paginate(request, &request.path, labels))
     }
 }
@@ -952,7 +948,7 @@ impl Handler for ops::PullsMerge {
             (merged_id, TimelineEventKind::Merged, Some(sha.clone())),
             (closed_id, TimelineEventKind::Closed, None),
         ] {
-            pull.apply_event(TimelineEvent {
+            pull.apply_event(NewTimelineEvent {
                 id,
                 kind,
                 actor: actor.clone(),
@@ -1233,7 +1229,7 @@ impl Handler for ops::PullsRequestReviewers {
                     if let Some(team) = &team {
                         added_teams.push(team.clone());
                     }
-                    pull.apply_event(TimelineEvent {
+                    pull.apply_event(NewTimelineEvent {
                         id,
                         kind: TimelineEventKind::ReviewRequested,
                         actor: actor.clone(),
@@ -1334,7 +1330,7 @@ impl Handler for ops::PullsRemoveRequestedReviewers {
         let removals = users.chain(teams).collect::<Vec<_>>();
         let now = crate::time::now_utc();
         for ((user, team), id) in removals.into_iter().zip(ids) {
-            pull.apply_event(TimelineEvent {
+            pull.apply_event(NewTimelineEvent {
                 id,
                 kind: TimelineEventKind::ReviewRequestRemoved,
                 actor: actor.clone(),

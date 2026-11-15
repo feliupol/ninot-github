@@ -179,18 +179,16 @@ fn every_event_payload_matches_its_schema() {
         let finished = render_run(ctx.state, &request, &finished);
         check_run::rerequested(&mut ctx, &finished).unwrap();
 
-        let run = {
+        let (run, job) = {
             let account = ctx.state.account("admin").unwrap();
             let repo = account.repo("tool").unwrap();
-            fixtures::seeded_workflow_run(
-                &request,
-                account,
-                repo,
-                fixtures::WorkflowRunSeed::default(),
+            let run = fixtures::seeded_workflow_run(fixtures::WorkflowRunSeed::default()).unwrap();
+            let job = fixtures::seeded_job(fixtures::JobSeed::default(), 0).unwrap();
+            (
+                crate::render::workflow_run(&request, account, repo, &run),
+                crate::render::workflow_job(&request, "admin", "tool", &run, &job),
             )
-            .unwrap()
         };
-        let job = fixtures::seeded_job(&request, &run, fixtures::JobSeed::default(), 0).unwrap();
         let mut queued_run = run.clone();
         queued_run.status = Some("queued".to_owned());
         queued_run.conclusion = None;

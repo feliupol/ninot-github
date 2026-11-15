@@ -9,20 +9,20 @@ pub struct IssueEvent {
     pub id: u64,
     /// What happened, named as the issue-event `event` field names it.
     pub kind: IssueEventKind,
-    /// Who did it.
-    pub actor: crate::types::SimpleUser,
+    /// Login of the account that did it.
+    pub actor: String,
     /// When it happened.
     pub created_at: DateTime<Utc>,
     /// The merge commit of `merged`, or the new head of `head_ref_force_pushed`.
     pub commit_id: Option<String>,
-    /// The user asked to review, for review-request events.
-    pub requested_reviewer: Option<crate::types::SimpleUser>,
-    /// The team asked to review, for review-request events.
-    pub requested_team: Option<crate::types::TeamSimple>,
+    /// Login of the user asked to review, for review-request events.
+    pub requested_reviewer: Option<String>,
+    /// Id of the repository owner's team asked to review, for review-request events.
+    pub requested_team: Option<u64>,
     /// The label of `labeled` and `unlabeled`.
     pub label: Option<IssueEventLabel>,
-    /// The user of `assigned` and `unassigned`.
-    pub assignee: Option<crate::types::SimpleUser>,
+    /// Login of the user of `assigned` and `unassigned`.
+    pub assignee: Option<String>,
     /// The milestone title of `milestoned` and `demilestoned`.
     pub milestone_title: Option<String>,
     /// The lock reason of `locked`. Absent reason is JSON null.
@@ -104,7 +104,7 @@ impl IssueEvent {
     pub(crate) fn new(
         id: u64,
         kind: IssueEventKind,
-        actor: crate::types::SimpleUser,
+        actor: String,
         created_at: DateTime<Utc>,
     ) -> Self {
         Self {

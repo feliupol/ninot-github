@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use super::{CheckRunRecord, CommitStatusRecord, Hook, IssueEvent, Release, State};
+use super::{CheckRunRecord, CommitStatusRecord, Hook, IssueEvent, Name, Release, State};
 use crate::api::{ApiResponse, Caller};
 use crate::time::now;
 use crate::types::{
@@ -38,21 +38,21 @@ pub struct Repo {
     pub pull_requests: BTreeMap<u64, PullRequest>,
     /// Issues by number.
     pub issues: BTreeMap<u64, Issue>,
-    /// Labels defined on the repository, keyed by lowercase name.
+    /// Labels defined on the repository, by name.
     ///
     /// Labels that only exist because an issue or pull request was seeded with them are not
     /// copied here. Reads merge this map with those copies.
-    pub labels: BTreeMap<String, crate::types::Label>,
+    pub labels: BTreeMap<Name, LabelRecord>,
     /// Milestones by their repository-local number.
     pub milestones: BTreeMap<u64, Milestone>,
     /// Workflow runs, ordered as the Actions API lists them.
-    pub workflow_runs: Vec<crate::types::WorkflowRun>,
+    pub workflow_runs: Vec<super::WorkflowRunRecord>,
     /// Jobs keyed by workflow run id.
-    pub workflow_jobs: BTreeMap<u64, Vec<crate::types::Job>>,
+    pub workflow_jobs: BTreeMap<u64, Vec<super::JobRecord>>,
     /// Plain-text workflow job logs, keyed by job id.
     pub workflow_job_logs: BTreeMap<u64, String>,
     /// Public key used by Actions secret clients, if configured by the fixture.
-    pub actions_public_key: Option<crate::types::ActionsPublicKey>,
+    pub actions_public_key: Option<ActionsPublicKey>,
     /// Encrypted Actions secret payloads, keyed by their case-sensitive name.
     pub actions_secrets: BTreeMap<String, StoredActionsSecret>,
     /// Check runs, oldest first. Fixture-seeded runs on different commits may share an id.
@@ -88,6 +88,53 @@ pub struct CheckSuiteRecord {
     pub updated_at: DateTime<Utc>,
     /// Rerequest forces queued with no conclusion until a run in the suite changes.
     pub rerequested: bool,
+}
+
+/// A label defined on a repository. Its URL is derived from the repository and name.
+#[derive(Clone, Debug)]
+pub struct LabelRecord {
+    /// Label id.
+    pub id: u64,
+    /// GraphQL node id; a label promoted from an issue copy keeps the copy's.
+    pub node_id: String,
+    /// Name, spelled as created. Unique among the repository's labels, ignoring case.
+    pub name: String,
+    /// Six lowercase hex digits without a leading `#`.
+    pub color: String,
+    /// Description, when one has been set.
+    pub description: Option<String>,
+    /// Whether GitHub created the label with the repository.
+    pub default: bool,
+    /// When the label was archived. Absent while it is not.
+    pub archived_at: Option<DateTime<Utc>>,
+    /// Login of the user who archived the label.
+    pub archived_by: Option<String>,
+}
+
+/// A label as an issue or pull request embeds it, as a record to store. The archiver is kept
+/// by login; the URL is dropped because records derive it.
+impl From<crate::types::Label> for LabelRecord {
+    fn from(label: crate::types::Label) -> Self {
+        Self {
+            id: u64::try_from(label.id).expect("label ids are non-negative"),
+            node_id: label.node_id,
+            name: label.name,
+            color: label.color,
+            description: label.description,
+            default: label.default,
+            archived_at: label.archived_at,
+            archived_by: label.archived_by.map(|user| user.login),
+        }
+    }
+}
+
+/// The key Actions secret clients encrypt with.
+#[derive(Clone, Debug)]
+pub struct ActionsPublicKey {
+    /// Identifier clients send back with each encrypted secret.
+    pub key_id: String,
+    /// Base64-encoded X25519 public key.
+    pub key: String,
 }
 
 /// Encrypted Actions secret data retained by the fake but never returned by REST reads.
@@ -222,6 +269,28 @@ pub struct TimelineEvent {
     pub id: u64,
     /// What happened.
     pub kind: TimelineEventKind,
+    /// Login of the account that did it.
+    pub actor: String,
+    /// When it happened.
+    pub created_at: DateTime<Utc>,
+    /// The merge commit of `merged`, or the new head of `head_ref_force_pushed`.
+    pub commit_id: Option<String>,
+    /// Login of the user asked to review, for review-request events.
+    pub requested_reviewer: Option<String>,
+    /// Id of the repository owner's team asked to review, for review-request events.
+    pub requested_team: Option<u64>,
+}
+
+/// A timeline event to apply, naming its people as the pull request's REST fields embed them.
+///
+/// [`PullRequest::apply_event`] copies them into `merged_by` and the requested reviewers and
+/// teams, and stores the event with references to them.
+#[derive(Clone, Debug)]
+pub struct NewTimelineEvent {
+    /// Event id, unique across the server.
+    pub id: u64,
+    /// What happened.
+    pub kind: TimelineEventKind,
     /// Who did it.
     pub actor: crate::types::SimpleUser,
     /// When it happened.
@@ -243,7 +312,7 @@ impl PullRequest {
     /// readying a non-draft, drafting a closed or draft pull request, closing or merging a closed
     /// one, merging a draft, reopening an open or merged one, a review request naming no reviewer, removing a
     /// request that was not made, or a force-push without its new head.
-    pub fn apply_event(&mut self, event: TimelineEvent) -> Result<(), String> {
+    pub fn apply_event(&mut self, event: NewTimelineEvent) -> Result<(), String> {
         let number = self.data.as_ref().map_or(0, |data| data.number);
         let data = self
             .data
@@ -332,7 +401,17 @@ impl PullRequest {
         if data.updated_at < event.created_at {
             data.updated_at = event.created_at;
         }
-        self.events.push(event);
+        self.events.push(TimelineEvent {
+            id: event.id,
+            kind: event.kind,
+            actor: event.actor.login,
+            created_at: event.created_at,
+            commit_id: event.commit_id,
+            requested_reviewer: event.requested_reviewer.map(|user| user.login),
+            requested_team: event
+                .requested_team
+                .map(|team| u64::try_from(team.id).expect("team ids are positive")),
+        });
         Ok(())
     }
 }

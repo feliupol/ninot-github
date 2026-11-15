@@ -12,7 +12,7 @@ use crate::api::{ApiRequest, ApiResponse, ApiResult};
 use crate::handlers::repos::{Found, find_repo};
 use crate::operation::ops;
 use crate::render;
-use crate::state::{Repo, State, lock};
+use crate::state::{State, lock};
 use crate::types;
 use crate::webhooks::events::{self, PayloadError};
 
@@ -31,8 +31,8 @@ impl Handler for ops::IssuesSetLabels {
             .map(|label| label.name.clone())
             .collect::<Vec<_>>();
         super::require_push(&found)?;
-        let labels = require_labels(found.repo(&state), &names, &current)?;
-        let catalog = super::catalog(found.repo(&state));
+        let labels = require_labels(&state, request, &found, &names, &current)?;
+        let catalog = super::catalog(&state, request, &found);
         let added: Vec<types::Label> = labels
             .iter()
             .filter(|label| {
@@ -88,7 +88,7 @@ impl Handler for ops::IssuesRemoveAllLabels {
             .collect::<Vec<_>>();
         super::require_push(&found)?;
         let actor = super::caller_user(&state, request, &caller.login)?;
-        let catalog = super::catalog(found.repo(&state));
+        let catalog = super::catalog(&state, request, &found);
         let removed: Vec<types::Label> = current
             .iter()
             .filter_map(|name| catalog.get(&super::label_key(name)).cloned())
@@ -132,7 +132,7 @@ impl Handler for ops::IssuesRemoveLabel {
             return Err(ApiResponse::not_found());
         }
         super::require_push(&found)?;
-        let removed = super::catalog(found.repo(&state))
+        let removed = super::catalog(&state, request, &found)
             .get(&key)
             .cloned()
             .into_iter()
@@ -142,18 +142,22 @@ impl Handler for ops::IssuesRemoveLabel {
         fire_label_diff(&mut state, request, &found, number, &[], &removed)?;
         let after = super::record::snapshot(found.repo(&state), number)?;
         super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
-        let repo = found.repo(&state);
-        Ok(ApiResponse::typed(200, &labels_named(repo, &remaining)))
+        Ok(ApiResponse::typed(
+            200,
+            &labels_named(&state, request, &found, &remaining),
+        ))
     }
 }
 
 /// Labels named in `names`, rejecting unknown labels and archived labels that are not already present.
 pub(super) fn require_labels(
-    repo: &Repo,
+    state: &State,
+    request: &ApiRequest,
+    found: &Found,
     names: &[String],
     already: &[String],
 ) -> Result<Vec<types::Label>, ApiResponse> {
-    let catalog = super::catalog(repo);
+    let catalog = super::catalog(state, request, found);
     let mut chosen = Vec::new();
     for name in names {
         let key = super::label_key(name);
@@ -283,8 +287,13 @@ fn fire_label_diff(
     Ok(())
 }
 
-fn labels_named(repo: &Repo, names: &[String]) -> Vec<types::Label> {
-    let catalog = super::catalog(repo);
+fn labels_named(
+    state: &State,
+    request: &ApiRequest,
+    found: &Found,
+    names: &[String],
+) -> Vec<types::Label> {
+    let catalog = super::catalog(state, request, found);
     names
         .iter()
         .filter_map(|name| catalog.get(&super::label_key(name)).cloned())

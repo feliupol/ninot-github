@@ -294,3 +294,108 @@ fn missing_issue_or_event_is_not_found() {
     assert_eq!(empty.status, 200, "{:?}", empty.body);
     assert_eq!(empty.body.as_array().unwrap().len(), 0);
 }
+
+#[test]
+fn issue_events_render_the_current_actor_and_team() {
+    let server = Server::start().unwrap();
+    server.add_org("acme", &["admin"]);
+    let repository = server
+        .create_repository("acme", "project", false, None, None, "main")
+        .unwrap();
+    let admin = common::Api::admin(&server);
+    let created = admin.post("/repos/acme/project/issues", json!({"title": "One"}));
+    assert_eq!(created.status, 201, "{:?}", created.body);
+    let closed = admin.patch("/repos/acme/project/issues/1", json!({"state": "closed"}));
+    assert_eq!(closed.status, 200, "{:?}", closed.body);
+    let pull = repository
+        .create_pull_request(
+            2,
+            PullRequestSeed {
+                created_at: SeedField::present("2026-05-01T00:00:00Z".to_owned()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    pull.create_timeline_event(TimelineEventSeed {
+        requested_team: SeedField::present(ninot_github::fixtures::TeamSeed {
+            slug: "reviewers".to_owned(),
+        }),
+        ..TimelineEventSeed {
+            event: "review_requested".to_owned(),
+            created_at: "2026-05-01T01:00:00Z".to_owned(),
+            ..Default::default()
+        }
+    })
+    .unwrap();
+
+    server
+        .user("admin")
+        .unwrap()
+        .set_name(Some("Ada".to_owned()));
+    let renamed = admin.patch("/orgs/acme/teams/reviewers", json!({"name": "Gatekeepers"}));
+    assert_eq!(renamed.status, 200, "{:?}", renamed.body);
+
+    let issue = admin.get("/repos/acme/project/issues/1/events");
+    assert_eq!(issue.status, 200, "{:?}", issue.body);
+    assert_eq!(issue.body[0]["actor"]["login"], "admin");
+    assert_eq!(issue.body[0]["actor"]["name"], "Ada");
+    let pull = admin.get("/repos/acme/project/issues/2/events");
+    assert_eq!(pull.status, 200, "{:?}", pull.body);
+    assert_eq!(pull.body[0]["requested_team"]["slug"], "gatekeepers");
+    let timeline = admin.get("/repos/acme/project/issues/2/timeline");
+    assert_eq!(timeline.status, 200, "{:?}", timeline.body);
+    assert_eq!(timeline.body[0]["requested_team"]["slug"], "gatekeepers");
+    assert_eq!(
+        timeline.body[0]["review_requester"],
+        pull.body[0]["review_requester"]
+    );
+
+    let deleted = admin.delete("/orgs/acme/teams/gatekeepers");
+    assert_eq!(deleted.status, 204, "{:?}", deleted.body);
+    let pull = admin.get("/repos/acme/project/issues/2/events");
+    assert!(
+        pull.body[0].get("requested_team").is_none(),
+        "{:?}",
+        pull.body
+    );
+    let timeline = admin.get("/repos/acme/project/issues/2/timeline");
+    assert!(
+        timeline.body[0]["requested_team"].is_null(),
+        "{:?}",
+        timeline.body
+    );
+}
+
+#[test]
+fn seeded_event_actors_render_from_their_account() {
+    let server = Server::start().unwrap();
+    let repository = server
+        .create_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+    let admin = common::Api::admin(&server);
+    let pull = repository
+        .create_pull_request(
+            1,
+            PullRequestSeed {
+                created_at: SeedField::present("2026-01-02T10:00:00Z".to_owned()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    pull.create_timeline_event(TimelineEventSeed {
+        event: "closed".to_owned(),
+        created_at: "2026-01-02T11:00:00Z".to_owned(),
+        actor: SeedField::present(UserSeed {
+            avatar_url: SeedField::present("https://example.test/a.png".to_owned()),
+            ..user("carol")
+        }),
+        ..Default::default()
+    })
+    .unwrap();
+
+    let avatar = format!("{}/avatars/carol", server.url());
+    let events = admin.get("/repos/admin/project/issues/1/events");
+    assert_eq!(events.body[0]["actor"]["avatar_url"], avatar.as_str());
+    let timeline = admin.get("/repos/admin/project/issues/1/timeline");
+    assert_eq!(timeline.body[0]["actor"]["avatar_url"], avatar.as_str());
+}

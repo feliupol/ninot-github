@@ -37,11 +37,18 @@ impl Handler for ops::ActionsGetRepoPublicKey {
         let repo = secret_repository(&state, request)?;
         let key = repo
             .actions_public_key
-            .clone()
+            .as_ref()
             .ok_or_else(ApiResponse::not_found)?;
         Ok(ApiResponse::typed(
             200,
-            &types::ActionsGetRepoPublicKeyResponse(key),
+            &types::ActionsGetRepoPublicKeyResponse(types::ActionsPublicKey {
+                key_id: key.key_id.clone(),
+                key: key.key.clone(),
+                id: None,
+                url: None,
+                title: None,
+                created_at: None,
+            }),
         ))
     }
 }

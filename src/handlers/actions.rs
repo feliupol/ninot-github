@@ -6,6 +6,7 @@ use super::Handler;
 use super::repos::find_repo;
 use crate::api::{ApiRequest, ApiResponse, ApiResult, paginate_with};
 use crate::operation::ops;
+use crate::render;
 use crate::state::{State, combined_state, latest_per_context, lock};
 use crate::types;
 
@@ -58,10 +59,8 @@ impl Handler for ops::ActionsListWorkflowRunsForRepo {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let state = lock(state);
         let found = find_repo(&state, request)?;
-        let repo = state
-            .account(&found.owner)
-            .and_then(|owner| owner.repo(&found.name))
-            .expect("repository exists");
+        let owner = state.account(&found.owner).expect("repository exists");
+        let repo = owner.repo(&found.name).expect("repository exists");
         let mut runs = repo
             .workflow_runs
             .iter()
@@ -79,12 +78,15 @@ impl Handler for ops::ActionsListWorkflowRunsForRepo {
                         .query("head_sha")
                         .is_none_or(|value| run.head_sha == value)
             })
-            .cloned()
             .collect::<Vec<_>>();
         // Newest first, as GitHub lists them.
         runs.sort_by_key(|run| std::cmp::Reverse((run.created_at, run.id)));
         let total_count = runs.len() as i64;
-        let (workflow_runs, link) = crate::api::page(request, &request.path, runs);
+        let (runs, link) = crate::api::page(request, &request.path, runs);
+        let workflow_runs = runs
+            .into_iter()
+            .map(|run| render::workflow_run(request, owner, repo, run))
+            .collect();
         let response = types::ActionsListWorkflowRunsForRepoResponse {
             total_count,
             workflow_runs,
@@ -101,23 +103,20 @@ impl Handler for ops::ActionsGetWorkflowRun {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let state = lock(state);
         let found = find_repo(&state, request)?;
-        let repo = state
-            .account(&found.owner)
-            .and_then(|owner| owner.repo(&found.name))
-            .expect("repository exists");
+        let owner = state.account(&found.owner).expect("repository exists");
+        let repo = owner.repo(&found.name).expect("repository exists");
         let id = request
             .param("run_id")
-            .parse::<i64>()
+            .parse::<u64>()
             .map_err(|_| ApiResponse::not_found())?;
         let run = repo
             .workflow_runs
             .iter()
             .find(|run| run.id == id)
-            .cloned()
             .ok_or_else(ApiResponse::not_found)?;
         Ok(ApiResponse::conditional_typed(
             request,
-            &types::ActionsGetWorkflowRunResponse(run),
+            &types::ActionsGetWorkflowRunResponse(render::workflow_run(request, owner, repo, run)),
         ))
     }
 }
@@ -140,7 +139,7 @@ fn rerun_workflow(state: &Mutex<State>, request: &ApiRequest, failed_only: bool)
     }
     let id = request
         .param("run_id")
-        .parse::<i64>()
+        .parse::<u64>()
         .map_err(|_| ApiResponse::not_found())?;
     let (run_snapshot, job_snapshots) = {
         let repo = state
@@ -155,10 +154,9 @@ fn rerun_workflow(state: &Mutex<State>, request: &ApiRequest, failed_only: bool)
         if run.status.as_deref() != Some("completed") {
             return Err(ApiResponse::error(409, "Workflow run is not completed"));
         }
-        let run_id = u64::try_from(id).map_err(|_| ApiResponse::not_found())?;
         let jobs = repo
             .workflow_jobs
-            .get_mut(&run_id)
+            .get_mut(&id)
             .ok_or_else(ApiResponse::not_found)?;
         let selected = jobs.iter_mut().filter(|job| {
             !failed_only
@@ -177,7 +175,7 @@ fn rerun_workflow(state: &Mutex<State>, request: &ApiRequest, failed_only: bool)
             job.status = types::JobStatus::Queued;
             job.conclusion = None;
             job.completed_at = None;
-            job.run_attempt = Some(run.run_attempt.unwrap_or(1).saturating_add(1));
+            job.run_attempt = run.run_attempt.saturating_add(1);
             for step in &mut job.steps {
                 step.status = types::JobStepsItemStatus::Queued;
                 step.conclusion = None;
@@ -188,8 +186,7 @@ fn rerun_workflow(state: &Mutex<State>, request: &ApiRequest, failed_only: bool)
         if failed_only && rerun_ids.is_empty() {
             return Err(ApiResponse::error(409, "Workflow run has no failed jobs"));
         }
-        let next_attempt = run.run_attempt.unwrap_or(1).saturating_add(1);
-        run.run_attempt = Some(next_attempt);
+        run.run_attempt = run.run_attempt.saturating_add(1);
         run.status = Some("queued".to_owned());
         run.conclusion = None;
         run.run_started_at = None;
@@ -202,10 +199,22 @@ fn rerun_workflow(state: &Mutex<State>, request: &ApiRequest, failed_only: bool)
             .collect::<Vec<_>>();
         (run_snapshot, job_snapshots)
     };
+    let (run, jobs) = {
+        let owner = state.account(&found.owner).expect("repository exists");
+        let repo = owner.repo(&found.name).expect("repository exists");
+        let jobs = job_snapshots
+            .iter()
+            .map(|job| render::workflow_job(request, &found.owner, &found.name, &run_snapshot, job))
+            .collect::<Vec<_>>();
+        (
+            render::workflow_run(request, owner, repo, &run_snapshot),
+            jobs,
+        )
+    };
     let mut ctx = crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
-    crate::webhooks::events::workflow_run::deliver(&mut ctx, &run_snapshot);
-    for job in &job_snapshots {
-        crate::webhooks::events::workflow_job::deliver(&mut ctx, &run_snapshot, job);
+    crate::webhooks::events::workflow_run::deliver(&mut ctx, &run);
+    for job in &jobs {
+        crate::webhooks::events::workflow_job::deliver(&mut ctx, &run, job);
     }
     if failed_only {
         Ok(ApiResponse::typed(
@@ -244,11 +253,18 @@ impl Handler for ops::ActionsListJobsForWorkflowRun {
             .param("run_id")
             .parse::<u64>()
             .map_err(|_| ApiResponse::not_found())?;
+        let run = repo
+            .workflow_runs
+            .iter()
+            .find(|run| run.id == id)
+            .ok_or_else(ApiResponse::not_found)?;
         let jobs = repo
             .workflow_jobs
             .get(&id)
-            .cloned()
-            .ok_or_else(ApiResponse::not_found)?;
+            .ok_or_else(ApiResponse::not_found)?
+            .iter()
+            .map(|job| render::workflow_job(request, &found.owner, &found.name, run, job))
+            .collect::<Vec<_>>();
         let response = types::ActionsListJobsForWorkflowRunResponse {
             total_count: jobs.len() as i64,
             jobs,
@@ -267,16 +283,29 @@ impl Handler for ops::ActionsGetJobForWorkflowRun {
             .expect("repository exists");
         let job_id = request
             .param("job_id")
-            .parse::<i64>()
+            .parse::<u64>()
             .map_err(|_| ApiResponse::not_found())?;
-        let job = repo
+        let (run_id, job) = repo
             .workflow_jobs
-            .values()
-            .flatten()
-            .find(|job| job.id == job_id)
-            .cloned()
+            .iter()
+            .find_map(|(run_id, jobs)| {
+                jobs.iter()
+                    .find(|job| job.id == job_id)
+                    .map(|job| (*run_id, job))
+            })
             .ok_or_else(ApiResponse::not_found)?;
-        let response = types::ActionsGetJobForWorkflowRunResponse(job);
+        let run = repo
+            .workflow_runs
+            .iter()
+            .find(|run| run.id == run_id)
+            .ok_or_else(ApiResponse::not_found)?;
+        let response = types::ActionsGetJobForWorkflowRunResponse(render::workflow_job(
+            request,
+            &found.owner,
+            &found.name,
+            run,
+            job,
+        ));
         Ok(ApiResponse::conditional_typed(request, &response))
     }
 }
@@ -317,11 +346,7 @@ impl Handler for ops::ActionsDownloadWorkflowRunLogs {
             .param("run_id")
             .parse::<u64>()
             .map_err(|_| ApiResponse::not_found())?;
-        if !repo
-            .workflow_runs
-            .iter()
-            .any(|run| u64::try_from(run.id).ok() == Some(run_id))
-        {
+        if !repo.workflow_runs.iter().any(|run| run.id == run_id) {
             return Err(ApiResponse::not_found());
         }
         let location = request

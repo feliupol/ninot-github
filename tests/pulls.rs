@@ -356,6 +356,47 @@ fn workflow_runs_jobs_and_commit_checks_share_repository_state() {
 }
 
 #[test]
+fn workflow_runs_render_the_current_repository() {
+    let server = Server::start().unwrap();
+    let repository = server
+        .create_repository("admin", "ci", false, None, None, "main")
+        .unwrap();
+    let api = common::Api::admin(&server);
+    repository
+        .create_workflow_run(
+            WorkflowRunSeed {
+                id: SeedField::present(42),
+                ..Default::default()
+            },
+            vec![JobSeed {
+                id: SeedField::present(91),
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+    let renamed = api.patch(
+        "/repos/admin/ci",
+        json!({"name": "pipeline", "description": "Builds"}),
+    );
+    assert_eq!(renamed.status, 200, "{:?}", renamed.body);
+
+    let run = api.get("/repos/admin/pipeline/actions/runs/42");
+    assert_eq!(run.status, 200, "{:?}", run.body);
+    assert_eq!(run.body["repository"]["full_name"], "admin/pipeline");
+    assert_eq!(run.body["repository"]["description"], "Builds");
+    assert_eq!(
+        run.body["url"],
+        format!("{}/repos/admin/pipeline/actions/runs/42", server.url())
+    );
+    let job = api.get("/repos/admin/pipeline/actions/jobs/91");
+    assert_eq!(job.status, 200, "{:?}", job.body);
+    assert_eq!(
+        job.body["run_url"],
+        format!("{}/repos/admin/pipeline/actions/runs/42", server.url())
+    );
+}
+
+#[test]
 fn issue_creation_persists_labels_and_comments_for_later_reads() {
     let server = Server::start().unwrap();
     server

@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use super::Handler;
 use crate::api::{ApiRequest, ApiResponse, ApiResult, paginate};
 use crate::operation::ops;
-use crate::state::{State, lock};
+use crate::state::{Gist, State, lock};
 use crate::types;
 
 impl Handler for ops::GistsCreate {
@@ -19,56 +19,28 @@ impl Handler for ops::GistsCreate {
 
         let mut state = lock(state);
         state.last_gist_id += 1;
-        let id = format!("ninotgist{:06}", state.last_gist_id);
-        let urls = request.urls().gist(&id);
-        let timestamp = crate::state::now();
-        let files = body
-            .files
-            .into_iter()
-            .map(|(filename, file)| {
-                let content = file.content;
-                let file = types::GistSimpleFilesValue {
-                    content: Some(content.clone()),
-                    encoding: "utf-8".to_owned(),
-                    filename: Some(filename.clone()),
-                    language: filename.ends_with(".rs").then(|| "Rust".to_owned()),
-                    raw_url: Some(urls.raw(&filename)),
-                    size: Some(i64::try_from(content.len()).expect("gist file size fits in i64")),
-                    truncated: Some(false),
-                    type_: Some("text/plain".to_owned()),
-                };
-                (filename, Some(file))
-            })
-            .collect();
-        let gist = types::GistSimple {
-            comments: Some(0),
-            comments_enabled: Some(true),
-            comments_url: Some(urls.comments()),
-            commits_url: Some(urls.commits()),
-            created_at: Some(timestamp.clone()),
+        let timestamp = crate::time::now_utc();
+        let gist = Gist {
+            number: state.last_gist_id,
             description: body.description,
-            files,
-            fork_of: None,
-            forks: Some(Vec::new()),
-            forks_url: Some(urls.forks()),
-            git_pull_url: Some(urls.git()),
-            git_push_url: Some(urls.git()),
-            history: Some(Vec::new()),
-            html_url: Some(urls.html.clone()),
-            id: Some(id.clone()),
-            node_id: Some(format!("G_{id}")),
-            owner: None,
-            public: Some(matches!(
+            public: matches!(
                 body.public,
                 Some(types::GistsCreateRequestPublic::Boolean(true))
-            )),
-            truncated: Some(false),
-            updated_at: Some(timestamp.clone()),
-            url: Some(urls.api.clone()),
-            user: None,
+            ),
+            files: body
+                .files
+                .into_iter()
+                .map(|(filename, file)| (filename, file.content))
+                .collect(),
+            created_at: timestamp,
+            updated_at: timestamp,
         };
-        state.gists.push(gist.clone());
-        Ok(ApiResponse::typed(201, &types::GistsCreateResponse(gist)))
+        let rendered = gist_simple(request, &gist);
+        state.gists.push(gist);
+        Ok(ApiResponse::typed(
+            201,
+            &types::GistsCreateResponse(rendered),
+        ))
     }
 }
 
@@ -76,70 +48,113 @@ impl Handler for ops::GistsList {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         request.require_caller()?;
         let state = lock(state);
-        let gists = state.gists.iter().map(base_gist).collect::<Vec<_>>();
+        let gists = state
+            .gists
+            .iter()
+            .map(|gist| base_gist(request, gist))
+            .collect::<Vec<_>>();
         Ok(paginate(request, &request.path, gists))
     }
 }
 
-fn base_gist(gist: &types::GistSimple) -> types::BaseGist {
+/// The gist as `gists/create` returns it, with file contents.
+fn gist_simple(request: &ApiRequest, gist: &Gist) -> types::GistSimple {
+    let id = gist.id();
+    let urls = request.urls().gist(&id);
+    let timestamp = crate::time::format(&gist.created_at);
+    let files = gist
+        .files
+        .iter()
+        .map(|(filename, content)| {
+            let file = types::GistSimpleFilesValue {
+                content: Some(content.clone()),
+                encoding: "utf-8".to_owned(),
+                filename: Some(filename.clone()),
+                language: language(filename),
+                raw_url: Some(urls.raw(filename)),
+                size: Some(size(content)),
+                truncated: Some(false),
+                type_: Some("text/plain".to_owned()),
+            };
+            (filename.clone(), Some(file))
+        })
+        .collect();
+    types::GistSimple {
+        comments: Some(0),
+        comments_enabled: Some(true),
+        comments_url: Some(urls.comments()),
+        commits_url: Some(urls.commits()),
+        created_at: Some(timestamp),
+        description: gist.description.clone(),
+        files,
+        fork_of: None,
+        forks: Some(Vec::new()),
+        forks_url: Some(urls.forks()),
+        git_pull_url: Some(urls.git()),
+        git_push_url: Some(urls.git()),
+        history: Some(Vec::new()),
+        html_url: Some(urls.html.clone()),
+        id: Some(id.clone()),
+        node_id: Some(format!("G_{id}")),
+        owner: None,
+        public: Some(gist.public),
+        truncated: Some(false),
+        updated_at: Some(crate::time::format(&gist.updated_at)),
+        url: Some(urls.api.clone()),
+        user: None,
+    }
+}
+
+/// The gist as `gists/list` returns it, without file contents.
+fn base_gist(request: &ApiRequest, gist: &Gist) -> types::BaseGist {
+    let id = gist.id();
+    let urls = request.urls().gist(&id);
     types::BaseGist {
-        comments: gist.comments.unwrap_or_default(),
-        comments_enabled: gist.comments_enabled,
-        comments_url: gist
-            .comments_url
-            .clone()
-            .expect("created gist has comments_url"),
-        commits_url: gist
-            .commits_url
-            .clone()
-            .expect("created gist has commits_url"),
-        created_at: crate::render::timestamp(
-            gist.created_at
-                .as_deref()
-                .expect("created gist has created_at"),
-        ),
+        comments: 0,
+        comments_enabled: Some(true),
+        comments_url: urls.comments(),
+        commits_url: urls.commits(),
+        created_at: gist.created_at,
         description: gist.description.clone(),
         files: gist
             .files
             .iter()
-            .map(|(filename, file)| {
-                let file = file.as_ref().expect("created gist has file metadata");
+            .map(|(filename, content)| {
                 (
                     filename.clone(),
                     types::BaseGistFilesValue {
-                        encoding: file.encoding.clone(),
-                        filename: file.filename.clone(),
-                        language: file.language.clone(),
-                        raw_url: file.raw_url.clone(),
-                        size: file.size,
-                        type_: file.type_.clone(),
+                        encoding: "utf-8".to_owned(),
+                        filename: Some(filename.clone()),
+                        language: language(filename),
+                        raw_url: Some(urls.raw(filename)),
+                        size: Some(size(content)),
+                        type_: Some("text/plain".to_owned()),
                     },
                 )
             })
             .collect(),
         forks: Vec::new(),
-        forks_url: gist.forks_url.clone().expect("created gist has forks_url"),
-        git_pull_url: gist
-            .git_pull_url
-            .clone()
-            .expect("created gist has git_pull_url"),
-        git_push_url: gist
-            .git_push_url
-            .clone()
-            .expect("created gist has git_push_url"),
+        forks_url: urls.forks(),
+        git_pull_url: urls.git(),
+        git_push_url: urls.git(),
         history: Vec::new(),
-        html_url: gist.html_url.clone().expect("created gist has html_url"),
-        id: gist.id.clone().expect("created gist has id"),
-        node_id: gist.node_id.clone().expect("created gist has node_id"),
-        owner: gist.owner.clone(),
-        public: gist.public.unwrap_or_default(),
-        truncated: gist.truncated,
-        updated_at: crate::render::timestamp(
-            gist.updated_at
-                .as_deref()
-                .expect("created gist has updated_at"),
-        ),
-        url: gist.url.clone().expect("created gist has url"),
+        html_url: urls.html.clone(),
+        node_id: format!("G_{id}"),
+        id,
+        owner: None,
+        public: gist.public,
+        truncated: Some(false),
+        updated_at: gist.updated_at,
+        url: urls.api,
         user: None,
     }
+}
+
+/// The language GitHub's linguist would report; only Rust is recognised.
+fn language(filename: &str) -> Option<String> {
+    filename.ends_with(".rs").then(|| "Rust".to_owned())
+}
+
+fn size(content: &str) -> i64 {
+    i64::try_from(content.len()).expect("gist file size fits in i64")
 }

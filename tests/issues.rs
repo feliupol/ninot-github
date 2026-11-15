@@ -753,6 +753,35 @@ fn issues_get_label() {
 }
 
 #[test]
+fn stored_labels_render_their_url_and_archiver_on_each_read() {
+    let server = Server::start().unwrap();
+    server
+        .create_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+    let admin = common::Api::admin(&server);
+    admin.post("/repos/admin/project/labels", json!({"name": "Bug"}));
+    let archived = admin.patch("/repos/admin/project/labels/bug", json!({"archived": true}));
+    assert_eq!(archived.status, 200, "{:?}", archived.body);
+    assert!(archived.body["archived_by"]["name"].is_null());
+
+    server
+        .user("admin")
+        .unwrap()
+        .set_name(Some("Ada".to_owned()));
+    let renamed = admin.patch("/repos/admin/project", json!({"name": "renamed"}));
+    assert_eq!(renamed.status, 200, "{:?}", renamed.body);
+
+    let label = admin.get("/repos/admin/renamed/labels/bug");
+    assert_eq!(label.status, 200, "{:?}", label.body);
+    assert_eq!(
+        label.body["url"],
+        format!("{}/repos/admin/renamed/labels/Bug", server.url())
+    );
+    assert_eq!(label.body["archived_by"]["login"], "admin");
+    assert_eq!(label.body["archived_by"]["name"], "Ada");
+}
+
+#[test]
 fn issues_update_label() {
     let server = Server::start().unwrap();
     server.add_user("bob");

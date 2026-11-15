@@ -552,7 +552,7 @@ impl Repository {
             &self.owner,
             &self.name,
             installation_id,
-            secrets_permission.map(crate::fixtures::ActionsSecretsPermission::as_api),
+            secrets_permission,
         );
         Ok(())
     }
@@ -580,13 +580,9 @@ impl Repository {
             .account_mut(&self.owner)
             .and_then(|account| account.repo_mut(&self.name))
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "repository does not exist"))?;
-        repo.actions_public_key = Some(crate::types::ActionsPublicKey {
+        repo.actions_public_key = Some(crate::state::ActionsPublicKey {
             key_id: seed.key_id,
             key: seed.key,
-            id: None,
-            url: None,
-            title: None,
-            created_at: None,
         });
         Ok(())
     }
@@ -777,20 +773,27 @@ impl Repository {
         let labels: Vec<String> = labels.iter().map(|label| (*label).to_owned()).collect();
         let scripts: Vec<String> = scripts.iter().map(|script| (*script).to_owned()).collect();
         let mut state = lock(&self.app.state);
-        let (run_id, id) =
-            state.queue_script_job(&request, &self.owner, &self.name, &labels, &scripts)?;
+        let (run_id, id) = state.queue_script_job(&self.owner, &self.name, &labels, &scripts)?;
         let (run, jobs) = {
             let repo = state
                 .account(&self.owner)
                 .and_then(|account| account.repo(&self.name))
                 .ok_or_else(|| not_found("repository does not exist"))?;
-            let run_key = i64::try_from(run_id).unwrap_or(i64::MAX);
-            let run = repo
-                .workflow_runs
-                .iter()
-                .find(|run| run.id == run_key)
-                .cloned();
-            let jobs = repo.workflow_jobs.get(&run_id).cloned().unwrap_or_default();
+            let account = state.account(&self.owner).expect("repository owner exists");
+            let run = repo.workflow_runs.iter().find(|run| run.id == run_id);
+            let jobs = run
+                .map(|run| {
+                    repo.workflow_jobs
+                        .get(&run_id)
+                        .into_iter()
+                        .flatten()
+                        .map(|job| {
+                            crate::render::workflow_job(&request, &self.owner, &self.name, run, job)
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let run = run.map(|run| crate::render::workflow_run(&request, account, repo, run));
             (run, jobs)
         };
         if let Some(run) = run {
@@ -813,28 +816,31 @@ impl Repository {
         self.ensure_running()?;
         let request = self.api_request();
         let mut state = lock(&self.app.state);
-        let run = {
+        let run = crate::fixtures::seeded_workflow_run(seed)?;
+        let run_id = run.id;
+        let jobs = jobs
+            .into_iter()
+            .enumerate()
+            .map(|(index, seed)| crate::fixtures::seeded_job(seed, index))
+            .collect::<io::Result<Vec<_>>>()?;
+        let (stored_run, stored_jobs) = {
             let account = state.account(&self.owner).ok_or_else(|| {
                 io::Error::new(io::ErrorKind::NotFound, "repository owner does not exist")
             })?;
             let repository = account.repo(&self.name).ok_or_else(|| {
                 io::Error::new(io::ErrorKind::NotFound, "repository does not exist")
             })?;
-            crate::fixtures::seeded_workflow_run(&request, account, repository, seed)?
-        };
-        let run_id = u64::try_from(run.id).map_err(|error| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("invalid workflow run id: {error}"),
+            let jobs = jobs
+                .iter()
+                .map(|job| {
+                    crate::render::workflow_job(&request, &self.owner, &self.name, &run, job)
+                })
+                .collect::<Vec<_>>();
+            (
+                crate::render::workflow_run(&request, account, repository, &run),
+                jobs,
             )
-        })?;
-        let jobs = jobs
-            .into_iter()
-            .enumerate()
-            .map(|(index, seed)| crate::fixtures::seeded_job(&request, &run, seed, index))
-            .collect::<io::Result<Vec<_>>>()?;
-        let stored_run = run.clone();
-        let stored_jobs = jobs.clone();
+        };
         state.add_workflow_run(&self.owner, &self.name, run, jobs);
         let mut ctx =
             crate::webhooks::events::Ctx::new(&mut state, &request, &self.owner, &self.name);
@@ -1214,7 +1220,7 @@ impl PullRequest {
             .and_then(|account| account.repo_mut(&self.repository.name))
             .and_then(|repo| repo.pull_requests.get_mut(&self.number))
             .expect("pull request checked above");
-        pull.apply_event(crate::state::TimelineEvent {
+        pull.apply_event(crate::state::NewTimelineEvent {
             id,
             kind,
             actor,

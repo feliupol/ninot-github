@@ -287,10 +287,7 @@ impl App {
                     else {
                         return into_response(ApiResponse::not_found(), caller.as_ref());
                     };
-                    let run_exists = repository
-                        .workflow_runs
-                        .iter()
-                        .any(|run| u64::try_from(run.id).ok() == Some(run_id));
+                    let run_exists = repository.workflow_runs.iter().any(|run| run.id == run_id);
                     let Some(jobs) = repository.workflow_jobs.get(&run_id) else {
                         return into_response(ApiResponse::not_found(), caller.as_ref());
                     };
@@ -299,11 +296,10 @@ impl App {
                     }
                     jobs.iter()
                         .filter_map(|job| {
-                            let id = u64::try_from(job.id).ok()?;
                             repository
                                 .workflow_job_logs
-                                .get(&id)
-                                .map(|text| (id, text.clone()))
+                                .get(&job.id)
+                                .map(|text| (job.id, text.clone()))
                         })
                         .collect::<Vec<_>>()
                 };

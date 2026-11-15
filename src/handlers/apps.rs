@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use super::Handler;
 use crate::api::{ApiRequest, ApiResponse, ApiResult, Caller};
 use crate::operation::ops;
-use crate::state::{State, lock};
+use crate::state::{ActionsSecretsPermission, State, lock};
 use crate::types;
 
 fn app_slug(app_id: u64) -> String {
@@ -16,7 +16,7 @@ fn app_slug(app_id: u64) -> String {
     }
 }
 
-fn app_permissions(secrets: Option<types::AppPermissionsSecrets>) -> types::AppPermissions {
+fn app_permissions(secrets: Option<ActionsSecretsPermission>) -> types::AppPermissions {
     types::AppPermissions {
         actions: None,
         administration: None,
@@ -67,7 +67,7 @@ fn app_permissions(secrets: Option<types::AppPermissionsSecrets>) -> types::AppP
         repository_hooks: None,
         repository_projects: None,
         secret_scanning_alerts: None,
-        secrets,
+        secrets: secrets.map(ActionsSecretsPermission::as_api),
         security_events: None,
         single_file: None,
         starring: None,
@@ -184,15 +184,15 @@ impl Handler for ops::AppsCreateInstallationAccessToken {
         let requested_secrets = body
             .permissions
             .as_ref()
-            .map(|permissions| permissions.secrets);
+            .map(|permissions| permissions.secrets.map(ActionsSecretsPermission::from_api));
         if let Some(Some(requested)) = requested_secrets {
             let granted = installation.secrets_permission;
             let within_grant = matches!(
                 (granted, requested),
                 (
-                    Some(types::AppPermissionsSecrets::Read),
-                    types::AppPermissionsSecrets::Read
-                ) | (Some(types::AppPermissionsSecrets::Write), _)
+                    Some(ActionsSecretsPermission::Read),
+                    ActionsSecretsPermission::Read
+                ) | (Some(ActionsSecretsPermission::Write), _)
             );
             // Source: <https://docs.github.com/en/rest/apps/apps#create-an-installation-access-token-for-an-app>
             if !within_grant {
@@ -215,14 +215,10 @@ impl Handler for ops::AppsCreateInstallationAccessToken {
             installation.owner, installation.repository
         );
         let app_scope = format!("github-app:{}", installation.app_id);
-        let secrets_scopes = match effective_secrets {
-            Some(types::AppPermissionsSecrets::Read) => vec!["actions:secrets:read".to_owned()],
-            Some(types::AppPermissionsSecrets::Write) => vec![
-                "actions:secrets:read".to_owned(),
-                "actions:secrets:write".to_owned(),
-            ],
-            None => Vec::new(),
-        };
+        let secrets_scopes = effective_secrets
+            .map_or(&[][..], ActionsSecretsPermission::token_scopes)
+            .iter()
+            .map(|scope| (*scope).to_owned());
         state.tokens.insert(
             token.clone(),
             Caller {
