@@ -87,7 +87,7 @@ pub(crate) fn integration(
     } else {
         format!("app-{app_id}")
     };
-    let html = format!("{}/apps/{slug}", request.web_url);
+    let html = request.urls().app_html(&slug);
     types::NullableIntegration {
         client_id: None,
         created_at: now,
@@ -259,13 +259,16 @@ pub(crate) fn render_suite(
     let latest = latest_of(runs.clone());
     let (status, conclusion) = rollup(&latest, suite.rerequested);
     let installed = app_installed(state, &found.owner, &found.name, suite.app_id);
-    let api = format!("{}/repos/{}/{}", request.api_url, found.owner, found.name);
+    let urls = request
+        .urls()
+        .repo(&found.owner, &found.name)
+        .check_suite(suite_id);
     let now = suite.created_at;
     Ok(types::CheckSuite {
         after: Some(suite.after),
         app: Some(integration(request, account, suite.app_id, now)),
         before: Some(suite.before),
-        check_runs_url: format!("{api}/check-suites/{suite_id}/check-runs"),
+        check_runs_url: urls.check_runs(),
         conclusion,
         created_at: Some(suite.created_at),
         head_branch: suite.head_branch,
@@ -280,7 +283,7 @@ pub(crate) fn render_suite(
         runs_rerequestable: Some(installed && !runs.is_empty()),
         status: Some(status),
         updated_at: Some(suite.updated_at),
-        url: Some(format!("{api}/check-suites/{suite_id}")),
+        url: Some(urls.api),
     })
 }
 

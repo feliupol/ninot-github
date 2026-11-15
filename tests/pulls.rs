@@ -109,6 +109,48 @@ fn pull_requests_reviews_and_comments_are_seeded_in_server_state() {
 }
 
 #[test]
+fn seeded_label_and_review_comment_urls_follow_github_shapes() {
+    let server = Server::start().unwrap();
+    let repository = server
+        .create_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+    let pull = repository
+        .create_pull_request(
+            9,
+            PullRequestSeed {
+                labels: SeedField::present(vec![LabelSeed {
+                    id: SeedField::present(1),
+                    name: SeedField::present("help wanted".to_owned()),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    pull.create_review_comment(ReviewCommentSeed {
+        body: SeedField::present("Guard this.".to_owned()),
+        ..Default::default()
+    })
+    .unwrap();
+    let base = server.url();
+    let api = common::Api::admin(&server);
+
+    let read = api.get("/repos/admin/project/pulls/9");
+    assert_eq!(read.status, 200, "{:?}", read.body);
+    assert_eq!(
+        read.body["labels"][0]["url"],
+        format!("{base}/repos/admin/project/labels/help%20wanted")
+    );
+
+    let comments = api.get("/repos/admin/project/pulls/9/comments");
+    assert_eq!(comments.status, 200, "{:?}", comments.body);
+    let id = comments.body[0]["id"].as_u64().unwrap();
+    let html = format!("{base}/admin/project/pull/9#discussion_r{id}");
+    assert_eq!(comments.body[0]["html_url"], html);
+    assert_eq!(comments.body[0]["_links"]["html"]["href"], html);
+}
+
+#[test]
 fn sync_routes_read_git_state_and_mutate_the_same_pull_request_world() {
     use std::path::Path;
 

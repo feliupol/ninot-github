@@ -20,6 +20,7 @@ use crate::operation::ops;
 use crate::render::{self, node_id};
 use crate::state::{PullRequest, Repo, State, TimelineEvent, TimelineEventKind, lock};
 use crate::types;
+use crate::urls::RepoUrls;
 
 /// The commits on a pull request, oldest first: those reachable from its head but not from its
 /// base. Empty when the repository has no git storage or git does not know the head.
@@ -185,13 +186,10 @@ fn entry(value: &impl serde::Serialize) -> Value {
 }
 
 /// A stored event as the timeline renders it.
-fn stored_event(api: &str, event: &TimelineEvent) -> Value {
+fn stored_event(repo: &RepoUrls, event: &TimelineEvent) -> Value {
     let id = render::id(event.id);
-    let url = format!("{api}/issues/events/{}", event.id);
-    let commit_url = event
-        .commit_id
-        .as_ref()
-        .map(|sha| format!("{api}/commits/{sha}"));
+    let url = repo.issue_event(event.id);
+    let commit_url = event.commit_id.as_ref().map(|sha| repo.commit(sha).api);
     let kind = event.kind.name();
     let node = node_id(kind, event.id);
     let created_at = crate::time::format(&event.created_at);
@@ -317,7 +315,8 @@ fn review_event(review: &types::PullRequestReview, head_sha: &str) -> Option<Val
 }
 
 /// A commit on the pull request as the timeline renders it.
-fn committed_event(api: &str, html: &str, commit: &git::Commit) -> Value {
+fn committed_event(repo: &RepoUrls, commit: &git::Commit) -> Value {
+    let urls = repo.commit(&commit.sha);
     let person = |signature: &git::Signature| types::TimelineCommittedEventAuthor {
         date: render::timestamp(&signature.date),
         email: signature.email.clone(),
@@ -332,24 +331,27 @@ fn committed_event(api: &str, html: &str, commit: &git::Commit) -> Value {
             name: committer.name,
         },
         event: Some("committed".to_owned()),
-        html_url: format!("{html}/commit/{}", commit.sha),
+        html_url: urls.html,
         message: commit.message.clone(),
-        node_id: render_commit(api, html, commit).node_id,
+        node_id: render_commit(repo, commit).node_id,
         parents: commit
             .parents
             .iter()
-            .map(|parent| types::TimelineCommittedEventParentsItem {
-                html_url: format!("{html}/commit/{parent}"),
-                sha: parent.clone(),
-                url: format!("{api}/git/commits/{parent}"),
+            .map(|parent| {
+                let urls = repo.commit(parent);
+                types::TimelineCommittedEventParentsItem {
+                    html_url: urls.html,
+                    sha: parent.clone(),
+                    url: urls.git,
+                }
             })
             .collect(),
         sha: commit.sha.clone(),
         tree: types::TimelineCommittedEventTree {
             sha: commit.tree.clone(),
-            url: format!("{api}/git/trees/{}", commit.tree),
+            url: repo.git_tree(&commit.tree),
         },
-        url: format!("{api}/git/commits/{}", commit.sha),
+        url: urls.git,
         verification: types::TimelineCommittedEventVerification {
             payload: None,
             reason: "unsigned".to_owned(),
@@ -364,7 +366,7 @@ fn committed_event(api: &str, html: &str, commit: &git::Commit) -> Value {
 ///
 /// `committed` events carry no timestamp; they are placed when their commit first reached the
 /// head branch, or at the pull request's creation for commits that were there from the start.
-fn pull_timeline(api: &str, html: &str, repo: &Repo, pull: &PullRequest) -> io::Result<Vec<Value>> {
+fn pull_timeline(urls: &RepoUrls, repo: &Repo, pull: &PullRequest) -> io::Result<Vec<Value>> {
     let Some(data) = &pull.data else {
         return Ok(Vec::new());
     };
@@ -381,13 +383,13 @@ fn pull_timeline(api: &str, html: &str, repo: &Repo, pull: &PullRequest) -> io::
             .copied()
             .unwrap_or(data.created_at);
         let order = i64::try_from(index).unwrap_or(i64::MAX) - i64::MAX;
-        rows.push((at, order, committed_event(api, html, commit)));
+        rows.push((at, order, committed_event(urls, commit)));
     }
     rows.extend(pull.events.iter().map(|event| {
         (
             event.created_at,
             render::id(event.id),
-            stored_event(api, event),
+            stored_event(urls, event),
         )
     }));
     rows.extend(
@@ -423,7 +425,7 @@ fn with_pull<T>(
     state: &Mutex<State>,
     request: &ApiRequest,
     parameter: &str,
-    read: impl FnOnce(&Repo, &PullRequest, &str, &str) -> Result<T, ApiResponse>,
+    read: impl FnOnce(&Repo, &PullRequest, &RepoUrls) -> Result<T, ApiResponse>,
 ) -> Result<T, ApiResponse> {
     let state = lock(state);
     let found = find_repo(&state, request)?;
@@ -439,9 +441,7 @@ fn with_pull<T>(
         .pull_requests
         .get(&number)
         .ok_or_else(ApiResponse::not_found)?;
-    let api = format!("{}/repos/{}/{}", request.api_url, found.owner, found.name);
-    let html = format!("{}/{}/{}", request.web_url, found.owner, found.name);
-    read(repo, pull, &api, &html)
+    read(repo, pull, &request.urls().repo(&found.owner, &found.name))
 }
 
 impl Handler for ops::IssuesListEventsForTimeline {
@@ -457,8 +457,7 @@ impl Handler for ops::IssuesListEventsForTimeline {
                 .param("issue_number")
                 .parse::<u64>()
                 .map_err(|_| ApiResponse::not_found())?;
-            let api = format!("{}/repos/{}/{}", request.api_url, found.owner, found.name);
-            let html = format!("{}/{}/{}", request.web_url, found.owner, found.name);
+            let urls = request.urls().repo(&found.owner, &found.name);
             if let Some(issue) = repo.issues.get(&number) {
                 issue.comments.iter().filter_map(comment_event).collect()
             } else {
@@ -466,7 +465,7 @@ impl Handler for ops::IssuesListEventsForTimeline {
                     .pull_requests
                     .get(&number)
                     .ok_or_else(ApiResponse::not_found)?;
-                pull_timeline(&api, &html, repo, pull).map_err(ApiResponse::internal)?
+                pull_timeline(&urls, repo, pull).map_err(ApiResponse::internal)?
             }
         };
         Ok(paginate(request, &request.path, rows))
@@ -475,7 +474,7 @@ impl Handler for ops::IssuesListEventsForTimeline {
 
 impl Handler for ops::PullsListCommits {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
-        let commits = with_pull(state, request, "pull_number", |repo, pull, api, html| {
+        let commits = with_pull(state, request, "pull_number", |repo, pull, urls| {
             let data = pull
                 .data
                 .as_ref()
@@ -483,7 +482,7 @@ impl Handler for ops::PullsListCommits {
             Ok(pull_commits(repo.git_dir.as_deref(), data)
                 .map_err(ApiResponse::internal)?
                 .iter()
-                .map(|commit| render_commit(api, html, commit))
+                .map(|commit| render_commit(urls, commit))
                 .collect::<Vec<_>>())
         })?;
         Ok(paginate(request, &request.path, commits))
@@ -492,7 +491,7 @@ impl Handler for ops::PullsListCommits {
 
 impl Handler for ops::PullsListFiles {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
-        let files = with_pull(state, request, "pull_number", |_, pull, _, _| {
+        let files = with_pull(state, request, "pull_number", |_, pull, _| {
             Ok(pull.files.clone())
         })?;
         Ok(paginate(request, &request.path, files))

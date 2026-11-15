@@ -60,6 +60,11 @@ impl ApiRequest {
         }
     }
 
+    /// Locations of resources under this request's base URLs.
+    pub fn urls(&self) -> crate::urls::Urls<'_> {
+        crate::urls::Urls::new(&self.api_url, &self.web_url)
+    }
+
     /// A path parameter the route guarantees.
     pub fn param(&self, name: &str) -> &str {
         self.params
@@ -388,11 +393,8 @@ pub fn page<T>(request: &ApiRequest, path: &str, items: Vec<T>) -> (Vec<T>, Opti
         }
         query.append_pair("per_page", &per_page.to_string());
         query.append_pair("page", &target.to_string());
-        format!(
-            "<{}{path}?{}>; rel=\"{rel}\"",
-            request.api_url,
-            query.finish()
-        )
+        let url = request.urls().api(&format!("{path}?{}", query.finish()));
+        format!("<{url}>; rel=\"{rel}\"")
     };
     let mut links = Vec::new();
     // Source: <https://docs.github.com/en/rest/using-the-rest-api/using-pagination-in-the-rest-api#using-link-headers>

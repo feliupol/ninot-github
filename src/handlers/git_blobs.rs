@@ -29,7 +29,7 @@ fn decode_content(content: &str, encoding: &str) -> Result<Vec<u8>, ApiResponse>
 }
 
 fn blob_url(request: &ApiRequest, located: &super::git_store::Located, sha: &str) -> String {
-    format!("{}/git/blobs/{sha}", located.api(request))
+    located.urls(request).git_object("blobs", sha)
 }
 
 impl Handler for ops::GitCreateBlob {

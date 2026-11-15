@@ -15,7 +15,7 @@ use crate::state::{State, lock};
 use crate::types;
 
 fn commit_url(request: &ApiRequest, located: &super::git_store::Located, sha: &str) -> String {
-    format!("{}/git/commits/{sha}", located.api(request))
+    located.urls(request).commit(sha).git
 }
 
 fn render_git_commit(
@@ -23,29 +23,32 @@ fn render_git_commit(
     located: &super::git_store::Located,
     commit: &ninot_common::git::Commit,
 ) -> types::GitCommit {
-    let api = located.api(request);
-    let html = located.html(request);
+    let repo = located.urls(request);
+    let urls = repo.commit(&commit.sha);
     types::GitCommit {
         author: git_user_from_signature(&commit.author),
         committer: git_committer_from_signature(&commit.committer),
-        html_url: format!("{html}/commit/{}", commit.sha),
+        html_url: urls.html,
         message: commit.message.clone(),
         node_id: object_node_id("Commit", &commit.sha),
         parents: commit
             .parents
             .iter()
-            .map(|parent| types::GitCommitParentsItem {
-                html_url: format!("{html}/commit/{parent}"),
-                sha: parent.clone(),
-                url: format!("{api}/git/commits/{parent}"),
+            .map(|parent| {
+                let urls = repo.commit(parent);
+                types::GitCommitParentsItem {
+                    html_url: urls.html,
+                    sha: parent.clone(),
+                    url: urls.git,
+                }
             })
             .collect(),
         sha: commit.sha.clone(),
         tree: types::GitCommitTree {
             sha: commit.tree.clone(),
-            url: format!("{api}/git/trees/{}", commit.tree),
+            url: repo.git_tree(&commit.tree),
         },
-        url: format!("{api}/git/commits/{}", commit.sha),
+        url: urls.git,
         verification: unsigned_commit_verification(),
     }
 }

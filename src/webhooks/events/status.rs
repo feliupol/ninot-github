@@ -1,5 +1,6 @@
 //! The `status` event.
 
+use crate::urls::RepoUrls;
 use serde_json::{Value, json};
 
 use super::{Ctx, stamp};
@@ -16,14 +17,7 @@ pub(crate) fn commit_status(ctx: &mut Ctx, sha: &str, status: &types::Status) {
     let Some(sender) = ctx.sender_value(None) else {
         return;
     };
-    let api = repository
-        .get("url")
-        .and_then(Value::as_str)
-        .unwrap_or("https://api.github.com/repos/unknown/unknown");
-    let html = repository
-        .get("html_url")
-        .and_then(Value::as_str)
-        .unwrap_or("https://github.com/unknown/unknown");
+    let urls = ctx.urls();
     ctx.enqueue(
         "status",
         "status-event",
@@ -35,8 +29,8 @@ pub(crate) fn commit_status(ctx: &mut Ctx, sha: &str, status: &types::Status) {
             "context": status.context,
             "description": status.description,
             "state": status.state.to_ascii_lowercase(),
-            "commit": commit_object(ctx, sha, api, html),
-            "branches": branches(ctx, sha, api),
+            "commit": commit_object(ctx, sha, &urls),
+            "branches": branches(ctx, sha, &urls),
             "created_at": status.created_at,
             "updated_at": status.updated_at,
             "repository": repository,
@@ -45,7 +39,8 @@ pub(crate) fn commit_status(ctx: &mut Ctx, sha: &str, status: &types::Status) {
     );
 }
 
-fn commit_object(ctx: &Ctx, sha: &str, api: &str, html: &str) -> Value {
+fn commit_object(ctx: &Ctx, sha: &str, repo: &RepoUrls) -> Value {
+    let urls = repo.commit(sha);
     let commit = ctx
         .git_dir()
         .and_then(|dir| ninot_common::git::commit(&dir, sha).ok());
@@ -72,8 +67,8 @@ fn commit_object(ctx: &Ctx, sha: &str, api: &str, html: &str) -> Value {
             "author": author,
             "committer": committer,
             "message": message,
-            "tree": {"sha": tree, "url": format!("{api}/git/trees/{tree}")},
-            "url": format!("{api}/git/commits/{sha}"),
+            "tree": {"sha": tree, "url": repo.git_tree(&tree)},
+            "url": urls.git,
             "comment_count": 0,
             "verification": {
                 "verified": false,
@@ -82,15 +77,15 @@ fn commit_object(ctx: &Ctx, sha: &str, api: &str, html: &str) -> Value {
                 "payload": Value::Null,
             }
         },
-        "url": format!("{api}/commits/{sha}"),
-        "html_url": format!("{html}/commit/{sha}"),
-        "comments_url": format!("{api}/commits/{sha}/comments"),
+        "url": urls.api,
+        "html_url": urls.html,
+        "comments_url": urls.comments(),
         "author": Value::Null,
         "committer": Value::Null,
         "parents": parents.iter().map(|parent| json!({
             "sha": parent,
-            "url": format!("{api}/commits/{parent}"),
-            "html_url": format!("{html}/commit/{parent}"),
+            "url": repo.commit(parent).api,
+            "html_url": repo.commit(parent).html,
         })).collect::<Vec<_>>(),
     })
 }
@@ -111,7 +106,7 @@ fn person_stub() -> Value {
     })
 }
 
-fn branches(ctx: &Ctx, sha: &str, api: &str) -> Value {
+fn branches(ctx: &Ctx, sha: &str, repo: &RepoUrls) -> Value {
     let Some(dir) = ctx.git_dir() else {
         return Value::Array(Vec::new());
     };
@@ -130,7 +125,7 @@ fn branches(ctx: &Ctx, sha: &str, api: &str) -> Value {
                     .to_owned();
                 json!({
                     "name": name,
-                    "commit": {"sha": reference.sha, "url": format!("{api}/commits/{}", reference.sha)},
+                    "commit": {"sha": reference.sha, "url": repo.commit(&reference.sha).api},
                     "protected": false,
                 })
             })

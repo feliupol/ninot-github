@@ -31,24 +31,18 @@ fn deliver_from_run(ctx: &mut Ctx, action: &str, check: &types::CheckRun) {
         return;
     };
     let now = crate::time::now();
-    let mut suite = check_run::suite_payload(check, &repository, &sender, &now);
+    let mut suite = check_run::suite_payload(check, &ctx.urls(), &sender, &now);
     let id = suite.get("id").and_then(Value::as_i64).unwrap_or(1);
     let sha = suite
         .get("head_sha")
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_owned();
-    let repo_url = repository
-        .get("url")
-        .and_then(Value::as_str)
-        .unwrap_or("https://api.github.com/repos/unknown/unknown");
+    let urls = ctx.urls().check_suite(id);
     if let Some(object) = suite.as_object_mut() {
         object.insert("node_id".to_owned(), Value::from(format!("CS_{id}")));
         object.insert("latest_check_runs_count".to_owned(), Value::from(1));
-        object.insert(
-            "check_runs_url".to_owned(),
-            Value::from(format!("{repo_url}/check-suites/{id}/check-runs")),
-        );
+        object.insert("check_runs_url".to_owned(), Value::from(urls.check_runs()));
         object.insert("head_commit".to_owned(), commit_simple(ctx, &sha));
     }
     enqueue(ctx, action, suite, repository, sender);

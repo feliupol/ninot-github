@@ -20,8 +20,7 @@ impl Handler for ops::GistsCreate {
         let mut state = lock(state);
         state.last_gist_id += 1;
         let id = format!("ninotgist{:06}", state.last_gist_id);
-        let api = request.api_url.trim_end_matches('/');
-        let web = request.web_url.trim_end_matches('/');
+        let urls = request.urls().gist(&id);
         let timestamp = crate::state::now();
         let files = body
             .files
@@ -33,7 +32,7 @@ impl Handler for ops::GistsCreate {
                     encoding: "utf-8".to_owned(),
                     filename: Some(filename.clone()),
                     language: filename.ends_with(".rs").then(|| "Rust".to_owned()),
-                    raw_url: Some(format!("{web}/raw/{id}/{filename}")),
+                    raw_url: Some(urls.raw(&filename)),
                     size: Some(i64::try_from(content.len()).expect("gist file size fits in i64")),
                     truncated: Some(false),
                     type_: Some("text/plain".to_owned()),
@@ -44,18 +43,18 @@ impl Handler for ops::GistsCreate {
         let gist = types::GistSimple {
             comments: Some(0),
             comments_enabled: Some(true),
-            comments_url: Some(format!("{api}/gists/{id}/comments")),
-            commits_url: Some(format!("{api}/gists/{id}/commits")),
+            comments_url: Some(urls.comments()),
+            commits_url: Some(urls.commits()),
             created_at: Some(timestamp.clone()),
             description: body.description,
             files,
             fork_of: None,
             forks: Some(Vec::new()),
-            forks_url: Some(format!("{api}/gists/{id}/forks")),
-            git_pull_url: Some(format!("https://gist.github.test/{id}.git")),
-            git_push_url: Some(format!("https://gist.github.test/{id}.git")),
+            forks_url: Some(urls.forks()),
+            git_pull_url: Some(urls.git()),
+            git_push_url: Some(urls.git()),
             history: Some(Vec::new()),
-            html_url: Some(format!("{web}/gist/{id}")),
+            html_url: Some(urls.html.clone()),
             id: Some(id.clone()),
             node_id: Some(format!("G_{id}")),
             owner: None,
@@ -65,7 +64,7 @@ impl Handler for ops::GistsCreate {
             )),
             truncated: Some(false),
             updated_at: Some(timestamp.clone()),
-            url: Some(format!("{api}/gists/{id}")),
+            url: Some(urls.api.clone()),
             user: None,
         };
         state.gists.push(gist.clone());

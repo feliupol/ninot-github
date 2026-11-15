@@ -34,13 +34,10 @@ fn render_asset(
     release: &Release,
     asset: &Asset,
 ) -> types::ReleaseAsset {
-    let api = format!("{}/repos/{}/{}", request.api_url, found.owner, found.name);
+    let repo = request.urls().repo(&found.owner, &found.name);
     let created = render::timestamp(&asset.created_at);
     types::ReleaseAsset {
-        browser_download_url: format!(
-            "{}/{}/{}/releases/download/{}/{}",
-            request.web_url, found.owner, found.name, release.tag_name, asset.name
-        ),
+        browser_download_url: repo.release_download(&release.tag_name, &asset.name),
         content_type: asset.content_type.clone(),
         created_at: created,
         digest: Some(asset.digest.clone()),
@@ -55,7 +52,7 @@ fn render_asset(
         uploader: state
             .account(&asset.uploader)
             .map(|account| render::nullable_simple_user(request, account)),
-        url: format!("{api}/releases/assets/{}", asset.id),
+        url: repo.release_asset(asset.id),
     }
 }
 
@@ -65,8 +62,8 @@ fn render_release(
     found: &Found,
     release: &Release,
 ) -> types::Release {
-    let api = format!("{}/repos/{}/{}", request.api_url, found.owner, found.name);
-    let html = format!("{}/{}/{}", request.web_url, found.owner, found.name);
+    let repo = request.urls().repo(&found.owner, &found.name);
+    let urls = repo.release(release.id, &release.tag_name);
     let author = state.account(&release.author).unwrap();
     types::Release {
         assets: release
@@ -74,7 +71,7 @@ fn render_release(
             .iter()
             .map(|asset| render_asset(state, request, found, release, asset))
             .collect(),
-        assets_url: format!("{api}/releases/{}/assets", release.id),
+        assets_url: urls.assets(),
         author: render::simple_user(request, author),
         body: release.body.clone(),
         body_html: None,
@@ -82,7 +79,7 @@ fn render_release(
         created_at: render::timestamp(&release.created_at),
         discussion_url: None,
         draft: release.draft,
-        html_url: format!("{html}/releases/tag/{}", release.tag_name),
+        html_url: urls.html,
         id: render::id(release.id),
         immutable: Some(false),
         mentions_count: None,
@@ -92,15 +89,12 @@ fn render_release(
         published_at: release.published_at.as_deref().map(render::timestamp),
         reactions: None,
         tag_name: release.tag_name.clone(),
-        tarball_url: Some(format!("{api}/tarball/{}", release.tag_name)),
+        tarball_url: Some(repo.tarball(&release.tag_name)),
         target_commitish: release.target_commitish.clone(),
         updated_at: None,
-        upload_url: format!(
-            "{}/api/uploads/repos/{}/{}/releases/{}/assets{{?name,label}}",
-            request.web_url, found.owner, found.name, release.id
-        ),
-        url: format!("{api}/releases/{}", release.id),
-        zipball_url: Some(format!("{api}/zipball/{}", release.tag_name)),
+        upload_url: urls.upload,
+        url: urls.api,
+        zipball_url: Some(repo.zipball(&release.tag_name)),
     }
 }
 

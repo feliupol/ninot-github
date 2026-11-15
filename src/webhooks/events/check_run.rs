@@ -1,5 +1,6 @@
 //! The `check_run` event.
 
+use crate::urls::RepoUrls;
 use serde_json::{Value, json};
 
 use super::{Ctx, json_of, stub_app};
@@ -36,7 +37,7 @@ fn deliver(ctx: &mut Ctx, action: &str, check: &types::CheckRun) {
         &format!("check_run-{action}"),
         json!({
             "action": action,
-            "check_run": prepare(check, &repository, &sender, &now),
+            "check_run": prepare(check, &ctx.urls(), &sender, &now),
             "repository": repository,
             "sender": sender,
         }),
@@ -46,7 +47,7 @@ fn deliver(ctx: &mut Ctx, action: &str, check: &types::CheckRun) {
 /// The check suite object nested in a check run, and the base of a `check_suite` event.
 pub(crate) fn suite_payload(
     check: &types::CheckRun,
-    repository: &Value,
+    repo: &RepoUrls,
     sender: &Value,
     now: &str,
 ) -> Value {
@@ -69,10 +70,6 @@ pub(crate) fn suite_payload(
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_owned();
-    let repo_url = repository
-        .get("url")
-        .and_then(Value::as_str)
-        .unwrap_or("https://api.github.com/repos/unknown/unknown");
     let app = app_value(&value, sender, now);
     json!({
         "id": id,
@@ -80,7 +77,7 @@ pub(crate) fn suite_payload(
         "head_sha": head_sha,
         "status": status,
         "conclusion": conclusion,
-        "url": format!("{repo_url}/check-suites/{id}"),
+        "url": repo.check_suite(id).api,
         "before": Value::Null,
         "after": Value::Null,
         "pull_requests": value.get("pull_requests").cloned().filter(Value::is_array).unwrap_or_else(|| Value::Array(Vec::new())),
@@ -90,9 +87,9 @@ pub(crate) fn suite_payload(
     })
 }
 
-fn prepare(check: &types::CheckRun, repository: &Value, sender: &Value, now: &str) -> Value {
+fn prepare(check: &types::CheckRun, repo: &RepoUrls, sender: &Value, now: &str) -> Value {
     let mut value = json_of(check);
-    let suite = suite_payload(check, repository, sender, now);
+    let suite = suite_payload(check, repo, sender, now);
     let app = app_value(&value, sender, now);
     let Some(object) = value.as_object_mut() else {
         return value;

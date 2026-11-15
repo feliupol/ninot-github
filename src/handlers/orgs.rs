@@ -46,8 +46,10 @@ impl Handler for ops::OrgsList {
             Some(last) if more => response.with_header(
                 "link",
                 format!(
-                    "<{}/organizations?per_page={per_page}&since={last}>; rel=\"next\"",
-                    request.api_url
+                    "<{}>; rel=\"next\"",
+                    request
+                        .urls()
+                        .api(&format!("/organizations?per_page={per_page}&since={last}"))
                 ),
             ),
             _ => response,

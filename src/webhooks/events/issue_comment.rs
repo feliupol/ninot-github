@@ -1,5 +1,6 @@
 //! The `issue_comment` event.
 
+use crate::urls::RepoUrls;
 use serde_json::{Value, json};
 
 use super::{Ctx, empty_reactions, json_of, rename_links};
@@ -36,7 +37,7 @@ fn deliver(ctx: &mut Ctx, action: &str, number: u64, comment: &types::IssueComme
     let Some(sender) = ctx.sender_value(None) else {
         return;
     };
-    let Some(issue) = issue_value(ctx, number, &repository) else {
+    let Some(issue) = issue_value(ctx, number) else {
         return;
     };
     let mut payload = json!({
@@ -52,27 +53,24 @@ fn deliver(ctx: &mut Ctx, action: &str, number: u64, comment: &types::IssueComme
     ctx.enqueue("issue_comment", &format!("issue_comment-{action}"), payload);
 }
 
-fn issue_value(ctx: &Ctx, number: u64, repository: &Value) -> Option<Value> {
+fn issue_value(ctx: &Ctx, number: u64) -> Option<Value> {
     let repo = ctx.state.account(ctx.owner)?.repo(ctx.name)?;
     if let Some(issue) = repo.issues.get(&number) {
         return Some(super::issues::issue_json(&issue.data));
     }
     let pull = repo.pull_requests.get(&number)?.data.as_ref()?;
-    let api = repository
-        .get("url")
-        .and_then(Value::as_str)
-        .unwrap_or("https://api.github.com/repos/unknown/unknown");
-    Some(issue_from_pull(pull, api))
+    Some(issue_from_pull(pull, &ctx.urls()))
 }
 
-fn issue_from_pull(pull: &types::PullRequest, api: &str) -> Value {
+fn issue_from_pull(pull: &types::PullRequest, repo: &RepoUrls) -> Value {
     let number = pull.number;
+    let issue = repo.issue(number.unsigned_abs());
     json!({
         "url": pull.issue_url,
-        "repository_url": api,
-        "labels_url": format!("{api}/issues/{number}/labels{{/name}}"),
+        "repository_url": repo.api,
+        "labels_url": issue.labels(),
         "comments_url": pull.comments_url,
-        "events_url": format!("{api}/issues/{number}/events"),
+        "events_url": issue.events(),
         "html_url": pull.html_url,
         "id": pull.id,
         "node_id": pull.node_id,

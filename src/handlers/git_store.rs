@@ -23,20 +23,9 @@ pub(crate) struct Located {
 }
 
 impl Located {
-    /// REST collection URL of this repository, such as `http://host/repos/o/r`.
-    pub(crate) fn api(&self, request: &ApiRequest) -> String {
-        format!(
-            "{}/repos/{}/{}",
-            request.api_url, self.found.owner, self.found.name
-        )
-    }
-
-    /// HTML URL of this repository, such as `http://host/o/r`.
-    pub(crate) fn html(&self, request: &ApiRequest) -> String {
-        format!(
-            "{}/{}/{}",
-            request.web_url, self.found.owner, self.found.name
-        )
+    /// Locations of this repository and its objects.
+    pub(crate) fn urls(&self, request: &ApiRequest) -> crate::urls::RepoUrls {
+        request.urls().repo(&self.found.owner, &self.found.name)
     }
 }
 

@@ -180,7 +180,6 @@ fn new_label(
     description: Option<String>,
 ) -> types::Label {
     let id = state.next_id();
-    let api = format!("{}/repos/{}/{}", request.api_url, found.owner, found.name);
     types::Label {
         archived_at: None,
         archived_by: None,
@@ -190,7 +189,7 @@ fn new_label(
         id: render::id(id),
         name: name.to_owned(),
         node_id: render::node_id("Label", id),
-        url: super::label_api_url(&api, name),
+        url: request.urls().repo(&found.owner, &found.name).label(name),
     }
 }
 
@@ -281,8 +280,10 @@ fn store_patch(
         label.description = patch.description;
     }
     apply_archive(&mut label, patch.archived, patch.archiver);
-    let api = format!("{}/repos/{}/{}", request.api_url, found.owner, found.name);
-    label.url = super::label_api_url(&api, &label.name);
+    label.url = request
+        .urls()
+        .repo(&found.owner, &found.name)
+        .label(&label.name);
     let repo = found.repo_mut(state);
     rewrite_copies(repo, key, &label);
     repo.labels

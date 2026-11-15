@@ -372,6 +372,11 @@ impl Repository {
         ApiRequest::for_urls(&self.server_url, None)
     }
 
+    /// Locations of this repository, under the base URL fixtures render with.
+    fn urls(&self) -> crate::urls::RepoUrls {
+        crate::urls::Urls::new(&self.server_url, &self.server_url).repo(&self.owner, &self.name)
+    }
+
     /// Returns the fixture handle for a commit SHA in this repository.
     pub fn commit(&self, sha: &str) -> io::Result<Commit> {
         self.ensure_running()?;
@@ -892,14 +897,7 @@ impl PullRequest {
     /// Adds a review to this pull request.
     pub fn create_review(&self, seed: crate::fixtures::ReviewSeed) -> io::Result<Review> {
         self.repository.ensure_running()?;
-        let api = format!(
-            "{}/repos/{}/{}",
-            self.repository.server_url, self.repository.owner, self.repository.name
-        );
-        let web = format!(
-            "{}/{}/{}",
-            self.repository.server_url, self.repository.owner, self.repository.name
-        );
+        let urls = self.repository.urls().pull(self.number);
         let mut state = lock(&self.repository.app.state);
         require_pull_request(&state, &self.repository, self.number)?;
         let user = seeded_nullable_user(&mut state, &self.repository, seed.user)?;
@@ -941,18 +939,18 @@ impl PullRequest {
             body_html: None,
             body_text: None,
             commit_id: None,
-            html_url: format!("{web}/pull/{}#pullrequestreview-{id}", self.number),
+            html_url: urls.review_html(id),
             id,
             links: types::PullRequestReviewLinks {
                 html: types::PullRequestReviewLinksHtml {
-                    href: format!("{web}/pull/{}#pullrequestreview-{id}", self.number),
+                    href: urls.review_html(id),
                 },
                 pull_request: types::PullRequestReviewLinksPullRequest {
-                    href: format!("{api}/pulls/{}", self.number),
+                    href: urls.api.clone(),
                 },
             },
             node_id: crate::render::node_id("PullRequestReview", global_id),
-            pull_request_url: format!("{api}/pulls/{}", self.number),
+            pull_request_url: urls.api.clone(),
             state: "COMMENTED".to_owned(),
             submitted_at: Some(crate::fixtures::parse_timestamp(
                 &created,
@@ -1608,14 +1606,7 @@ fn create_issue_comment(
     seed: crate::fixtures::IssueCommentSeed,
 ) -> io::Result<()> {
     repository.ensure_running()?;
-    let api = format!(
-        "{}/repos/{}/{}",
-        repository.server_url, repository.owner, repository.name
-    );
-    let web = format!(
-        "{}/{}/{}",
-        repository.server_url, repository.owner, repository.name
-    );
+    let repo_urls = repository.urls();
     let mut state = lock(&repository.app.state);
     require_repository(&state, &repository.owner, &repository.name)?;
     let repo = state
@@ -1639,16 +1630,16 @@ fn create_issue_comment(
         body_html: None,
         body_text: None,
         created_at: timestamp,
-        html_url: format!("{web}/pull/{number}#issuecomment-{id}"),
+        html_url: repo_urls.pull(number).comment_html(id),
         id,
-        issue_url: format!("{api}/issues/{number}"),
+        issue_url: repo_urls.issue(number).api,
         minimized: None,
         node_id: crate::render::node_id("IssueComment", global_id),
         performed_via_github_app: None,
         pin: None,
         reactions: None,
         updated_at: crate::fixtures::parse_timestamp(&now, "issue comment updated_at")?,
-        url: format!("{api}/issues/comments/{id}"),
+        url: repo_urls.issue_comment(id),
         user,
     };
     seed.body
@@ -1677,14 +1668,8 @@ fn create_review_comment(
     seed: crate::fixtures::ReviewCommentSeed,
 ) -> io::Result<()> {
     repository.ensure_running()?;
-    let api = format!(
-        "{}/repos/{}/{}",
-        repository.server_url, repository.owner, repository.name
-    );
-    let web = format!(
-        "{}/{}/{}",
-        repository.server_url, repository.owner, repository.name
-    );
+    let repo_urls = repository.urls();
+    let urls = repo_urls.pull(number);
     let mut state = lock(&repository.app.state);
     require_pull_request(&state, repository, number)?;
     let user = seeded_nullable_user(&mut state, repository, seed.user.clone())?;
@@ -1701,19 +1686,19 @@ fn create_review_comment(
         commit_id: "0000000000000000000000000000000000000000".to_owned(),
         created_at: timestamp,
         diff_hunk: "@@ -1 +1 @@".to_owned(),
-        html_url: format!("{web}/pull/{number}#discussion-diff-{id}"),
+        html_url: urls.review_comment_html(id),
         id,
         in_reply_to_id: None,
         line: None,
         links: types::PullRequestReviewCommentLinks {
             html: types::PullRequestReviewCommentLinksHtml {
-                href: format!("{web}/pull/{number}#discussion-diff-{id}"),
+                href: urls.review_comment_html(id),
             },
             pull_request: types::PullRequestReviewCommentLinksPullRequest {
-                href: format!("{api}/pulls/{number}"),
+                href: urls.api.clone(),
             },
             self_: types::PullRequestReviewCommentLinksSelf {
-                href: format!("{api}/pulls/comments/{id}"),
+                href: repo_urls.review_comment(id),
             },
         },
         node_id: crate::render::node_id("PullRequestReviewComment", global_id),
@@ -1724,14 +1709,14 @@ fn create_review_comment(
         path: "README.md".to_owned(),
         position: Some(1),
         pull_request_review_id: Some(review_id),
-        pull_request_url: format!("{api}/pulls/{number}"),
+        pull_request_url: urls.api.clone(),
         reactions: None,
         side: types::PullRequestReviewCommentSide::Right,
         start_line: None,
         start_side: None,
         subject_type: None,
         updated_at: crate::fixtures::parse_timestamp(&now, "review comment updated_at")?,
-        url: format!("{api}/pulls/comments/{id}"),
+        url: repo_urls.review_comment(id),
         user,
     };
     seed.path.apply(&mut comment.path);

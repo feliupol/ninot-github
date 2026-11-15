@@ -41,10 +41,7 @@ fn hook_id(request: &ApiRequest) -> Result<u64, ApiResponse> {
 }
 
 fn render(request: &ApiRequest, found: &Found, hook: &Hook, state: &State) -> types::Hook {
-    let api = format!(
-        "{}/repos/{}/{}/hooks/{}",
-        request.api_url, found.owner, found.name, hook.id
-    );
+    let urls = request.urls().repo(&found.owner, &found.name).hook(hook.id);
     let last = state
         .deliveries
         .iter()
@@ -80,16 +77,16 @@ fn render(request: &ApiRequest, found: &Found, hook: &Hook, state: &State) -> ty
         active: hook.active,
         config: config(hook),
         created_at: render::timestamp(&hook.created_at),
-        deliveries_url: Some(format!("{api}/deliveries")),
+        deliveries_url: Some(urls.deliveries()),
         events: hook.events.clone(),
         id: render::id(hook.id),
         last_response,
         name: "web".to_owned(),
-        ping_url: format!("{api}/pings"),
-        test_url: format!("{api}/test"),
+        ping_url: urls.pings(),
+        test_url: urls.test(),
         type_: "Repository".to_owned(),
         updated_at: render::timestamp(&hook.updated_at),
-        url: api,
+        url: urls.api,
     }
 }
 

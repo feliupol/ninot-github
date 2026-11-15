@@ -86,7 +86,7 @@ fn tenant_credential(state: &State, token: &str, body: &[u8], web_url: &str) -> 
         return ApiResponse::not_found();
     }
     ApiResponse::ok(json!({
-        "url": format!("{web_url}/_services/pipelines"),
+        "url": crate::urls::service(web_url, "pipelines"),
         "token_schema": "OAuthAccessToken",
         "token": token,
         "use_v2_flow": true,
@@ -193,8 +193,8 @@ fn add_runner(state: &mut State, token: &str, body: &[u8], web_url: &str) -> Api
         "id": id,
         "name": name,
         "authorization": {
-            "authorization_url": format!("{web_url}/_services/token/oauth2/token"),
-            "server_url": format!("{web_url}/_services/broker/"),
+            "authorization_url": crate::urls::service(web_url, "token/oauth2/token"),
+            "server_url": crate::urls::service(web_url, "broker/"),
             "client_id": format!("00000000-0000-4000-8000-{id:012x}"),
         },
     }))

@@ -131,11 +131,6 @@ fn decode_param(value: &str) -> String {
     String::from_utf8_lossy(&decoded).into_owned()
 }
 
-fn label_api_url(api: &str, name: &str) -> String {
-    let encoded: String = url::form_urlencoded::byte_serialize(name.as_bytes()).collect();
-    format!("{api}/labels/{}", encoded.replace('+', "%20"))
-}
-
 fn issue_number(request: &ApiRequest) -> Result<u64, ApiResponse> {
     request
         .param("issue_number")

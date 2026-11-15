@@ -18,6 +18,7 @@ use crate::state::{
     IssueEvent, IssueEventKind, Repo, State, TimelineEvent, TimelineEventKind, lock,
 };
 use crate::types;
+use crate::urls::RepoUrls;
 
 impl Handler for ops::IssuesListEvents {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
@@ -25,11 +26,11 @@ impl Handler for ops::IssuesListEvents {
         let found = find_repo(&state, request)?;
         let number = super::issue_number(request)?;
         let repo = found.repo(&state);
-        let api = format!("{}/repos/{}/{}", request.api_url, found.owner, found.name);
+        let urls = request.urls().repo(&found.owner, &found.name);
         let events = events_for(repo, number)?;
         let rows = events
             .iter()
-            .map(|event| render_event(&api, event, None))
+            .map(|event| render_event(&urls, event, None))
             .collect();
         Ok(paginate(request, &request.path, rows))
     }
@@ -40,10 +41,10 @@ impl Handler for ops::IssuesListEventsForRepo {
         let state = lock(state);
         let found = find_repo(&state, request)?;
         let repo = found.repo(&state);
-        let api = format!("{}/repos/{}/{}", request.api_url, found.owner, found.name);
+        let urls = request.urls().repo(&found.owner, &found.name);
         let rows = repo_events(repo)
             .into_iter()
-            .map(|(event, issue)| render_event(&api, &event, Some(&issue)))
+            .map(|(event, issue)| render_event(&urls, &event, Some(&issue)))
             .collect();
         Ok(paginate(request, &request.path, rows))
     }
@@ -58,14 +59,14 @@ impl Handler for ops::IssuesGetEvent {
             .parse::<u64>()
             .map_err(|_| ApiResponse::not_found())?;
         let repo = found.repo(&state);
-        let api = format!("{}/repos/{}/{}", request.api_url, found.owner, found.name);
+        let urls = request.urls().repo(&found.owner, &found.name);
         let (event, issue) = repo_events(repo)
             .into_iter()
             .find(|(event, _)| event.id == id)
             .ok_or_else(ApiResponse::not_found)?;
         Ok(ApiResponse::json(
             200,
-            render_event(&api, &event, Some(&issue)),
+            render_event(&urls, &event, Some(&issue)),
         ))
     }
 }
@@ -135,16 +136,13 @@ fn kind_from_timeline(kind: TimelineEventKind) -> IssueEventKind {
     }
 }
 
-fn render_event(api: &str, event: &IssueEvent, issue: Option<&types::Issue>) -> Value {
+fn render_event(repo: &RepoUrls, event: &IssueEvent, issue: Option<&types::Issue>) -> Value {
     let created_at = crate::time::format(&event.created_at);
-    let commit_url = event
-        .commit_id
-        .as_ref()
-        .map(|sha| format!("{api}/commits/{sha}"));
+    let commit_url = event.commit_id.as_ref().map(|sha| repo.commit(sha).api);
     let mut row = json!({
         "id": render::id(event.id),
         "node_id": render::node_id("IssueEvent", event.id),
-        "url": format!("{api}/issues/events/{}", event.id),
+        "url": repo.issue_event(event.id),
         "actor": event.actor,
         "event": event.kind.name(),
         "commit_id": event.commit_id,

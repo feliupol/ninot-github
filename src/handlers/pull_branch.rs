@@ -188,7 +188,7 @@ impl Handler for ops::PullsUpdateBranch {
             202,
             json!({
                 "message": "Updating pull request branch.",
-                "url": format!("{}/repos/{}/{}/pulls/{number}", request.api_url, found.owner, found.name),
+                "url": request.urls().repo(&found.owner, &found.name).pull(number).api,
             }),
         ))
     }

@@ -342,7 +342,7 @@ impl App {
             .or_else(|| full_path.strip_prefix(UPLOADS_PREFIX))
         {
             Some(rest) if rest.is_empty() || rest.starts_with('/') => (
-                format!("{web_url}{ENTERPRISE_PREFIX}"),
+                crate::urls::enterprise_api(&web_url),
                 if rest.is_empty() { "/" } else { rest },
             ),
             _ => (web_url.clone(), full_path),

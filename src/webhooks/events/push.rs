@@ -1,5 +1,6 @@
 //! The `push` event, sent once per ref an accepted push changed.
 
+use crate::urls::RepoUrls;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Mutex;
@@ -66,7 +67,7 @@ pub fn enqueue_push(
     else {
         return;
     };
-    let html = format!("{}/{owner}/{name}", request.web_url);
+    let urls = request.urls().repo(owner, name);
     let changed = changed_refs(before, after);
     let payloads: Vec<Value> = changed
         .iter()
@@ -75,13 +76,13 @@ pub fn enqueue_push(
                 Vec::new()
             } else {
                 let excluded: Vec<&str> = before.values().map(String::as_str).collect();
-                push_commits(git_dir, &html, new, &excluded)
+                push_commits(git_dir, &urls, new, &excluded)
             };
             let payload = webhook_types::PushEvent {
                 after: (*new).to_owned(),
                 base_ref: None,
                 before: (*old).to_owned(),
-                compare: format!("{html}/compare/{}...{}", &old[..12], &new[..12]),
+                compare: urls.compare(&old[..12], &new[..12]).html,
                 created: *old == ZERO_SHA,
                 deleted: *new == ZERO_SHA,
                 forced: false,
@@ -167,7 +168,7 @@ pub(crate) fn changed_refs<'a>(
 /// Commits reachable from `new` but from none of `excluded`, oldest first, as payload objects.
 fn push_commits(
     git_dir: &Path,
-    html: &str,
+    repo: &RepoUrls,
     new: &str,
     excluded: &[&str],
 ) -> Vec<webhook_types::Commit> {
@@ -198,7 +199,7 @@ fn push_commits(
                 removed,
                 timestamp: render::timestamp(&commit.committer.date),
                 tree_id: commit.tree,
-                url: format!("{html}/commit/{}", commit.sha),
+                url: repo.commit(&commit.sha).html,
             }
         })
         .collect()

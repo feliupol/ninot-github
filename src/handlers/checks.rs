@@ -14,6 +14,7 @@ use crate::operation::ops;
 use crate::render;
 use crate::state::{Repo, State, lock};
 use crate::types;
+use crate::urls::RepoUrls;
 
 struct Phase {
     status: types::CheckRunStatus,
@@ -60,11 +61,11 @@ impl Handler for ops::ChecksCreate {
         };
         let raw = state.next_id();
         let id = render::id(raw);
-        let api = format!("{}/repos/{}/{}", request.api_url, found.owner, found.name);
-        let web = format!("{}/{}/{}", request.web_url, found.owner, found.name);
+        let repo_urls = request.urls().repo(&found.owner, &found.name);
+        let urls = repo_urls.check_run(id);
         let stored = annotations
             .iter()
-            .map(|item| annotation(item, &web, &head_sha))
+            .map(|item| annotation(item, &repo_urls, &head_sha))
             .collect::<Vec<_>>();
         let (title, summary, text) = output_fields(body.output.as_ref());
         let run = types::CheckRun {
@@ -76,13 +77,13 @@ impl Handler for ops::ChecksCreate {
             details_url: Some(body.details_url.clone().unwrap_or(app.html_url)),
             external_id: body.external_id.clone(),
             head_sha: head_sha.clone(),
-            html_url: Some(format!("{web}/runs/{id}")),
+            html_url: Some(urls.html.clone()),
             id,
             name: body.name.clone(),
             node_id: render::node_id("CheckRun", raw),
             output: types::CheckRunOutput {
                 annotations_count: i64::try_from(stored.len()).unwrap_or(i64::MAX),
-                annotations_url: format!("{api}/check-runs/{id}/annotations"),
+                annotations_url: urls.annotations(),
                 summary,
                 text,
                 title,
@@ -90,7 +91,7 @@ impl Handler for ops::ChecksCreate {
             pull_requests: Vec::new(),
             started_at: Some(body.started_at.unwrap_or(now)),
             status: phase.status,
-            url: format!("{api}/check-runs/{id}"),
+            url: urls.api,
         };
         {
             let repo = found.repo_mut(&mut state);
@@ -126,10 +127,10 @@ impl Handler for ops::ChecksUpdate {
             return Err(checks_forbidden(request));
         }
         let phase = update_phase(&body, &current, now)?;
-        let web = format!("{}/{}/{}", request.web_url, found.owner, found.name);
+        let repo_urls = request.urls().repo(&found.owner, &found.name);
         let appended = extra
             .iter()
-            .map(|item| annotation(item, &web, &current.head_sha))
+            .map(|item| annotation(item, &repo_urls, &current.head_sha))
             .collect::<Vec<_>>();
         let was_completed = current.status.to_string() == "completed";
         let updated = {
@@ -448,10 +449,10 @@ fn annotation_input(draft: AnnotationDraft<'_>) -> Result<AnnotationInput, ApiRe
     })
 }
 
-fn annotation(item: &AnnotationInput, web: &str, sha: &str) -> types::CheckAnnotation {
+fn annotation(item: &AnnotationInput, repo: &RepoUrls, sha: &str) -> types::CheckAnnotation {
     types::CheckAnnotation {
         annotation_level: Some(item.level.clone()),
-        blob_href: format!("{web}/blob/{sha}/{}", item.path),
+        blob_href: repo.blob_html(sha, &item.path),
         end_column: item.end_column,
         end_line: item.end_line,
         message: Some(item.message.clone()),

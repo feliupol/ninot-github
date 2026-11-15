@@ -73,14 +73,14 @@ fn render_runner(runner: &Runner) -> Value {
 }
 
 fn render_group(request: &ApiRequest, org: &str, group: &RunnerGroup) -> Value {
-    let api = &request.api_url;
+    let urls = request.urls().org(org);
     let id = group.id;
     let mut value = json!({
         "id": id,
         "name": group.name,
         "visibility": group.visibility,
         "default": group.is_default,
-        "runners_url": format!("{api}/orgs/{org}/actions/runner-groups/{id}/runners"),
+        "runners_url": urls.runner_group_runners(id),
         "inherited": false,
         "allows_public_repositories": group.allows_public_repositories,
         "workflow_restrictions_read_only": false,
@@ -88,8 +88,7 @@ fn render_group(request: &ApiRequest, org: &str, group: &RunnerGroup) -> Value {
         "selected_workflows": group.selected_workflows,
     });
     if group.visibility == "selected" {
-        value["selected_repositories_url"] =
-            format!("{api}/orgs/{org}/actions/runner-groups/{id}/repositories").into();
+        value["selected_repositories_url"] = urls.runner_group_repositories(id).into();
     }
     if let Some(network) = &group.network_configuration_id {
         value["network_configuration_id"] = network.as_str().into();
@@ -119,10 +118,11 @@ fn paged(request: &ApiRequest, items: Vec<Value>, key: &str) -> ApiResponse {
     let mut value = json!({ "total_count": total });
     value[key] = Value::Array(body);
     let link = |target: usize, rel: &str| {
-        format!(
-            "<{}{}?per_page={per_page}&page={target}>; rel=\"{rel}\"",
-            request.api_url, request.path
-        )
+        let url = request.urls().api(&format!(
+            "{}?per_page={per_page}&page={target}",
+            request.path
+        ));
+        format!("<{url}>; rel=\"{rel}\"")
     };
     let mut links = Vec::new();
     if page < last {
@@ -252,7 +252,7 @@ fn encode_jit(
         .map(|label| label.name.as_str())
         .collect();
     let payload = json!({
-        "gitHubUrl": format!("{}/{org}", request.web_url),
+        "gitHubUrl": request.urls().org(org).html,
         "runnerName": runner.name,
         "runnerGroup": group_name,
         "runnerLabels": &labels,

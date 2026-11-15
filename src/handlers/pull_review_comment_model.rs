@@ -128,18 +128,11 @@ pub(super) fn build(
 ) -> types::PullRequestReviewComment {
     let now = crate::time::now_utc();
     let id = crate::render::id(new.id);
-    let pull_url = format!(
-        "{}/repos/{}/{}/pulls/{number}",
-        request.api_url, found.owner, found.name
-    );
-    let url = format!(
-        "{}/repos/{}/{}/pulls/comments/{id}",
-        request.api_url, found.owner, found.name
-    );
-    let html_url = format!(
-        "{}/{}/{}/pull/{number}#discussion_r{id}",
-        request.web_url, found.owner, found.name
-    );
+    let repo = request.urls().repo(&found.owner, &found.name);
+    let pull = repo.pull(number);
+    let pull_url = pull.api.clone();
+    let url = repo.review_comment(id);
+    let html_url = pull.review_comment_html(id);
     let anchor = new.anchor;
     // The diff index is not tracked; the line stands in for it, as the response models require one.
     let diff_position = anchor.position.or(anchor.line).unwrap_or(0);

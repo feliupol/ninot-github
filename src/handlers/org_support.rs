@@ -72,19 +72,19 @@ pub(super) fn object_body(
 
 /// The short organization model.
 pub(super) fn organization_simple(request: &ApiRequest, org: &Account) -> Value {
-    let api = format!("{}/orgs/{}", request.api_url, org.login);
+    let urls = request.urls().org(&org.login);
     json!({
         "login": org.login,
         "id": render::id(org.id),
         "node_id": render::node_id("Organization", org.id),
-        "url": api,
-        "repos_url": format!("{api}/repos"),
-        "events_url": format!("{api}/events"),
-        "hooks_url": format!("{api}/hooks"),
-        "issues_url": format!("{api}/issues"),
-        "members_url": format!("{api}/members{{/member}}"),
-        "public_members_url": format!("{api}/public_members{{/member}}"),
-        "avatar_url": format!("{}/avatars/{}", request.web_url, org.login),
+        "url": urls.api,
+        "repos_url": urls.api("/repos"),
+        "events_url": urls.api("/events"),
+        "hooks_url": urls.api("/hooks"),
+        "issues_url": urls.api("/issues"),
+        "members_url": urls.api("/members{/member}"),
+        "public_members_url": urls.api("/public_members{/member}"),
+        "avatar_url": urls.avatar,
         "description": org.profile.description.clone().unwrap_or_default(),
     })
 }
@@ -101,7 +101,7 @@ pub(super) fn user_json(request: &ApiRequest, state: &State, login: &str) -> Opt
 }
 
 fn team_base(request: &ApiRequest, org: &Account, team: &Team) -> Value {
-    let api = format!("{}/orgs/{}/teams/{}", request.api_url, org.login, team.slug);
+    let urls = request.urls().team(&org.login, &team.slug);
     json!({
         "id": render::id(team.id),
         "node_id": render::node_id("Team", team.id),
@@ -111,10 +111,10 @@ fn team_base(request: &ApiRequest, org: &Account, team: &Team) -> Value {
         "privacy": team.privacy,
         "notification_setting": team.notification_setting,
         "permission": team.permission,
-        "url": api,
-        "html_url": format!("{}/orgs/{}/teams/{}", request.web_url, org.login, team.slug),
-        "members_url": format!("{api}/members{{/member}}"),
-        "repositories_url": format!("{api}/repos"),
+        "url": urls.api,
+        "html_url": urls.html,
+        "members_url": urls.members(),
+        "repositories_url": urls.repositories(),
         "type": "organization",
         "organization_id": render::id(org.id),
     })

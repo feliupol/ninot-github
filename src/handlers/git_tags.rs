@@ -14,7 +14,7 @@ use crate::state::{State, lock};
 use crate::types;
 
 fn tag_url(request: &ApiRequest, located: &super::git_store::Located, sha: &str) -> String {
-    format!("{}/git/tags/{sha}", located.api(request))
+    located.urls(request).git_object("tags", sha)
 }
 
 fn object_collection(kind: gix::objs::Kind) -> &'static str {
@@ -32,7 +32,7 @@ fn render_tag(
     sha: &str,
     tag: gix::objs::TagRef<'_>,
 ) -> Result<types::GitTag, ApiResponse> {
-    let api = located.api(request);
+    let repo = located.urls(request);
     let target = tag.target();
     let tagger = tag
         .tagger()
@@ -46,7 +46,7 @@ fn render_tag(
         object: types::GitTagObject {
             sha: target.to_string(),
             type_: tag.target_kind.to_string(),
-            url: format!("{api}/git/{}/{target}", object_collection(tag.target_kind)),
+            url: repo.git_object(object_collection(tag.target_kind), &target.to_string()),
         },
         sha: sha.to_owned(),
         tag: tag.name.to_string(),

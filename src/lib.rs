@@ -29,6 +29,7 @@ pub(crate) mod router;
 pub mod server;
 pub mod state;
 pub(crate) mod time;
+pub(crate) mod urls;
 
 /// REST request and response types generated from the pinned GitHub API spec.
 #[allow(clippy::all, dead_code, missing_docs)]

@@ -1941,3 +1941,64 @@ fn issues_list_for_authenticated_user() {
         BTreeSet::from(["tool".to_owned()])
     );
 }
+
+#[test]
+fn label_and_comment_urls_follow_github_shapes() {
+    let server = Server::start().unwrap();
+    server
+        .create_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+    let admin = common::Api::admin(&server);
+    let base = server.url();
+
+    let label = admin.post(
+        "/repos/admin/project/labels",
+        json!({"name": "bug :bug:", "color": "abcdef"}),
+    );
+    assert_eq!(label.status, 201, "{:?}", label.body);
+    assert_eq!(
+        label.body["url"],
+        format!("{base}/repos/admin/project/labels/bug%20:bug:")
+    );
+
+    let created = admin.post(
+        "/repos/admin/project/issues",
+        json!({"title": "Labelled", "labels": ["needs review"]}),
+    );
+    assert_eq!(created.status, 201, "{:?}", created.body);
+    assert_eq!(
+        created.body["labels"][0]["url"],
+        format!("{base}/repos/admin/project/labels/needs%20review")
+    );
+    let number = created.body["number"].as_u64().unwrap();
+
+    let added = admin.post(
+        &format!("/repos/admin/project/issues/{number}/labels"),
+        json!({"labels": ["good first issue"]}),
+    );
+    assert_eq!(added.status, 200, "{:?}", added.body);
+    let added_url = added
+        .body
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|label| label["name"] == "good first issue")
+        .map(|label| label["url"].clone());
+    assert_eq!(
+        added_url,
+        Some(json!(format!(
+            "{base}/repos/admin/project/labels/good%20first%20issue"
+        )))
+    );
+
+    let comment = admin.post(
+        &format!("/repos/admin/project/issues/{number}/comments"),
+        json!({"body": "Seen"}),
+    );
+    assert_eq!(comment.status, 201, "{:?}", comment.body);
+    let id = comment.body["id"].as_u64().unwrap();
+    assert_eq!(
+        comment.body["html_url"],
+        format!("{base}/admin/project/issues/{number}#issuecomment-{id}")
+    );
+}

@@ -555,7 +555,7 @@ impl Handler for ops::SearchIssuesAndPullRequests {
                 if !visible(&state, request, &account.login, &repo.name) {
                     continue;
                 }
-                let api_repo = format!("{}/repos/{}/{}", request.api_url, account.login, repo.name);
+                let api_repo = request.urls().repo(&account.login, &repo.name).api;
                 for pull in repo.pull_requests.values() {
                     let Some(data) = pull.data.as_ref() else {
                         continue;
@@ -709,13 +709,10 @@ impl Handler for ops::SearchRepos {
             query
                 .append_pair("per_page", &per_page.to_string())
                 .append_pair("page", &target.to_string());
-            links.push(format!(
-                "<{}{}?{}>; rel=\"{}\"",
-                request.api_url,
-                request.path,
-                query.finish(),
-                relation
-            ));
+            let url = request
+                .urls()
+                .api(&format!("{}?{}", request.path, query.finish()));
+            links.push(format!("<{url}>; rel=\"{relation}\""));
         }
         if !links.is_empty() {
             api_response

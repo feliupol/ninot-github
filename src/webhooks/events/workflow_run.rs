@@ -1,5 +1,6 @@
 //! The `workflow_run` event.
 
+use crate::urls::RepoUrls;
 use serde_json::{Value, json};
 
 use super::{Ctx, commit_simple, fill_null, json_of};
@@ -28,7 +29,7 @@ pub(crate) fn deliver(ctx: &mut Ctx, run: &types::WorkflowRun) {
         .and_then(Value::as_str)
         .map(run_action)
         .unwrap_or("requested");
-    let workflow = workflow(&prepared, &repository);
+    let workflow = workflow(&prepared, &ctx.urls());
     ctx.enqueue(
         "workflow_run",
         &format!("workflow_run-{action}"),
@@ -132,7 +133,7 @@ fn prepare(ctx: &Ctx, run: &types::WorkflowRun, lite: &Value, sender: &Value) ->
     value
 }
 
-fn workflow(run: &Value, repository: &Value) -> Value {
+fn workflow(run: &Value, repo: &RepoUrls) -> Value {
     let id = run
         .get("workflow_id")
         .cloned()
@@ -148,29 +149,21 @@ fn workflow(run: &Value, repository: &Value) -> Value {
         .get("path")
         .and_then(Value::as_str)
         .unwrap_or(".github/workflows/ci.yml");
-    let html = repository
-        .get("html_url")
-        .and_then(Value::as_str)
-        .unwrap_or("https://github.com/unknown/unknown");
-    let api = repository
-        .get("url")
-        .and_then(Value::as_str)
-        .unwrap_or("https://api.github.com/repos/unknown/unknown");
     let created = run
         .get("created_at")
         .and_then(Value::as_str)
         .unwrap_or("1970-01-01T00:00:00Z");
     let numeric = id.as_i64().unwrap_or(1);
     json!({
-        "badge_url": format!("{html}/actions/workflows/{numeric}/badge.svg"),
+        "badge_url": repo.workflow_badge(numeric),
         "created_at": created,
-        "html_url": format!("{html}/blob/HEAD/{path}"),
+        "html_url": repo.blob_html("HEAD", path),
         "id": id,
         "name": name,
         "node_id": format!("W_{numeric}"),
         "path": path,
         "state": "active",
         "updated_at": run.get("updated_at").and_then(Value::as_str).unwrap_or(created),
-        "url": format!("{api}/actions/workflows/{numeric}"),
+        "url": repo.workflow(numeric),
     })
 }

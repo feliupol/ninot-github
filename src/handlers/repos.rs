@@ -75,7 +75,7 @@ pub fn find_repo(state: &State, request: &ApiRequest) -> Result<Found, ApiRespon
             .skip(4)
             .map(|segment| format!("/{segment}"))
             .collect();
-        let location = format!("{}/repos/{to_owner}/{to_name}{rest}", request.api_url);
+        let location = request.urls().repo(to_owner, to_name).api(&rest);
         let body = types::BasicError {
             documentation_url: Some(DOCS_URL.to_owned()),
             message: Some("Moved Permanently".to_owned()),

@@ -376,8 +376,8 @@ impl Handler for ops::IssuesCreate {
             .account(&caller.login)
             .ok_or_else(ApiResponse::not_found)?;
         let user = crate::render::simple_user(request, user);
-        let api = format!("{}/repos/{}/{}", request.api_url, found.owner, found.name);
-        let web = format!("{}/{}/{}", request.web_url, found.owner, found.name);
+        let repo_urls = request.urls().repo(&found.owner, &found.name);
+        let urls = repo_urls.issue(number);
         let created = crate::state::now();
         let labels = body
             .labels
@@ -403,7 +403,7 @@ impl Handler for ops::IssuesCreate {
                         "LA_{}_{}_{}_{index}",
                         found.owner, found.name, number
                     )),
-                    url: Some(format!("{api}/labels/{name}")),
+                    url: Some(repo_urls.label(name)),
                 }
             })
             .collect::<Vec<_>>();
@@ -418,16 +418,16 @@ impl Handler for ops::IssuesCreate {
             closed_at: None,
             closed_by: None,
             comments: 0,
-            comments_url: format!("{api}/issues/{number}/comments"),
+            comments_url: urls.comments(),
             created_at: crate::render::timestamp(&created),
             draft: None,
-            events_url: format!("{api}/issues/{number}/events"),
-            html_url: format!("{web}/issues/{number}"),
+            events_url: urls.events(),
+            html_url: urls.html.clone(),
             id: crate::render::id(number),
             issue_dependencies_summary: None,
             issue_field_values: Vec::new(),
             labels,
-            labels_url: format!("{api}/issues/{number}/labels{{/name}}"),
+            labels_url: urls.labels(),
             locked: false,
             milestone: None,
             node_id: format!("I_{}_{}_{}", found.owner, found.name, number),
@@ -438,7 +438,7 @@ impl Handler for ops::IssuesCreate {
             pull_request: None,
             reactions: None,
             repository: None,
-            repository_url: api.clone(),
+            repository_url: repo_urls.api.clone(),
             state: "open".to_owned(),
             state_reason: None,
             sub_issues_summary: None,
@@ -446,7 +446,7 @@ impl Handler for ops::IssuesCreate {
             title,
             type_: None,
             updated_at: crate::render::timestamp(&created),
-            url: format!("{api}/issues/{number}"),
+            url: urls.api.clone(),
             user: Some(user.clone().into()),
         };
         state.add_issue(&found.owner, &found.name, number, issue.clone());
@@ -638,8 +638,8 @@ impl Handler for ops::PullsCreate {
         let head_sha = ninot_common::git::resolve_commit(git_dir, head_name)
             .map_err(ApiResponse::internal)?
             .ok_or_else(|| ApiResponse::unprocessable("head branch does not exist"))?;
-        let api = format!("{}/repos/{}/{}", request.api_url, found.owner, found.name);
-        let web = format!("{}/{}/{}", request.web_url, found.owner, found.name);
+        let repo_urls = request.urls().repo(&found.owner, &found.name);
+        let urls = repo_urls.pull(number);
         let base = types::PullRequestBase {
             label: format!("{}:{base_ref}", found.owner),
             ref_: base_ref.to_owned(),
@@ -668,27 +668,27 @@ impl Handler for ops::PullsCreate {
             changed_files: 0,
             closed_at: None,
             comments: 0,
-            comments_url: format!("{api}/issues/{number}/comments"),
+            comments_url: urls.issue.comments(),
             commits: 1,
-            commits_url: format!("{api}/pulls/{number}/commits"),
+            commits_url: urls.commits(),
             created_at: now,
             deletions: 0,
-            diff_url: format!("{web}/pull/{number}.diff"),
+            diff_url: urls.diff(),
             draft: Some(body.draft.unwrap_or(false)),
             head,
-            html_url: format!("{web}/pull/{number}"),
+            html_url: urls.html.clone(),
             id: crate::render::id(number),
-            issue_url: format!("{api}/issues/{number}"),
+            issue_url: urls.issue.api.clone(),
             labels: Vec::new(),
             links: types::PullRequestLinks {
-                comments: link(format!("{api}/issues/{number}/comments")),
-                commits: link(format!("{api}/pulls/{number}/commits")),
-                html: link(format!("{web}/pull/{number}")),
-                issue: link(format!("{api}/issues/{number}")),
-                review_comment: link(format!("{api}/pulls/comments{{/number}}")),
-                review_comments: link(format!("{api}/pulls/{number}/comments")),
-                self_: link(format!("{api}/pulls/{number}")),
-                statuses: link(format!("{api}/statuses/{head_sha}")),
+                comments: link(urls.issue.comments()),
+                commits: link(urls.commits()),
+                html: link(urls.html.clone()),
+                issue: link(urls.issue.api.clone()),
+                review_comment: link(repo_urls.review_comment_template()),
+                review_comments: link(urls.review_comments()),
+                self_: link(urls.api.clone()),
+                statuses: link(repo_urls.statuses(&head_sha)),
             },
             locked: false,
             maintainer_can_modify: body.maintainer_can_modify.unwrap_or(true),
@@ -701,19 +701,19 @@ impl Handler for ops::PullsCreate {
             milestone: None,
             node_id: format!("PR_{}_{}_{}", found.owner, found.name, number),
             number: crate::render::id(number),
-            patch_url: format!("{web}/pull/{number}.patch"),
+            patch_url: urls.patch(),
             rebaseable: Some(true),
             requested_reviewers: Vec::new(),
             requested_teams: Vec::new(),
-            review_comment_url: format!("{api}/pulls/comments{{/number}}"),
+            review_comment_url: repo_urls.review_comment_template(),
             review_comments: 0,
-            review_comments_url: format!("{api}/pulls/{number}/comments"),
+            review_comments_url: urls.review_comments(),
             stack: None,
             state: types::PullRequestState::Open,
-            statuses_url: format!("{api}/statuses/{head_sha}"),
+            statuses_url: repo_urls.statuses(&head_sha),
             title: title.to_owned(),
             updated_at: now,
-            url: format!("{api}/pulls/{number}"),
+            url: urls.api.clone(),
             user,
         };
         state.add_pull_request(&found.owner, &found.name, number, data.clone());
@@ -755,7 +755,7 @@ impl Handler for ops::IssuesAddLabels {
             .param("issue_number")
             .parse::<u64>()
             .map_err(|_| ApiResponse::not_found())?;
-        let api = format!("{}/repos/{}/{}", request.api_url, found.owner, found.name);
+        let repo_urls = request.urls().repo(&found.owner, &found.name);
         let (labels, pull, issue, added) = {
             let repo = state
                 .account_mut(&found.owner)
@@ -780,7 +780,7 @@ impl Handler for ops::IssuesAddLabels {
                             id: crate::render::id(id),
                             name: name.clone(),
                             node_id: format!("LA_{}_{}_{}", found.owner, found.name, id),
-                            url: format!("{api}/labels/{name}"),
+                            url: repo_urls.label(&name),
                         };
                         added.push(label_from_pull(&item));
                         pull.labels.push(item);
@@ -808,7 +808,7 @@ impl Handler for ops::IssuesAddLabels {
                             id: Some(crate::render::id(id)),
                             name: Some(name.clone()),
                             node_id: Some(format!("LA_{}_{}_{}", found.owner, found.name, id)),
-                            url: Some(format!("{api}/labels/{name}")),
+                            url: Some(repo_urls.label(&name)),
                         };
                         if let Some(label) = label_from_issue_item(&item) {
                             added.push(label);
@@ -865,7 +865,8 @@ impl Handler for ops::IssuesCreateComment {
             .ok_or_else(ApiResponse::not_found)?;
         let user = crate::render::simple_user(request, account);
         let id = state.next_id();
-        let api = format!("{}/repos/{}/{}", request.api_url, found.owner, found.name);
+        let repo_urls = request.urls().repo(&found.owner, &found.name);
+        let issue_urls = repo_urls.issue(number);
         let exists = state
             .account(&found.owner)
             .and_then(|account| account.repo(&found.name))
@@ -882,16 +883,16 @@ impl Handler for ops::IssuesCreateComment {
             body_html: None,
             body_text: None,
             created_at,
-            html_url: format!("{}/issues/{number}#issuecomment-{id}", request.web_url),
+            html_url: issue_urls.comment_html(id),
             id: crate::render::id(id),
-            issue_url: format!("{api}/issues/{number}"),
+            issue_url: issue_urls.api,
             minimized: None,
             node_id: crate::render::node_id("IssueComment", id),
             performed_via_github_app: None,
             pin: None,
             reactions: None,
             updated_at: created_at,
-            url: format!("{api}/issues/comments/{id}"),
+            url: repo_urls.issue_comment(id),
             user: Some(user.into()),
         };
         state.add_issue_comment(&found.owner, &found.name, number, comment.clone());
@@ -1046,14 +1047,9 @@ impl Handler for ops::PullsCreateReview {
         if let Some(time) = &submitted_at {
             data.updated_at = crate::render::timestamp(time);
         }
-        let pull_request_url = format!(
-            "{}/repos/{}/{}/pulls/{number}",
-            request.api_url, found.owner, found.name
-        );
-        let html_url = format!(
-            "{}/{}/{}/pull/{}#pullrequestreview-{id}",
-            request.web_url, found.owner, found.name, number
-        );
+        let urls = request.urls().repo(&found.owner, &found.name).pull(number);
+        let pull_request_url = urls.api.clone();
+        let html_url = urls.review_html(id);
         let items = comment_ids
             .iter()
             .copied()

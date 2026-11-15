@@ -39,7 +39,7 @@ use winnow::Parser;
 
 use crate::api::{ApiResponse, Caller};
 use crate::handlers::repos::init_storage;
-use crate::render::{node_id, web_host};
+use crate::render::node_id;
 use crate::server::Hit;
 use crate::state::{Account, AccountKind, Repo, State, lock};
 use ninot_common::git;
@@ -111,6 +111,13 @@ struct Env {
     web_url: String,
 }
 
+impl Env {
+    /// Locations under the server's base URL, which GraphQL objects link to.
+    fn urls(&self) -> crate::urls::Urls<'_> {
+        crate::urls::Urls::new(&self.web_url, &self.web_url)
+    }
+}
+
 /// GitHub's error for a missing object, with its `NOT_FOUND` type.
 fn not_found(message: String) -> Error {
     typed_error(message, "NOT_FOUND")
@@ -153,14 +160,14 @@ fn account_json(env: &Env, account: &Account) -> Json {
         "databaseId": account.id,
         "login": account.login,
         "name": null,
-        "url": format!("{}/{}", env.web_url, account.login),
+        "url": env.urls().user(&account.login).html,
         "createdAt": account.created_at,
     })
 }
 
 /// A `Repository` object; fields that need git or permissions have resolvers.
 fn repository_json(env: &Env, account: &Account, repo: &Repo) -> Json {
-    let host = web_host(&env.web_url);
+    let urls = env.urls().repo(&account.login, &repo.name);
     json!({
         "__typename": "Repository",
         "id": node_id("Repository", repo.id),
@@ -169,8 +176,8 @@ fn repository_json(env: &Env, account: &Account, repo: &Repo) -> Json {
         "nameWithOwner": format!("{}/{}", account.login, repo.name),
         "owner": account_json(env, account),
         "description": repo.description,
-        "url": format!("{}/{}/{}", env.web_url, account.login, repo.name),
-        "sshUrl": format!("git@{host}:{}/{}.git", account.login, repo.name),
+        "url": urls.html,
+        "sshUrl": urls.ssh_url(),
         "isPrivate": repo.private,
         "visibility": if repo.private { "PRIVATE" } else { "PUBLIC" },
         "isFork": false,
@@ -1070,7 +1077,7 @@ fn graphql_pull_node(
         "reviewDecision":decision,
         "comments":{"__typename":"IssueCommentConnection","nodes":issue_comments,"totalCount":pull.issue_comments.len(),"pageInfo":{"hasPreviousPage":false,"hasNextPage":false,"startCursor":null,"endCursor":null}},
         "commits":{"__typename":"PullRequestCommitConnection", "nodes":commit_nodes},
-        "repositoryUrl":format!("{}/{}",env.web_url,account.login),
+        "repositoryUrl":env.urls().user(&account.login).html,
     }))
 }
 

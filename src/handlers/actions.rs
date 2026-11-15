@@ -50,15 +50,15 @@ impl Handler for ops::ReposGetCombinedStatusForRef {
         };
         let repository =
             crate::render::minimal_repository(request, account, repo, found.permission);
-        let api = format!("{}/repos/{}/{}", request.api_url, found.owner, found.name);
+        let commit = request.urls().repo(&found.owner, &found.name).commit(&sha);
         let response = types::ReposGetCombinedStatusForRefResponse(types::CombinedCommitStatus {
-            commit_url: format!("{api}/commits/{sha}"),
+            commit_url: commit.api.clone(),
             repository,
             sha: sha.clone(),
             state: state.to_owned(),
             total_count: statuses.len() as i64,
             statuses,
-            url: format!("{api}/commits/{sha}/status"),
+            url: commit.status(),
         });
         Ok(ApiResponse::typed(200, &response))
     }
@@ -306,10 +306,7 @@ impl Handler for ops::ActionsDownloadJobLogsForWorkflowRun {
         if !repo.workflow_job_logs.contains_key(&id) {
             return Err(ApiResponse::not_found());
         }
-        let location = format!(
-            "{}/_ninot/actions/logs/{}/{}/{}",
-            request.web_url, found.owner, found.name, id
-        );
+        let location = request.urls().job_logs(&found.owner, &found.name, id);
         Ok(ApiResponse {
             status: 302,
             headers: vec![("location".to_owned(), location)],
@@ -337,10 +334,9 @@ impl Handler for ops::ActionsDownloadWorkflowRunLogs {
         {
             return Err(ApiResponse::not_found());
         }
-        let location = format!(
-            "{}/_ninot/actions/log-archives/{}/{}/{}",
-            request.web_url, found.owner, found.name, run_id
-        );
+        let location = request
+            .urls()
+            .run_log_archive(&found.owner, &found.name, run_id);
         Ok(ApiResponse {
             status: 302,
             headers: vec![("location".to_owned(), location)],

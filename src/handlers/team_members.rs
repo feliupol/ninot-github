@@ -29,10 +29,7 @@ fn membership(
     role: &str,
 ) -> Value {
     json!({
-        "url": format!(
-            "{}/orgs/{org}/teams/{}/memberships/{login}",
-            request.api_url, team.slug
-        ),
+        "url": request.urls().team(org, &team.slug).membership(login),
         "role": role,
         "state": state,
     })

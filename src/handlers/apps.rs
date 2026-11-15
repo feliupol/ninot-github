@@ -87,11 +87,9 @@ pub(super) fn installation_model(
         .account(&installation.owner)
         .expect("installation owner exists");
     let timestamp = crate::time::now_utc();
+    let urls = request.urls().installation(installation.id);
     types::Installation {
-        access_tokens_url: format!(
-            "{}/app/installations/{}/access_tokens",
-            request.api_url, installation.id
-        ),
+        access_tokens_url: urls.access_tokens,
         account: Some(types::InstallationAccount::SimpleUser(
             crate::render::simple_user(request, account),
         )),
@@ -102,13 +100,10 @@ pub(super) fn installation_model(
         created_at: timestamp,
         events: Vec::new(),
         has_multiple_single_files: Some(false),
-        html_url: format!(
-            "{}/settings/installations/{}",
-            request.web_url, installation.id
-        ),
+        html_url: urls.html,
         id: crate::render::id(installation.id),
         permissions: app_permissions(installation.secrets_permission),
-        repositories_url: format!("{}/installation/repositories", request.api_url),
+        repositories_url: request.urls().api("/installation/repositories"),
         repository_selection: types::InstallationRepositorySelection::Selected,
         single_file_name: None,
         single_file_paths: Vec::new(),

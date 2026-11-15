@@ -84,12 +84,10 @@ impl Handler for ops::OrgsCheckMembershipForUser {
         let username = request.param("username").to_lowercase();
         // Source: OpenAPI orgs/check-membership-for-user 302
         if !sees_all(request, org) {
-            let location = format!(
-                "{}/orgs/{}/public_members/{}",
-                request.api_url,
-                org.login,
-                request.param("username")
-            );
+            let location = request
+                .urls()
+                .org(&org.login)
+                .public_member(request.param("username"));
             return Ok(ApiResponse {
                 status: 302,
                 headers: vec![("location".to_owned(), location)],
@@ -134,11 +132,11 @@ fn membership_json(
     };
     let user = user_json(request, state, login)?;
     Some(json!({
-        "url": format!("{}/orgs/{}/memberships/{}", request.api_url, org.login, login),
+        "url": request.urls().org(&org.login).membership(login),
         "state": membership,
         "role": role,
         "direct_membership": membership == "active",
-        "organization_url": format!("{}/orgs/{}", request.api_url, org.login),
+        "organization_url": request.urls().org(&org.login).api,
         "organization": organization_simple(request, org),
         "user": user,
         "permissions": {"can_create_repository": role == "admin"},

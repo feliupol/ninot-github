@@ -13,6 +13,7 @@ use crate::operation::ops;
 use crate::render::{self, node_id};
 use crate::state::{State, lock};
 use crate::types;
+use crate::urls::RepoUrls;
 use ninot_common::git::{self, PathContent, TreeEntry};
 
 fn resolve_fork_network_branch(
@@ -59,7 +60,7 @@ pub(crate) fn render_ref(
     located: &Located,
     found: &git::Ref,
 ) -> types::GitRef {
-    let api = located.api(request);
+    let repo = located.urls(request);
     let object_kind = if found.kind == "tag" {
         "tags"
     } else {
@@ -74,10 +75,10 @@ pub(crate) fn render_ref(
                 .try_into()
                 .expect("git object ids are 40 hex digits"),
             type_: found.kind.clone(),
-            url: format!("{api}/git/{object_kind}/{}", found.sha),
+            url: repo.git_object(object_kind, &found.sha),
         },
         ref_: found.name.clone(),
-        url: format!("{api}/git/{}", found.name),
+        url: repo.git_ref(&found.name),
     }
 }
 
@@ -193,8 +194,9 @@ impl Handler for ops::GitListMatchingRefs {
     }
 }
 
-/// A git commit as the REST API renders it, for the repository at `api` and `html`.
-pub(crate) fn render_commit(api: &str, html: &str, commit: &git::Commit) -> types::Commit {
+/// A git commit as the REST API renders it, for the repository at `repo`.
+pub(crate) fn render_commit(repo: &RepoUrls, commit: &git::Commit) -> types::Commit {
+    let urls = repo.commit(&commit.sha);
     let signature = |signature: &git::Signature| types::NullableGitUser {
         date: Some(render::timestamp(&signature.date)),
         email: Some(signature.email.clone()),
@@ -202,7 +204,7 @@ pub(crate) fn render_commit(api: &str, html: &str, commit: &git::Commit) -> type
     };
     types::Commit {
         author: None,
-        comments_url: format!("{api}/commits/{}/comments", commit.sha),
+        comments_url: urls.comments(),
         commit: types::CommitCommit {
             author: Some(signature(&commit.author)),
             comment_count: 0,
@@ -210,9 +212,9 @@ pub(crate) fn render_commit(api: &str, html: &str, commit: &git::Commit) -> type
             message: commit.message.clone(),
             tree: types::CommitCommitTree {
                 sha: commit.tree.clone(),
-                url: format!("{api}/git/trees/{}", commit.tree),
+                url: repo.git_tree(&commit.tree),
             },
-            url: format!("{api}/git/commits/{}", commit.sha),
+            url: urls.git.clone(),
             verification: Some(types::Verification {
                 payload: None,
                 reason: "unsigned".to_owned(),
@@ -223,20 +225,23 @@ pub(crate) fn render_commit(api: &str, html: &str, commit: &git::Commit) -> type
         },
         committer: None,
         files: Vec::new(),
-        html_url: format!("{html}/commit/{}", commit.sha),
+        html_url: urls.html,
         node_id: node_id("Commit", 0),
         parents: commit
             .parents
             .iter()
-            .map(|parent| types::CommitParentsItem {
-                html_url: Some(format!("{html}/commit/{parent}")),
-                sha: parent.clone(),
-                url: format!("{api}/commits/{parent}"),
+            .map(|parent| {
+                let urls = repo.commit(parent);
+                types::CommitParentsItem {
+                    html_url: Some(urls.html),
+                    sha: parent.clone(),
+                    url: urls.api,
+                }
             })
             .collect(),
         sha: commit.sha.clone(),
         stats: None,
-        url: format!("{api}/commits/{}", commit.sha),
+        url: urls.api,
     }
 }
 
@@ -259,7 +264,7 @@ impl Handler for ops::ReposGetCommit {
         let commit = read_commit(&located, request.param("ref"))?;
         Ok(ApiResponse::typed(
             200,
-            &render_commit(&located.api(request), &located.html(request), &commit),
+            &render_commit(&located.urls(request), &commit),
         ))
     }
 }
@@ -267,13 +272,13 @@ impl Handler for ops::ReposGetCommit {
 impl Handler for ops::ReposListBranches {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let located = locate(state, request)?;
-        let api = located.api(request);
+        let repo = located.urls(request);
         let items = git::refs(&located.git_dir, "refs/heads/")
             .map_err(ApiResponse::internal)?
             .into_iter()
             .map(|found| types::ShortBranch {
                 commit: types::ShortBranchCommit {
-                    url: format!("{api}/commits/{}", found.sha),
+                    url: repo.commit(&found.sha).api,
                     sha: found.sha,
                 },
                 name: found.name.trim_start_matches("refs/heads/").to_owned(),
@@ -297,20 +302,20 @@ impl Handler for ops::ReposGetBranch {
             .find(|found| found.name == name)
             .ok_or_else(|| ApiResponse::error(404, "Branch not found"))?;
         let commit = git::commit(&located.git_dir, &found.sha).map_err(ApiResponse::internal)?;
-        let api = located.api(request);
+        let repo = located.urls(request);
         Ok(ApiResponse::typed(
             200,
             &types::BranchWithProtection {
-                commit: render_commit(&located.api(request), &located.html(request), &commit),
+                commit: render_commit(&repo, &commit),
                 links: types::BranchWithProtectionLinks {
-                    html: format!("{}/tree/{branch}", located.html(request)),
-                    self_: format!("{api}/branches/{branch}"),
+                    html: repo.tree_html(branch),
+                    self_: repo.branch(branch),
                 },
                 name: branch.to_owned(),
                 pattern: None,
                 protected: false,
                 protection: unprotected(),
-                protection_url: format!("{api}/branches/{branch}/protection"),
+                protection_url: repo.branch_protection(branch),
                 required_approving_review_count: None,
             },
         ))
@@ -356,26 +361,20 @@ fn entry<'a>(
     entry: &'a TreeEntry,
 ) -> Entry<'a> {
     use types::ContentDirectoryItemType as Kind;
-    let api = located.api(request);
-    let html = located.html(request);
+    let repo = located.urls(request);
     let (kind, tree_or_blob) = match (entry.kind.as_str(), entry.mode.as_str()) {
         ("tree", _) => (Kind::Dir, "tree"),
         ("commit", _) => (Kind::Submodule, "tree"),
         (_, "120000") => (Kind::Symlink, "blob"),
         _ => (Kind::File, "blob"),
     };
-    let download_url = (kind == Kind::File).then(|| {
-        format!(
-            "{}/raw/{}/{}/{reference}/{}",
-            request.web_url, located.found.owner, located.found.name, entry.path
-        )
-    });
+    let download_url = (kind == Kind::File).then(|| repo.raw(reference, &entry.path));
     Entry {
         kind,
         name: entry.path.rsplit('/').next().unwrap_or(&entry.path),
-        self_url: format!("{api}/contents/{}?ref={reference}", entry.path),
-        git_url: format!("{api}/git/{tree_or_blob}s/{}", entry.sha),
-        html_url: format!("{html}/{tree_or_blob}/{reference}/{}", entry.path),
+        self_url: repo.contents(&entry.path, reference),
+        git_url: repo.git_object(&format!("{tree_or_blob}s"), &entry.sha),
+        html_url: repo.entry_html(tree_or_blob, reference, &entry.path),
         download_url,
     }
 }
@@ -415,13 +414,15 @@ fn gitlink(
         .to_bstring()
         .to_string();
     let hosted = url
-        .strip_prefix(&format!("{}/", request.web_url))
+        .strip_prefix(&request.urls().web("/"))
         .map(|rest| rest.strip_suffix(".git").unwrap_or(rest))
-        .filter(|rest| rest.split('/').count() == 2);
+        .and_then(|rest| rest.split_once('/'))
+        .filter(|(_, name)| !name.contains('/'))
+        .map(|(owner, name)| request.urls().repo(owner, name));
     let sha = &tree_entry.sha;
     Ok(Gitlink {
-        git_url: hosted.map(|repo| format!("{}/repos/{repo}/git/trees/{sha}", request.api_url)),
-        html_url: hosted.map(|repo| format!("{}/{repo}/tree/{sha}", request.web_url)),
+        git_url: hosted.as_ref().map(|repo| repo.git_tree(sha)),
+        html_url: hosted.as_ref().map(|repo| repo.tree_html(sha)),
         url,
     })
 }
@@ -613,8 +614,8 @@ fn file_commit(
     commit: &git::Commit,
     file: &TreeEntry,
 ) -> types::FileCommit {
-    let api = located.api(request);
-    let html = located.html(request);
+    let repo = located.urls(request);
+    let urls = repo.commit(&commit.sha);
     let file_entry = entry(request, located, branch, file);
     let person = |signature: &git::Signature| types::FileCommitCommitAuthor {
         date: Some(crate::time::format(&render::timestamp(&signature.date))),
@@ -646,24 +647,27 @@ fn file_commit(
                 email: committer.email,
                 name: committer.name,
             }),
-            html_url: Some(format!("{html}/commit/{}", commit.sha)),
+            html_url: Some(urls.html),
             message: Some(commit.message.clone()),
             node_id: Some(node_id("Commit", 0)),
             parents: commit
                 .parents
                 .iter()
-                .map(|parent| types::FileCommitCommitParentsItem {
-                    html_url: Some(format!("{html}/commit/{parent}")),
-                    sha: Some(parent.clone()),
-                    url: Some(format!("{api}/git/commits/{parent}")),
+                .map(|parent| {
+                    let urls = repo.commit(parent);
+                    types::FileCommitCommitParentsItem {
+                        html_url: Some(urls.html),
+                        sha: Some(parent.clone()),
+                        url: Some(urls.git),
+                    }
                 })
                 .collect(),
             sha: Some(commit.sha.clone()),
             tree: Some(types::FileCommitCommitTree {
                 sha: Some(commit.tree.clone()),
-                url: Some(format!("{api}/git/trees/{}", commit.tree)),
+                url: Some(repo.git_tree(&commit.tree)),
             }),
-            url: Some(format!("{api}/git/commits/{}", commit.sha)),
+            url: Some(urls.git),
             verification: Some(types::FileCommitCommitVerification {
                 payload: None,
                 reason: Some("unsigned".to_owned()),
@@ -875,31 +879,29 @@ impl Handler for ops::ReposCompareCommits {
             git::commit(&located.git_dir, &base_sha).map_err(ApiResponse::internal)?;
         let merge_base_commit =
             git::commit(&located.git_dir, &base_sha).map_err(ApiResponse::internal)?;
-        let api = located.api(request);
-        let html = located.html(request);
-        let compare = format!("{base}...{head}");
+        let repo = located.urls(request);
+        let compare = repo.compare(base, head);
+        let owner = &located.found.owner;
         let response = types::CommitComparison {
-            url: format!("{api}/compare/{compare}"),
-            html_url: format!("{html}/compare/{compare}"),
-            permalink_url: format!(
-                "{html}/compare/{}:{}...{}:{}",
-                located.found.owner, base_sha, located.found.owner, head_sha
-            ),
-            diff_url: format!("{html}/compare/{compare}.diff"),
-            patch_url: format!("{html}/compare/{compare}.patch"),
-            base_commit: render_commit(&located.api(request), &located.html(request), &base_commit),
-            merge_base_commit: render_commit(
-                &located.api(request),
-                &located.html(request),
-                &merge_base_commit,
-            ),
+            url: compare.api.clone(),
+            html_url: compare.html.clone(),
+            permalink_url: repo
+                .compare(
+                    &format!("{owner}:{base_sha}"),
+                    &format!("{owner}:{head_sha}"),
+                )
+                .html,
+            diff_url: compare.diff(),
+            patch_url: compare.patch(),
+            base_commit: render_commit(&repo, &base_commit),
+            merge_base_commit: render_commit(&repo, &merge_base_commit),
             status,
             ahead_by: ahead.len() as i64,
             behind_by: behind.len() as i64,
             total_commits: ahead.len() as i64,
             commits: commits
                 .iter()
-                .map(|commit| render_commit(&located.api(request), &located.html(request), commit))
+                .map(|commit| render_commit(&repo, commit))
                 .collect(),
             files: Vec::new(),
         };

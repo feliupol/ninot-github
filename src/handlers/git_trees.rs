@@ -13,18 +13,19 @@ use crate::api::{ApiRequest, ApiResponse, ApiResult};
 use crate::operation::ops;
 use crate::state::State;
 use crate::types;
+use crate::urls::RepoUrls;
 
 fn tree_url(request: &ApiRequest, located: &super::git_store::Located, sha: &str) -> String {
-    format!("{}/git/trees/{sha}", located.api(request))
+    located.urls(request).git_tree(sha)
 }
 
-fn entry_url(api: &str, kind: EntryKind, sha: &str) -> String {
+fn entry_url(repo: &RepoUrls, kind: EntryKind, sha: &str) -> String {
     let collection = match kind {
         EntryKind::Tree => "trees",
         EntryKind::Commit => "commits",
         EntryKind::Blob | EntryKind::BlobExecutable | EntryKind::Link => "blobs",
     };
-    format!("{api}/git/{collection}/{sha}")
+    repo.git_object(collection, sha)
 }
 
 fn github_type(kind: EntryKind) -> String {
@@ -43,15 +44,15 @@ fn list_tree(
     tree_id: gix::ObjectId,
     recursive: bool,
 ) -> Result<(String, Vec<types::GitTreeTreeItem>), ApiResponse> {
-    let api = located.api(request);
+    let urls = located.urls(request);
     let mut items = Vec::new();
-    collect_tree(repo, &api, tree_id, "", recursive, &mut items)?;
+    collect_tree(repo, &urls, tree_id, "", recursive, &mut items)?;
     Ok((tree_id.to_string(), items))
 }
 
 fn collect_tree(
     repo: &gix::Repository,
-    api: &str,
+    urls: &RepoUrls,
     tree_id: gix::ObjectId,
     prefix: &str,
     recursive: bool,
@@ -83,14 +84,14 @@ fn collect_tree(
             sha,
             size,
             type_: github_type(kind),
-            url: Some(entry_url(api, kind, &entry.object_id().to_string())),
+            url: Some(entry_url(urls, kind, &entry.object_id().to_string())),
         });
         if recursive && kind == EntryKind::Tree {
             let child_path = items
                 .last()
                 .map(|item| item.path.clone())
                 .unwrap_or_default();
-            collect_tree(repo, api, entry.object_id(), &child_path, true, items)?;
+            collect_tree(repo, urls, entry.object_id(), &child_path, true, items)?;
         }
     }
     Ok(())

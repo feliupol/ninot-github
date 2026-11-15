@@ -10,6 +10,7 @@ use crate::render;
 use crate::state::{Account, Permission, Repo, State};
 use crate::time;
 use crate::types;
+use crate::urls::RepoUrls;
 
 /// Public key supplied to the repository Actions-secret fixture.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -854,8 +855,8 @@ pub(crate) fn workflow_run(
     id: i64,
     head_sha: String,
 ) -> types::WorkflowRun {
-    let api = format!("{}/repos/{}/{}", request.api_url, account.login, repo.name);
-    let web = format!("{}/{}/{}", request.web_url, account.login, repo.name);
+    let repo_urls = request.urls().repo(&account.login, &repo.name);
+    let urls = repo_urls.workflow_run(id);
     let now = crate::time::now_utc();
     let minimal_repo = render::minimal_repository(
         request,
@@ -869,11 +870,11 @@ pub(crate) fn workflow_run(
     );
     types::WorkflowRun {
         actor: None,
-        artifacts_url: format!("{api}/actions/runs/{id}/artifacts"),
-        cancel_url: format!("{api}/actions/runs/{id}/cancel"),
+        artifacts_url: urls.api("/artifacts"),
+        cancel_url: urls.api("/cancel"),
         check_suite_id: None,
         check_suite_node_id: None,
-        check_suite_url: format!("{api}/check-suites/{id}"),
+        check_suite_url: repo_urls.check_suite(id).api,
         conclusion: None,
         created_at: now,
         display_title: "CI".to_owned(),
@@ -883,10 +884,10 @@ pub(crate) fn workflow_run(
         head_repository: minimal_repo.clone(),
         head_repository_id: Some(render::id(repo.id)),
         head_sha,
-        html_url: format!("{web}/actions/runs/{id}"),
+        html_url: urls.html.clone(),
         id,
-        jobs_url: format!("{api}/actions/runs/{id}/jobs"),
-        logs_url: format!("{api}/actions/runs/{id}/logs"),
+        jobs_url: urls.api("/jobs"),
+        logs_url: urls.api("/logs"),
         name: Some("CI".to_owned()),
         node_id: render::node_id("WorkflowRun", node_id(id)),
         path: ".github/workflows/ci.yml".to_owned(),
@@ -894,16 +895,16 @@ pub(crate) fn workflow_run(
         pull_requests: Some(Vec::new()),
         referenced_workflows: None,
         repository: minimal_repo,
-        rerun_url: format!("{api}/actions/runs/{id}/rerun"),
+        rerun_url: urls.api("/rerun"),
         run_attempt: Some(1),
         run_number: id,
         run_started_at: Some(now),
         status: Some("completed".to_owned()),
         triggering_actor: None,
         updated_at: now,
-        url: format!("{api}/actions/runs/{id}"),
+        url: urls.api.clone(),
         workflow_id: id,
-        workflow_url: format!("{api}/actions/workflows/ci.yml"),
+        workflow_url: repo_urls.workflow("ci.yml"),
     }
 }
 
@@ -911,25 +912,25 @@ pub(crate) fn workflow_run(
 pub(crate) fn job(request: &ApiRequest, run: &types::WorkflowRun, id: i64) -> types::Job {
     let owner = &run.repository.owner.login;
     let repo = &run.repository.name;
-    let api = format!("{}/repos/{owner}/{repo}", request.api_url);
-    let web = format!("{}/{owner}/{repo}", request.web_url);
+    let repo_urls = request.urls().repo(owner, repo);
     let run_id = run.id;
+    let urls = repo_urls.workflow_job(run_id, id);
     let now = crate::time::now_utc();
     types::Job {
-        check_run_url: format!("{api}/check-runs/{id}"),
+        check_run_url: repo_urls.check_run(id).api,
         completed_at: Some(now),
         conclusion: None,
         created_at: now,
         head_branch: run.head_branch.clone(),
         head_sha: run.head_sha.clone(),
-        html_url: Some(format!("{web}/actions/runs/{run_id}/job/{id}")),
+        html_url: Some(urls.html),
         id,
         labels: Vec::new(),
         name: "Job".to_owned(),
         node_id: render::node_id("WorkflowJob", node_id(id)),
         run_attempt: Some(1),
         run_id,
-        run_url: format!("{api}/actions/runs/{run_id}"),
+        run_url: repo_urls.workflow_run(run_id).api,
         runner_group_id: None,
         runner_group_name: None,
         runner_id: None,
@@ -937,7 +938,7 @@ pub(crate) fn job(request: &ApiRequest, run: &types::WorkflowRun, id: i64) -> ty
         started_at: now,
         status: types::JobStatus::Completed,
         steps: Vec::new(),
-        url: format!("{api}/actions/jobs/{id}"),
+        url: urls.api,
         workflow_name: run.name.clone(),
     }
 }
@@ -950,7 +951,7 @@ pub(crate) fn check_run(
     sha: &str,
     id: i64,
 ) -> types::CheckRun {
-    let api = format!("{}/repos/{owner}/{repo}", request.api_url);
+    let urls = request.urls().repo(owner, repo).check_run(id);
     types::CheckRun {
         app: None,
         check_suite: None,
@@ -960,13 +961,13 @@ pub(crate) fn check_run(
         details_url: None,
         external_id: None,
         head_sha: sha.to_owned(),
-        html_url: Some(format!("{api}/check-runs/{id}")),
+        html_url: Some(urls.api.clone()),
         id,
         name: "Check".to_owned(),
         node_id: render::node_id("CheckRun", node_id(id)),
         output: types::CheckRunOutput {
             annotations_count: 0,
-            annotations_url: format!("{api}/check-runs/{id}/annotations"),
+            annotations_url: urls.annotations(),
             summary: None,
             text: None,
             title: None,
@@ -974,7 +975,7 @@ pub(crate) fn check_run(
         pull_requests: Vec::new(),
         started_at: None,
         status: types::CheckRunStatus::Completed,
-        url: format!("{api}/check-runs/{id}"),
+        url: urls.api,
     }
 }
 
@@ -986,7 +987,10 @@ pub(crate) fn commit_status(
     sha: &str,
     id: i64,
 ) -> types::Status {
-    let api = format!("{}/repos/{}/{}", request.api_url, account.login, repo.name);
+    let url = request
+        .urls()
+        .repo(&account.login, &repo.name)
+        .status(sha, id);
     let now = time::now();
     types::Status {
         avatar_url: None,
@@ -999,7 +1003,7 @@ pub(crate) fn commit_status(
         state: "success".to_owned(),
         target_url: None,
         updated_at: now,
-        url: format!("{api}/statuses/{sha}/{id}"),
+        url,
     }
 }
 
@@ -1013,8 +1017,8 @@ pub(crate) fn seeded_issue(
     number: u64,
     seed: IssueSeed,
 ) -> io::Result<types::Issue> {
-    let api = format!("{}/repos/{owner}/{repo_name}", request.api_url);
-    let web = format!("{}/{owner}/{repo_name}", request.web_url);
+    let repo_urls = request.urls().repo(owner, repo_name);
+    let urls = repo_urls.issue(number);
     let now = crate::time::now_utc();
     let signed_number = model_id_or_input(number, "issue number")?;
     let user = default_user.into();
@@ -1029,16 +1033,16 @@ pub(crate) fn seeded_issue(
         closed_at: None,
         closed_by: None,
         comments: 0,
-        comments_url: format!("{api}/issues/{number}/comments"),
+        comments_url: urls.comments(),
         created_at: now,
         draft: None,
-        events_url: format!("{api}/issues/{number}/events"),
-        html_url: format!("{web}/issues/{number}"),
+        events_url: urls.events(),
+        html_url: urls.html.clone(),
         id: signed_number,
         issue_dependencies_summary: None,
         issue_field_values: Vec::new(),
         labels: Vec::new(),
-        labels_url: format!("{api}/issues/{number}/labels{{/name}}"),
+        labels_url: urls.labels(),
         locked: false,
         milestone: None,
         node_id: format!("I_{owner}_{repo_name}_{number}"),
@@ -1049,7 +1053,7 @@ pub(crate) fn seeded_issue(
         pull_request: None,
         reactions: None,
         repository: None,
-        repository_url: api.clone(),
+        repository_url: repo_urls.api.clone(),
         state: "open".to_owned(),
         state_reason: None,
         sub_issues_summary: None,
@@ -1057,7 +1061,7 @@ pub(crate) fn seeded_issue(
         title: format!("Issue #{number}"),
         type_: None,
         updated_at: now,
-        url: format!("{api}/issues/{number}"),
+        url: urls.api.clone(),
         user: Some(user),
     };
     apply!(issue.title, seed.title);
@@ -1100,8 +1104,8 @@ pub(crate) fn seeded_pull_request(
     seed: PullRequestSeed,
 ) -> io::Result<SeededPullRequest> {
     let (owner, repo_name) = repository_name;
-    let api = format!("{}/repos/{owner}/{repo_name}", request.api_url);
-    let web = format!("{}/{owner}/{repo_name}", request.web_url);
+    let repo_urls = request.urls().repo(owner, repo_name);
+    let urls = repo_urls.pull(number);
     let signed_number = model_id_or_input(number, "pull request number")?;
     let id = match seed.id {
         SeedField::Present(id) => model_id_signed(id, "pull request")?,
@@ -1129,12 +1133,12 @@ pub(crate) fn seeded_pull_request(
         changed_files: 0,
         closed_at: None,
         comments: 0,
-        comments_url: format!("{api}/issues/{number}/comments"),
+        comments_url: urls.issue.comments(),
         commits: 1,
-        commits_url: format!("{api}/pulls/{number}/commits"),
+        commits_url: urls.commits(),
         created_at: now,
         deletions: 0,
-        diff_url: format!("{web}/pull/{number}.diff"),
+        diff_url: urls.diff(),
         draft: Some(false),
         head: types::PullRequestHead {
             label: format!("{owner}:feature"),
@@ -1143,34 +1147,34 @@ pub(crate) fn seeded_pull_request(
             sha: default_sha.clone(),
             user: user.clone(),
         },
-        html_url: format!("{web}/pull/{number}"),
+        html_url: urls.html.clone(),
         id,
-        issue_url: format!("{api}/issues/{number}"),
+        issue_url: urls.issue.api.clone(),
         labels: Vec::new(),
         links: types::PullRequestLinks {
             comments: types::Link {
-                href: format!("{api}/issues/{number}/comments"),
+                href: urls.issue.comments(),
             },
             commits: types::Link {
-                href: format!("{api}/pulls/{number}/commits"),
+                href: urls.commits(),
             },
             html: types::Link {
-                href: format!("{web}/pull/{number}"),
+                href: urls.html.clone(),
             },
             issue: types::Link {
-                href: format!("{api}/issues/{number}"),
+                href: urls.issue.api.clone(),
             },
             review_comment: types::Link {
-                href: format!("{api}/pulls/comments{{/number}}"),
+                href: repo_urls.review_comment_template(),
             },
             review_comments: types::Link {
-                href: format!("{api}/pulls/{number}/comments"),
+                href: urls.review_comments(),
             },
             self_: types::Link {
-                href: format!("{api}/pulls/{number}"),
+                href: urls.api.clone(),
             },
             statuses: types::Link {
-                href: format!("{api}/statuses/{default_sha}"),
+                href: repo_urls.statuses(&default_sha),
             },
         },
         locked: false,
@@ -1184,19 +1188,19 @@ pub(crate) fn seeded_pull_request(
         milestone: None,
         node_id: format!("PR_{owner}_{repo_name}_{number}"),
         number: signed_number,
-        patch_url: format!("{web}/pull/{number}.patch"),
+        patch_url: urls.patch(),
         rebaseable: None,
         requested_reviewers: Vec::new(),
         requested_teams: Vec::new(),
-        review_comment_url: format!("{api}/pulls/comments{{/number}}"),
+        review_comment_url: repo_urls.review_comment_template(),
         review_comments: 0,
-        review_comments_url: format!("{api}/pulls/{number}/comments"),
+        review_comments_url: urls.review_comments(),
         stack: None,
         state: types::PullRequestState::Open,
-        statuses_url: format!("{api}/statuses/{default_sha}"),
+        statuses_url: repo_urls.statuses(&default_sha),
         title: format!("Pull request #{number}"),
         updated_at: now,
-        url: format!("{api}/pulls/{number}"),
+        url: urls.api.clone(),
         user,
     };
     apply!(pull.title, seed.title);
@@ -1289,7 +1293,7 @@ pub(crate) fn seeded_pull_request(
         SeedField::Present(files) => {
             let files = files
                 .into_iter()
-                .map(|file| pull_request_file(&api, &web, &pull.head.sha, file))
+                .map(|file| pull_request_file(&repo_urls, &pull.head.sha, file))
                 .collect::<io::Result<Vec<_>>>()?;
             let count = i64::try_from(files.len())
                 .map_err(|error| invalid_seed(format!("too many files: {error}")))?;
@@ -1444,8 +1448,7 @@ fn closing_events(
 
 /// A seeded changed file as `GET /pulls/{number}/files` lists it.
 fn pull_request_file(
-    api: &str,
-    web: &str,
+    repo: &RepoUrls,
     head_sha: &str,
     seed: PullRequestFileSeed,
 ) -> io::Result<types::DiffEntry> {
@@ -1462,13 +1465,13 @@ fn pull_request_file(
     let filename = seed.filename;
     Ok(types::DiffEntry {
         additions,
-        blob_url: format!("{web}/blob/{head_sha}/{filename}"),
+        blob_url: repo.blob_html(head_sha, &filename),
         changes: additions + deletions,
-        contents_url: format!("{api}/contents/{filename}?ref={head_sha}"),
+        contents_url: repo.contents(&filename, head_sha),
         deletions,
         patch: None,
         previous_filename,
-        raw_url: format!("{web}/raw/{head_sha}/{filename}"),
+        raw_url: repo.raw(head_sha, &filename),
         sha: None,
         status,
         filename,
@@ -1574,9 +1577,8 @@ fn label_model(
     apply!(label.color, seed.color);
     apply!(label.default, seed.default);
     apply!(label.url, seed.url);
-    let encoded: String = url::form_urlencoded::byte_serialize(label.name.as_bytes()).collect();
     if label.url.is_empty() {
-        label.url = format!("{}/repos/{owner}/{repo}/labels/{encoded}", request.api_url);
+        label.url = request.urls().repo(owner, repo).label(&label.name);
     }
     Ok(label)
 }

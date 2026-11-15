@@ -31,6 +31,7 @@ use crate::api::ApiRequest;
 use crate::render;
 use crate::state::{Permission, State};
 use crate::types;
+use crate::urls::RepoUrls;
 use crate::webhook_types;
 use crate::webhooks::enqueue;
 
@@ -81,6 +82,16 @@ impl<'a> Ctx<'a> {
         let repo = account.repo(self.name)?;
         let full = render::full_repository(self.request, account, repo, Permission::default());
         Some(json_of(&webhook_types::Repository::from(full)))
+    }
+
+    /// Locations of the repository, spelled as state stores its owner and name.
+    pub(crate) fn urls(&self) -> RepoUrls {
+        let account = self.state.account(self.owner);
+        let owner = account.map_or(self.owner, |account| account.login.as_str());
+        let name = account
+            .and_then(|account| account.repo(self.name))
+            .map_or(self.name, |repo| repo.name.as_str());
+        self.request.urls().repo(owner, name)
     }
 
     /// [`repository_value`] projected onto the `repository-lite` definition.

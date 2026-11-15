@@ -187,7 +187,7 @@ fn poll_message(
                     "id": guid(2, job.message_id),
                     "runner_request_id": job.message_id.to_string(),
                     "should_acknowledge": true,
-                    "run_service_url": format!("{web_url}/_services/run/"),
+                    "run_service_url": crate::urls::service(web_url, "run/"),
                     "billing_owner_id": "",
                 });
                 return ApiResponse::ok(json!({
@@ -335,8 +335,8 @@ fn job_message(job: &ServiceJob, token: &str, web_url: &str) -> Value {
         ("ref_name", "main".to_owned()),
         ("ref_type", "branch".to_owned()),
         ("server_url", web_url.to_owned()),
-        ("api_url", format!("{web_url}/api/v3")),
-        ("graphql_url", format!("{web_url}/api/graphql")),
+        ("api_url", crate::urls::enterprise_api(web_url)),
+        ("graphql_url", crate::urls::graphql(web_url)),
         ("token", token.to_owned()),
     ]);
     let steps: Vec<Value> = job
@@ -372,7 +372,7 @@ fn job_message(job: &ServiceJob, token: &str, web_url: &str) -> Value {
         "resources": {
             "endpoints": [{
                 "name": "SystemVssConnection",
-                "url": format!("{web_url}/_services/run/"),
+                "url": crate::urls::service(web_url, "run/"),
                 "authorization": { "scheme": "OAuth", "parameters": { "AccessToken": token } },
                 "data": {},
             }],
