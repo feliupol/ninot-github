@@ -107,7 +107,7 @@ fn every_event_payload_matches_its_schema() {
         issues::edited(&mut ctx, &issue, Some("Earlier"), Some(""));
         let mut closed = issue.clone();
         closed.state = "closed".to_owned();
-        closed.closed_at = Some(render::timestamp(&crate::time::now()));
+        closed.closed_at = Some(crate::time::now_utc());
         issues::closed(&mut ctx, &closed);
         issues::reopened(&mut ctx, &issue);
         issues::assigned(&mut ctx, &issue, &user);
@@ -128,7 +128,7 @@ fn every_event_payload_matches_its_schema() {
         pull_request::edited(&mut ctx, &pull, changes);
         let mut closed_pull = pull.clone();
         closed_pull.state = types::PullRequestState::Closed;
-        closed_pull.closed_at = Some(render::timestamp(&crate::time::now()));
+        closed_pull.closed_at = Some(crate::time::now_utc());
         pull_request::closed(&mut ctx, &closed_pull);
         pull_request::reopened(&mut ctx, &pull);
         pull_request::synchronize(&mut ctx, &pull, &pull.base.sha, &pull.head.sha, &user);
@@ -327,7 +327,7 @@ fn hook() -> Hook {
 }
 
 fn sample_release(author: types::SimpleUser) -> types::Release {
-    let now = render::timestamp(&crate::time::now());
+    let now = crate::time::now_utc();
     types::Release {
         assets: Vec::new(),
         assets_url: "https://api.github.com/repos/admin/tool/releases/1/assets".to_owned(),
@@ -363,7 +363,7 @@ fn review(
     user: &types::SimpleUser,
     pull: &types::PullRequest,
 ) -> types::PullRequestReview {
-    let now = fixtures::current_timestamp();
+    let now = crate::time::now_utc();
     types::PullRequestReview {
         author_association: types::AuthorAssociation::None,
         body: "Looks fine".to_owned(),
@@ -393,7 +393,7 @@ fn review_comment(
     user: &types::SimpleUser,
     number: i64,
 ) -> types::PullRequestReviewComment {
-    let now = fixtures::current_timestamp();
+    let now = crate::time::now_utc();
     let api = request.api_url.as_str();
     let web = request.web_url.as_str();
     types::PullRequestReviewComment {
@@ -444,7 +444,7 @@ fn issue_comment(
     user: &types::SimpleUser,
     number: i64,
 ) -> types::IssueComment {
-    let now = fixtures::current_timestamp();
+    let now = crate::time::now_utc();
     types::IssueComment {
         author_association: Some(types::AuthorAssociation::None),
         body: Some("I see it".to_owned()),

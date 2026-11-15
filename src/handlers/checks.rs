@@ -43,7 +43,7 @@ impl Handler for ops::ChecksCreate {
                 "missing_field",
             ));
         }
-        let now = render::timestamp(&crate::time::now());
+        let now = crate::time::now_utc();
         let phase = create_phase(&body, now)?;
         let annotations = create_annotations(&body)?;
         let mut state = lock(state);
@@ -55,7 +55,7 @@ impl Handler for ops::ChecksCreate {
             .expect("repository owner exists");
         let app = integration(request, account, app_id, now);
         let head_sha = {
-            let repo = repo(&state, &found);
+            let repo = found.repo(&state);
             checks_model::commit_key(repo, &body.head_sha)
         };
         let raw = state.next_id();
@@ -93,7 +93,7 @@ impl Handler for ops::ChecksCreate {
             url: format!("{api}/check-runs/{id}"),
         };
         {
-            let repo = repo_mut(&mut state, &found);
+            let repo = found.repo_mut(&mut state);
             cap_same_name(repo, suite_id, &run.name);
             repo.check_annotations.insert(id, stored);
             repo.check_runs
@@ -116,12 +116,12 @@ impl Handler for ops::ChecksUpdate {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let body: types::ChecksUpdateRequest = request.json_as()?;
         let id = parse_id(request.param("check_run_id"))?;
-        let now = render::timestamp(&crate::time::now());
+        let now = crate::time::now_utc();
         let extra = update_annotations(&body)?;
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         let app_id = require_checks_app(request)?;
-        let current = find_run(repo(&state, &found), id).ok_or_else(ApiResponse::not_found)?;
+        let current = find_run(found.repo(&state), id).ok_or_else(ApiResponse::not_found)?;
         if current.app.as_ref().map(|app| app.id) != Some(app_id) {
             return Err(checks_forbidden(request));
         }
@@ -133,7 +133,7 @@ impl Handler for ops::ChecksUpdate {
             .collect::<Vec<_>>();
         let was_completed = current.status.to_string() == "completed";
         let updated = {
-            let repo = repo_mut(&mut state, &found);
+            let repo = found.repo_mut(&mut state);
             let count = {
                 let stored = repo.check_annotations.entry(id).or_default();
                 stored.extend(appended);
@@ -189,7 +189,7 @@ impl Handler for ops::ChecksListAnnotations {
         let state = lock(state);
         let found = find_repo(&state, request)?;
         let id = parse_id(request.param("check_run_id"))?;
-        let repo = repo(&state, &found);
+        let repo = found.repo(&state);
         if find_run(repo, id).is_none() {
             return Err(ApiResponse::not_found());
         }
@@ -204,7 +204,7 @@ impl Handler for ops::ChecksRerequestRun {
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         let app_id = require_checks_app(request)?;
-        let run = find_run(repo(&state, &found), id).ok_or_else(ApiResponse::not_found)?;
+        let run = find_run(found.repo(&state), id).ok_or_else(ApiResponse::not_found)?;
         if run.app.as_ref().map(|app| app.id) != Some(app_id) {
             return Err(checks_forbidden(request));
         }
@@ -212,7 +212,7 @@ impl Handler for ops::ChecksRerequestRun {
             return Err(not_rerequestable());
         };
         {
-            let repo = repo_mut(&mut state, &found);
+            let repo = found.repo_mut(&mut state);
             if !checks_model::mark_rerequested(repo, suite_id) {
                 return Err(not_rerequestable());
             }
@@ -228,25 +228,11 @@ impl Handler for ops::ChecksRerequestRun {
 }
 
 fn not_rerequestable() -> ApiResponse {
-    ApiResponse::error(422, "Check run is not rerequestable")
+    ApiResponse::unprocessable("Check run is not rerequestable")
 }
 
 fn parse_id(value: &str) -> Result<i64, ApiResponse> {
     value.parse().map_err(|_| ApiResponse::not_found())
-}
-
-fn repo<'a>(state: &'a State, found: &super::repos::Found) -> &'a Repo {
-    state
-        .account(&found.owner)
-        .and_then(|account| account.repo(&found.name))
-        .expect("repository exists")
-}
-
-fn repo_mut<'a>(state: &'a mut State, found: &super::repos::Found) -> &'a mut Repo {
-    state
-        .account_mut(&found.owner)
-        .and_then(|account| account.repo_mut(&found.name))
-        .expect("repository exists")
 }
 
 fn find_run(repo: &Repo, id: i64) -> Option<types::CheckRun> {

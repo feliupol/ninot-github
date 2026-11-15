@@ -44,15 +44,11 @@ impl Located {
 pub(crate) fn locate(state: &Mutex<State>, request: &ApiRequest) -> Result<Located, ApiResponse> {
     let state = lock(state);
     let found = find_repo(&state, request)?;
-    let repo = state
-        .account(&found.owner)
-        .unwrap()
-        .repo(&found.name)
-        .unwrap();
+    let repo = found.repo(&state);
     let git_dir = repo
         .git_dir
         .clone()
-        .ok_or_else(|| ApiResponse::error(500, "repository has no git storage"))?;
+        .ok_or_else(|| ApiResponse::internal("repository has no git storage"))?;
     let default_branch = repo.default_branch.clone();
     Ok(Located {
         found,
@@ -77,11 +73,6 @@ pub(crate) fn locate_writable(
     Ok((caller, located))
 }
 
-/// Wraps a gitoxide or I/O failure as an internal server error.
-pub(crate) fn internal(error: impl std::fmt::Display) -> ApiResponse {
-    ApiResponse::error(500, &error.to_string())
-}
-
 /// GitHub's answer for git data in a repository without commits.
 pub(crate) fn empty_repository() -> ApiResponse {
     ApiResponse::error(409, "Git Repository is empty.")
@@ -89,7 +80,7 @@ pub(crate) fn empty_repository() -> ApiResponse {
 
 /// Opens the bare repository, ignoring the user's and system's configuration.
 pub(crate) fn open_repo(git_dir: &Path) -> Result<gix::Repository, ApiResponse> {
-    gix::open_opts(git_dir, gix::open::Options::isolated()).map_err(internal)
+    gix::open_opts(git_dir, gix::open::Options::isolated()).map_err(ApiResponse::internal)
 }
 
 /// Parses a full git object id, or 422 when it is not 40 hex digits.
@@ -117,7 +108,9 @@ pub(crate) fn find_existing_object(
     let repo = open_repo(git_dir)?;
     match resolve_object(&repo, spec)? {
         Some(id) => Ok(id),
-        None if ninot_common::git::is_empty(git_dir).map_err(internal)? => Err(empty_repository()),
+        None if ninot_common::git::is_empty(git_dir).map_err(ApiResponse::internal)? => {
+            Err(empty_repository())
+        }
         None => Err(ApiResponse::not_found()),
     }
 }
@@ -241,7 +234,7 @@ pub(crate) fn git_committer_from_signature(
 pub(crate) fn write_blob_in(repo: &gix::Repository, bytes: &[u8]) -> Result<String, ApiResponse> {
     Ok(repo
         .write_blob(bytes)
-        .map_err(internal)?
+        .map_err(ApiResponse::internal)?
         .detach()
         .to_string())
 }
@@ -275,6 +268,6 @@ pub(crate) fn is_ancestor(git_dir: &Path, old: &str, new: &str) -> Result<bool, 
         return Ok(true);
     }
     let reachable = ninot_common::git::new_commits(git_dir, new, &[])
-        .map_err(|_| ApiResponse::error(422, "Update is not a fast forward"))?;
+        .map_err(|_| ApiResponse::unprocessable("Update is not a fast forward"))?;
     Ok(reachable.iter().any(|sha| sha.eq_ignore_ascii_case(old)))
 }

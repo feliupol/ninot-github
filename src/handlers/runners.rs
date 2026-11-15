@@ -473,8 +473,7 @@ fn assign_runners(
             .values()
             .any(|runner| runner.group_id == group_id && !runner_ids.contains(&runner.id))
     {
-        return Err(ApiResponse::error(
-            422,
+        return Err(ApiResponse::unprocessable(
             "Runners cannot be removed from the default runner group.",
         ));
     }

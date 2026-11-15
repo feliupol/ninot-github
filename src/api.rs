@@ -90,7 +90,7 @@ impl ApiRequest {
             if !error.is_data() || serde_json::from_slice::<serde::de::IgnoredAny>(body).is_err() {
                 ApiResponse::error(400, "Problems parsing JSON")
             } else {
-                ApiResponse::error(422, "Invalid request body")
+                ApiResponse::unprocessable("Invalid request body")
             }
         })
     }
@@ -238,7 +238,7 @@ impl ApiResponse {
     pub(crate) fn conditional_typed(request: &ApiRequest, value: &impl Serialize) -> Self {
         match serde_json::to_value(value) {
             Ok(value) => Self::conditional_json(request, value),
-            Err(_) => Self::error(500, "Response could not be serialized"),
+            Err(_) => Self::internal("Response could not be serialized"),
         }
     }
 
@@ -281,6 +281,16 @@ impl ApiResponse {
 
     pub fn not_found() -> Self {
         Self::error(404, "Not Found")
+    }
+
+    /// A 500 whose message is `error`.
+    pub(crate) fn internal(error: impl std::fmt::Display) -> Self {
+        Self::error(500, &error.to_string())
+    }
+
+    /// A 422 with a plain message, for failures that are not about one field.
+    pub(crate) fn unprocessable(message: &str) -> Self {
+        Self::error(422, message)
     }
 
     /// A 422 validation failure naming the offending field.

@@ -24,15 +24,15 @@ impl Handler for ops::IssuesSetLabels {
         let found = find_repo(&state, request)?;
         let number = super::issue_number(request)?;
         let names = requested_names(&body)?;
-        let before = super::record::snapshot(super::repo(&state, &found), number)?;
+        let before = super::record::snapshot(found.repo(&state), number)?;
         let current = before
             .labels
             .iter()
             .map(|label| label.name.clone())
             .collect::<Vec<_>>();
         super::require_push(&found)?;
-        let labels = require_labels(super::repo(&state, &found), &names, &current)?;
-        let catalog = super::catalog(super::repo(&state, &found));
+        let labels = require_labels(found.repo(&state), &names, &current)?;
+        let catalog = super::catalog(found.repo(&state));
         let added: Vec<types::Label> = labels
             .iter()
             .filter(|label| {
@@ -52,23 +52,23 @@ impl Handler for ops::IssuesSetLabels {
             .filter_map(|name| catalog.get(&super::label_key(name)).cloned())
             .collect();
         let actor = super::caller_user(&state, request, &caller.login)?;
-        let repo = super::repo_mut(&mut state, &found);
+        let repo = found.repo_mut(&mut state);
         super::with_subject(
             repo,
             number,
             |issue| {
                 issue.labels = labels.iter().map(render::label_on_issue).collect();
-                issue.updated_at = super::now();
+                issue.updated_at = crate::time::now_utc();
                 Ok(())
             },
             |pull| {
                 pull.labels = labels.iter().map(render::label_on_pull).collect();
-                pull.updated_at = super::now();
+                pull.updated_at = crate::time::now_utc();
                 Ok(())
             },
         )?;
         fire_label_diff(&mut state, request, &found, number, &added, &removed);
-        let after = super::record::snapshot(super::repo(&state, &found), number)?;
+        let after = super::record::snapshot(found.repo(&state), number)?;
         super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
         Ok(ApiResponse::typed(200, &labels))
     }
@@ -80,7 +80,7 @@ impl Handler for ops::IssuesRemoveAllLabels {
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         let number = super::issue_number(request)?;
-        let before = super::record::snapshot(super::repo(&state, &found), number)?;
+        let before = super::record::snapshot(found.repo(&state), number)?;
         let current = before
             .labels
             .iter()
@@ -88,28 +88,28 @@ impl Handler for ops::IssuesRemoveAllLabels {
             .collect::<Vec<_>>();
         super::require_push(&found)?;
         let actor = super::caller_user(&state, request, &caller.login)?;
-        let catalog = super::catalog(super::repo(&state, &found));
+        let catalog = super::catalog(found.repo(&state));
         let removed: Vec<types::Label> = current
             .iter()
             .filter_map(|name| catalog.get(&super::label_key(name)).cloned())
             .collect();
-        let repo = super::repo_mut(&mut state, &found);
+        let repo = found.repo_mut(&mut state);
         super::with_subject(
             repo,
             number,
             |issue| {
                 issue.labels.clear();
-                issue.updated_at = super::now();
+                issue.updated_at = crate::time::now_utc();
                 Ok(())
             },
             |pull| {
                 pull.labels.clear();
-                pull.updated_at = super::now();
+                pull.updated_at = crate::time::now_utc();
                 Ok(())
             },
         )?;
         fire_label_diff(&mut state, request, &found, number, &[], &removed);
-        let after = super::record::snapshot(super::repo(&state, &found), number)?;
+        let after = super::record::snapshot(found.repo(&state), number)?;
         super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
         Ok(ApiResponse::no_content())
     }
@@ -122,7 +122,7 @@ impl Handler for ops::IssuesRemoveLabel {
         let found = find_repo(&state, request)?;
         let number = super::issue_number(request)?;
         let key = super::label_key(&super::decode_param(request.param("name")));
-        let before = super::record::snapshot(super::repo(&state, &found), number)?;
+        let before = super::record::snapshot(found.repo(&state), number)?;
         if !before
             .labels
             .iter()
@@ -131,7 +131,7 @@ impl Handler for ops::IssuesRemoveLabel {
             return Err(ApiResponse::not_found());
         }
         super::require_push(&found)?;
-        let removed = super::catalog(super::repo(&state, &found))
+        let removed = super::catalog(found.repo(&state))
             .get(&key)
             .cloned()
             .into_iter()
@@ -139,9 +139,9 @@ impl Handler for ops::IssuesRemoveLabel {
         let actor = super::caller_user(&state, request, &caller.login)?;
         let remaining = remove_named(&mut state, &found, number, &key)?;
         fire_label_diff(&mut state, request, &found, number, &[], &removed);
-        let after = super::record::snapshot(super::repo(&state, &found), number)?;
+        let after = super::record::snapshot(found.repo(&state), number)?;
         super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
-        let repo = super::repo(&state, &found);
+        let repo = found.repo(&state);
         Ok(ApiResponse::typed(200, &labels_named(repo, &remaining)))
     }
 }
@@ -181,7 +181,7 @@ fn requested_names(body: &Value) -> Result<Vec<String>, ApiResponse> {
         Value::String(name) => Ok(vec![trimmed_name(name)?]),
         Value::Array(items) => items.iter().map(one_name).collect(),
         Value::Object(object) => names_field(object),
-        _ => Err(ApiResponse::error(422, "Invalid request body")),
+        _ => Err(ApiResponse::unprocessable("Invalid request body")),
     }
 }
 
@@ -237,17 +237,17 @@ fn remove_named(
     key: &str,
 ) -> Result<Vec<String>, ApiResponse> {
     super::with_subject(
-        super::repo_mut(state, found),
+        found.repo_mut(state),
         number,
         |issue| {
             issue.labels.retain(|label| !named(label, key));
-            issue.updated_at = super::now();
+            issue.updated_at = crate::time::now_utc();
             Ok(super::label_names(issue))
         },
         |pull| {
             pull.labels
                 .retain(|label| super::label_key(&label.name) != key);
-            pull.updated_at = super::now();
+            pull.updated_at = crate::time::now_utc();
             Ok(pull.labels.iter().map(|label| label.name.clone()).collect())
         },
     )
@@ -261,8 +261,8 @@ fn fire_label_diff(
     added: &[types::Label],
     removed: &[types::Label],
 ) {
-    let issue = super::stored_issue(super::repo(state, found), number);
-    let pull = super::stored_pull(super::repo(state, found), number);
+    let issue = super::stored_issue(found.repo(state), number);
+    let pull = super::stored_pull(found.repo(state), number);
     let mut ctx = super::webhook_ctx(state, request, found);
     if let Some(issue) = &issue {
         for label in added {

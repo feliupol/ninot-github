@@ -35,7 +35,7 @@ impl Handler for ops::IssuesAddAssignees {
             None => Vec::new(),
         };
         let added = resolve_assignees(&state, request, &found.owner, &logins)?;
-        let stored = super::stored_issue(super::repo(&state, &found), number);
+        let stored = super::stored_issue(found.repo(&state), number);
         let already = stored
             .as_ref()
             .map(|issue| issue.assignees.clone())
@@ -49,31 +49,31 @@ impl Handler for ops::IssuesAddAssignees {
             })
             .cloned()
             .collect();
-        let before = super::record::snapshot(super::repo(&state, &found), number)?;
+        let before = super::record::snapshot(found.repo(&state), number)?;
         let actor = super::caller_user(&state, request, &caller.login)?;
         let issue = super::with_subject(
-            super::repo_mut(&mut state, &found),
+            found.repo_mut(&mut state),
             number,
             |issue| {
                 let merged = merge_assignees(&issue.assignees, added.clone())?;
                 write_assignees(&mut issue.assignee, &mut issue.assignees, merged);
-                issue.updated_at = super::now();
+                issue.updated_at = crate::time::now_utc();
                 Ok(issue.clone())
             },
             |pull| {
                 let merged = merge_assignees(&pull.assignees, added.clone())?;
                 write_assignees(&mut pull.assignee, &mut pull.assignees, merged);
-                pull.updated_at = super::now();
+                pull.updated_at = crate::time::now_utc();
                 Ok(render::issue_from_pull(pull))
             },
         )?;
-        if let Some(issue) = super::stored_issue(super::repo(&state, &found), number) {
+        if let Some(issue) = super::stored_issue(found.repo(&state), number) {
             let mut ctx = super::webhook_ctx(&mut state, request, &found);
             for user in &newly {
                 events::issues::assigned(&mut ctx, &issue, user);
             }
         }
-        let after = super::record::snapshot(super::repo(&state, &found), number)?;
+        let after = super::record::snapshot(found.repo(&state), number)?;
         super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
         Ok(ApiResponse::typed(201, &issue))
     }
@@ -94,34 +94,34 @@ impl Handler for ops::IssuesRemoveAssignees {
             Some(value) => string_logins(value)?,
             None => Vec::new(),
         };
-        let removed = super::stored_issue(super::repo(&state, &found), number)
+        let removed = super::stored_issue(found.repo(&state), number)
             .map(|issue| without_kept(&issue.assignees, &logins))
             .unwrap_or_default();
-        let before = super::record::snapshot(super::repo(&state, &found), number)?;
+        let before = super::record::snapshot(found.repo(&state), number)?;
         let actor = super::caller_user(&state, request, &caller.login)?;
         let issue = super::with_subject(
-            super::repo_mut(&mut state, &found),
+            found.repo_mut(&mut state),
             number,
             |issue| {
                 let remaining = without_logins(&issue.assignees, &logins);
                 write_assignees(&mut issue.assignee, &mut issue.assignees, remaining);
-                issue.updated_at = super::now();
+                issue.updated_at = crate::time::now_utc();
                 Ok(issue.clone())
             },
             |pull| {
                 let remaining = without_logins(&pull.assignees, &logins);
                 write_assignees(&mut pull.assignee, &mut pull.assignees, remaining);
-                pull.updated_at = super::now();
+                pull.updated_at = crate::time::now_utc();
                 Ok(render::issue_from_pull(pull))
             },
         )?;
-        if let Some(issue) = super::stored_issue(super::repo(&state, &found), number) {
+        if let Some(issue) = super::stored_issue(found.repo(&state), number) {
             let mut ctx = super::webhook_ctx(&mut state, request, &found);
             for user in &removed {
                 events::issues::unassigned(&mut ctx, &issue, user);
             }
         }
-        let after = super::record::snapshot(super::repo(&state, &found), number)?;
+        let after = super::record::snapshot(found.repo(&state), number)?;
         super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
         Ok(ApiResponse::typed(200, &issue))
     }
@@ -158,7 +158,7 @@ impl Handler for ops::IssuesCheckUserCanBeAssignedToIssue {
         let found = find_repo(&state, request)?;
         let number = super::issue_number(request)?;
         let assignee = super::decode_param(request.param("assignee"));
-        let repo = super::repo(&state, &found);
+        let repo = found.repo(&state);
         let exists = repo.issues.contains_key(&number) || repo.pull_requests.contains_key(&number);
         if exists && super::can_be_assigned(&state, &found.owner, &assignee) {
             Ok(ApiResponse::no_content())
@@ -330,12 +330,12 @@ fn current_issue(
     found: &crate::handlers::repos::Found,
     number: u64,
 ) -> Result<types::Issue, ApiResponse> {
-    let repo = super::repo(state, found);
+    let repo = found.repo(state);
     if let Some(pull) = repo.pull_requests.get(&number) {
         let data = pull
             .data
             .as_ref()
-            .ok_or_else(|| ApiResponse::error(500, "Pull request REST model is not seeded"))?;
+            .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?;
         return Ok(render::issue_from_pull(data));
     }
     repo.issues

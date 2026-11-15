@@ -856,7 +856,7 @@ pub(crate) fn workflow_run(
 ) -> types::WorkflowRun {
     let api = format!("{}/repos/{}/{}", request.api_url, account.login, repo.name);
     let web = format!("{}/{}/{}", request.web_url, account.login, repo.name);
-    let now = current_timestamp();
+    let now = crate::time::now_utc();
     let minimal_repo = render::minimal_repository(
         request,
         account,
@@ -914,7 +914,7 @@ pub(crate) fn job(request: &ApiRequest, run: &types::WorkflowRun, id: i64) -> ty
     let api = format!("{}/repos/{owner}/{repo}", request.api_url);
     let web = format!("{}/{owner}/{repo}", request.web_url);
     let run_id = run.id;
-    let now = current_timestamp();
+    let now = crate::time::now_utc();
     types::Job {
         check_run_url: format!("{api}/check-runs/{id}"),
         completed_at: Some(now),
@@ -1015,7 +1015,7 @@ pub(crate) fn seeded_issue(
 ) -> io::Result<types::Issue> {
     let api = format!("{}/repos/{owner}/{repo_name}", request.api_url);
     let web = format!("{}/{owner}/{repo_name}", request.web_url);
-    let now = current_timestamp();
+    let now = crate::time::now_utc();
     let signed_number = model_id_or_input(number, "issue number")?;
     let user = default_user.into();
     let mut issue = types::Issue {
@@ -1110,7 +1110,7 @@ pub(crate) fn seeded_pull_request(
     let default_sha = default_sha();
     let user = default_user;
     let repository = default_repository;
-    let now = current_timestamp();
+    let now = crate::time::now_utc();
     let mut pull = types::PullRequest {
         active_lock_reason: None,
         additions: 0,
@@ -1891,7 +1891,7 @@ fn integration(
     let owner = render::simple_user(request, default_owner);
     let mut integration = types::NullableIntegration {
         client_id: None,
-        created_at: render::timestamp(&time::now()),
+        created_at: crate::time::now_utc(),
         description: Some(String::new()),
         events: Vec::new(),
         external_url: String::new(),
@@ -1910,7 +1910,7 @@ fn integration(
             extra: std::collections::HashMap::new(),
         },
         slug: None,
-        updated_at: render::timestamp(&time::now()),
+        updated_at: crate::time::now_utc(),
     };
     if let SeedField::Present(id) = seed.id {
         integration.id = model_id_signed(id, "integration")?;
@@ -1947,11 +1947,6 @@ fn integration(
         apply_optional!(integration.permissions.metadata, permissions.metadata);
     }
     Ok(integration)
-}
-
-/// Produces the current timestamp in the generated model's UTC representation.
-pub(crate) fn current_timestamp() -> DateTime<Utc> {
-    render::timestamp(&time::now())
 }
 
 fn field_or<T>(field: SeedField<T>, default: T) -> T {
@@ -1999,8 +1994,7 @@ where
 }
 
 pub(crate) fn parse_timestamp(value: &str, kind: &str) -> io::Result<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(value)
-        .map(|value| value.with_timezone(&Utc))
+    crate::time::parse(value)
         .map_err(|error| invalid_seed(format!("invalid {kind} timestamp '{value}': {error}")))
 }
 

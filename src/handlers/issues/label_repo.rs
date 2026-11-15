@@ -32,7 +32,7 @@ impl Handler for ops::IssuesCreateLabel {
             }
         };
         let description = optional_description(body.get("description"))?;
-        if super::catalog(super::repo(&state, &found)).contains_key(&super::label_key(&name)) {
+        if super::catalog(found.repo(&state)).contains_key(&super::label_key(&name)) {
             return Err(ApiResponse::validation_failed(
                 "Label",
                 "name",
@@ -40,7 +40,8 @@ impl Handler for ops::IssuesCreateLabel {
             ));
         }
         let label = new_label(&mut state, request, &found, &name, &color, description);
-        super::repo_mut(&mut state, &found)
+        found
+            .repo_mut(&mut state)
             .labels
             .insert(super::label_key(&label.name), label.clone());
         Ok(ApiResponse::typed(201, &label).with_header("location", label.url.clone()))
@@ -52,7 +53,7 @@ impl Handler for ops::IssuesGetLabel {
         let state = lock(state);
         let found = find_repo(&state, request)?;
         let key = super::label_key(&super::decode_param(request.param("name")));
-        let label = super::catalog(super::repo(&state, &found))
+        let label = super::catalog(found.repo(&state))
             .get(&key)
             .cloned()
             .ok_or_else(ApiResponse::not_found)?;
@@ -67,7 +68,7 @@ impl Handler for ops::IssuesUpdateLabel {
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         let key = super::label_key(&super::decode_param(request.param("name")));
-        if !super::catalog(super::repo(&state, &found)).contains_key(&key) {
+        if !super::catalog(found.repo(&state)).contains_key(&key) {
             return Err(ApiResponse::not_found());
         }
         super::require_push(&found)?;
@@ -83,13 +84,13 @@ impl Handler for ops::IssuesDeleteLabel {
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         let key = super::label_key(&super::decode_param(request.param("name")));
-        if !super::catalog(super::repo(&state, &found)).contains_key(&key) {
+        if !super::catalog(found.repo(&state)).contains_key(&key) {
             return Err(ApiResponse::not_found());
         }
         super::require_push(&found)?;
-        let repo = super::repo_mut(&mut state, &found);
+        let repo = found.repo_mut(&mut state);
         repo.labels.remove(&key);
-        let now = super::now();
+        let now = crate::time::now_utc();
         for issue in repo.issues.values_mut() {
             let before = issue.data.labels.len();
             issue
@@ -198,7 +199,7 @@ fn label_patch(
     body: &Map<String, Value>,
     key: &str,
 ) -> Result<LabelPatch, ApiResponse> {
-    let current = super::catalog(super::repo(state, found))
+    let current = super::catalog(found.repo(state))
         .get(key)
         .cloned()
         .ok_or_else(ApiResponse::not_found)?;
@@ -214,7 +215,7 @@ fn label_patch(
         }
     };
     let new_key = super::label_key(&name);
-    if new_key != key && super::catalog(super::repo(state, found)).contains_key(&new_key) {
+    if new_key != key && super::catalog(found.repo(state)).contains_key(&new_key) {
         return Err(ApiResponse::validation_failed(
             "Label",
             "name",
@@ -265,10 +266,10 @@ fn store_patch(
     key: &str,
     patch: LabelPatch,
 ) -> Result<types::Label, ApiResponse> {
-    let stored = super::repo_mut(state, found).labels.remove(key);
+    let stored = found.repo_mut(state).labels.remove(key);
     let mut label = match stored {
         Some(label) => label,
-        None => super::catalog(super::repo(state, found))
+        None => super::catalog(found.repo(state))
             .remove(key)
             .ok_or_else(ApiResponse::not_found)?,
     };
@@ -280,7 +281,7 @@ fn store_patch(
     apply_archive(&mut label, patch.archived, patch.archiver);
     let api = format!("{}/repos/{}/{}", request.api_url, found.owner, found.name);
     label.url = super::label_api_url(&api, &label.name);
-    let repo = super::repo_mut(state, found);
+    let repo = found.repo_mut(state);
     rewrite_copies(repo, key, &label);
     repo.labels
         .insert(super::label_key(&label.name), label.clone());
@@ -294,7 +295,7 @@ fn apply_archive(
 ) {
     match archived {
         Some(true) if label.archived_at.is_none() => {
-            label.archived_at = Some(super::now());
+            label.archived_at = Some(crate::time::now_utc());
             label.archived_by = archiver;
         }
         Some(false) => {
@@ -308,7 +309,7 @@ fn apply_archive(
 fn rewrite_copies(repo: &mut crate::state::Repo, previous: &str, label: &types::Label) {
     let on_issue = render::label_on_issue(label);
     let on_pull = render::label_on_pull(label);
-    let now = super::now();
+    let now = crate::time::now_utc();
     for issue in repo.issues.values_mut() {
         let mut changed = false;
         for slot in &mut issue.data.labels {

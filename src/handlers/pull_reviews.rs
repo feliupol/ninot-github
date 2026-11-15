@@ -48,18 +48,6 @@ fn text(body: &Map<String, Value>, name: &str) -> Result<Option<String>, ApiResp
     }
 }
 
-fn pull_mut<'a>(
-    state: &'a mut State,
-    found: &Found,
-    number: u64,
-) -> Result<&'a mut state::PullRequest, ApiResponse> {
-    state
-        .account_mut(&found.owner)
-        .and_then(|account| account.repo_mut(&found.name))
-        .and_then(|repo| repo.pull_requests.get_mut(&number))
-        .ok_or_else(ApiResponse::not_found)
-}
-
 fn authored_by(review: &types::PullRequestReview, login: &str) -> bool {
     review
         .user
@@ -87,7 +75,7 @@ impl Handler for ops::PullsGetReview {
         let login = request.caller.as_ref().map(|caller| caller.login.clone());
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
-        let pull = pull_mut(&mut state, &found, number(request)?)?;
+        let pull = found.pull_mut(&mut state, number(request)?)?;
         let index = locate(pull, review_id(request)?, login.as_deref().unwrap_or(""))?;
         Ok(ApiResponse::typed(200, &pull.reviews[index]))
     }
@@ -100,7 +88,7 @@ impl Handler for ops::PullsUpdateReview {
         let text = text(&body, "body")?.ok_or_else(|| field("body", "missing_field"))?;
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
-        let pull = pull_mut(&mut state, &found, number(request)?)?;
+        let pull = found.pull_mut(&mut state, number(request)?)?;
         let index = locate(pull, review_id(request)?, &caller.login)?;
         let review = &mut pull.reviews[index];
         if !authored_by(review, &caller.login) {
@@ -116,12 +104,11 @@ impl Handler for ops::PullsDeletePendingReview {
         let caller = request.require_scope(&["repo", "public_repo"])?;
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
-        let pull = pull_mut(&mut state, &found, number(request)?)?;
+        let pull = found.pull_mut(&mut state, number(request)?)?;
         let id = review_id(request)?;
         let index = locate(pull, id, &caller.login)?;
         if pull.reviews[index].state != "PENDING" {
-            return Err(ApiResponse::error(
-                422,
+            return Err(ApiResponse::unprocessable(
                 "Can not delete a non-pending pull request review",
             ));
         }
@@ -140,7 +127,7 @@ impl Handler for ops::PullsListCommentsForReview {
         let login = request.caller.as_ref().map(|caller| caller.login.clone());
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
-        let pull = pull_mut(&mut state, &found, number(request)?)?;
+        let pull = found.pull_mut(&mut state, number(request)?)?;
         let id = review_id(request)?;
         locate(pull, id, login.as_deref().unwrap_or(""))?;
         let comments = pull
@@ -167,25 +154,22 @@ impl Handler for ops::PullsDismissReview {
             return Err(forbidden());
         }
         let number = number(request)?;
-        let pull = pull_mut(&mut state, &found, number)?;
+        let pull = found.pull_mut(&mut state, number)?;
         let index = locate(pull, review_id(request)?, &caller.login)?;
         let review = &mut pull.reviews[index];
         match review.state.as_str() {
             "PENDING" => {
-                return Err(ApiResponse::error(
-                    422,
+                return Err(ApiResponse::unprocessable(
                     "Can not dismiss a pending pull request review",
                 ));
             }
             "COMMENTED" => {
-                return Err(ApiResponse::error(
-                    422,
+                return Err(ApiResponse::unprocessable(
                     "Can not dismiss a commented pull request review",
                 ));
             }
             "DISMISSED" => {
-                return Err(ApiResponse::error(
-                    422,
+                return Err(ApiResponse::unprocessable(
                     "Can not dismiss a dismissed pull request review",
                 ));
             }
@@ -194,7 +178,7 @@ impl Handler for ops::PullsDismissReview {
         "DISMISSED".clone_into(&mut review.state);
         let review = review.clone();
         if let Some(data) = &mut pull.data {
-            data.updated_at = crate::render::timestamp(&state::now());
+            data.updated_at = crate::time::now_utc();
         }
         Ok(ApiResponse::typed(200, &review))
     }
@@ -215,25 +199,23 @@ impl Handler for ops::PullsSubmitReview {
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         let number = number(request)?;
-        let pull = pull_mut(&mut state, &found, number)?;
+        let pull = found.pull_mut(&mut state, number)?;
         let index = locate(pull, review_id(request)?, &caller.login)?;
         let review = &mut pull.reviews[index];
         if !authored_by(review, &caller.login) {
             return Err(forbidden());
         }
         if review.state != "PENDING" {
-            return Err(ApiResponse::error(
-                422,
+            return Err(ApiResponse::unprocessable(
                 "Can not submit a non-pending pull request review",
             ));
         }
         let data = pull
             .data
             .as_mut()
-            .ok_or_else(|| ApiResponse::error(500, "Pull request REST model is not seeded"))?;
+            .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?;
         if review_state != "COMMENTED" && data.user.login.eq_ignore_ascii_case(&caller.login) {
-            return Err(ApiResponse::error(
-                422,
+            return Err(ApiResponse::unprocessable(
                 "A pull request author cannot approve or request changes on their own pull request",
             ));
         }
@@ -242,12 +224,11 @@ impl Handler for ops::PullsSubmitReview {
             review.body = new_body;
         }
         if review_state != "APPROVED" && review.body.is_empty() {
-            return Err(ApiResponse::error(
-                422,
+            return Err(ApiResponse::unprocessable(
                 "body is required for this review event",
             ));
         }
-        let now = crate::render::timestamp(&state::now());
+        let now = crate::time::now_utc();
         review.state = review_state.to_owned();
         review.submitted_at = Some(now);
         let review = review.clone();

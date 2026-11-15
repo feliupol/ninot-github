@@ -202,9 +202,7 @@ fn rerun_workflow(state: &Mutex<State>, request: &ApiRequest, failed_only: bool)
         run.status = Some("queued".to_owned());
         run.conclusion = None;
         run.run_started_at = None;
-        run.updated_at = DateTime::parse_from_rfc3339(&crate::state::now())
-            .expect("server timestamp is RFC 3339")
-            .with_timezone(&Utc);
+        run.updated_at = crate::time::now_utc();
         let run_snapshot = run.clone();
         let job_snapshots = jobs
             .iter()
@@ -459,7 +457,6 @@ fn simple_commit_status(status: types::Status) -> Result<types::SimpleCommitStat
 
 /// Parses a timestamp already accepted by the status fixture model.
 fn parse_timestamp(value: &str) -> Result<DateTime<Utc>, ApiResponse> {
-    DateTime::parse_from_rfc3339(value)
-        .map(|timestamp| timestamp.with_timezone(&Utc))
-        .map_err(|_| ApiResponse::error(500, "Stored status timestamp is invalid"))
+    crate::time::parse(value)
+        .map_err(|_| ApiResponse::internal("Stored status timestamp is invalid"))
 }

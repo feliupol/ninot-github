@@ -13,7 +13,7 @@ impl Handler for ops::GistsCreate {
         request.require_scope(&["gist"])?;
         let body: types::GistsCreateRequest = request.json_as()?;
         if body.files.is_empty() {
-            return Err(ApiResponse::error(422, "files is required"));
+            return Err(ApiResponse::unprocessable("files is required"));
         }
 
         let mut state = lock(state);

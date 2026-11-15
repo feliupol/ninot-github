@@ -6,10 +6,9 @@
 
 use std::sync::Mutex;
 
-use chrono::{DateTime, Utc};
 use serde_json::{Map, Value};
 
-use super::pull_review_comment_model::{Anchor, NewComment, build, invalid, missing, render_now};
+use super::pull_review_comment_model::{Anchor, NewComment, build, invalid, missing};
 
 use super::Handler;
 use super::repos::{Found, find_repo};
@@ -45,25 +44,6 @@ fn comment_text(body: &Map<String, Value>) -> Result<String, ApiResponse> {
     }
 }
 
-fn repo<'a>(state: &'a State, found: &Found) -> &'a state::Repo {
-    state
-        .account(&found.owner)
-        .and_then(|account| account.repo(&found.name))
-        .expect("find_repo found the repository")
-}
-
-fn pull_mut<'a>(
-    state: &'a mut State,
-    found: &Found,
-    number: u64,
-) -> Result<&'a mut state::PullRequest, ApiResponse> {
-    state
-        .account_mut(&found.owner)
-        .and_then(|account| account.repo_mut(&found.name))
-        .and_then(|repo| repo.pull_requests.get_mut(&number))
-        .ok_or_else(ApiResponse::not_found)
-}
-
 /// Whether `comment` belongs to a pending review that `login` does not own.
 fn hidden(
     pull: &state::PullRequest,
@@ -93,7 +73,8 @@ fn caller_login(request: &ApiRequest) -> &str {
 /// The pull request number and index of the comment `id`, when the caller can see it.
 fn locate(state: &State, found: &Found, request: &ApiRequest, id: i64) -> Option<(u64, usize)> {
     let login = caller_login(request);
-    repo(state, found)
+    found
+        .repo(state)
         .pull_requests
         .iter()
         .find_map(|(number, pull)| {
@@ -109,13 +90,13 @@ impl Handler for ops::PullsListReviewCommentsForRepo {
         let login = caller_login(request);
         let since = match request.query("since") {
             Some(value) => Some(
-                DateTime::parse_from_rfc3339(value)
-                    .map(|time| time.with_timezone(&Utc))
+                crate::time::parse(value)
                     .map_err(|_| ApiResponse::validation_failed("Pull", "since", "invalid"))?,
             ),
             None => None,
         };
-        let mut comments = repo(&state, &found)
+        let mut comments = found
+            .repo(&state)
             .pull_requests
             .values()
             .flat_map(|pull| {
@@ -161,7 +142,7 @@ impl Handler for ops::PullsGetReviewComment {
         let id = comment_id(request)?;
         let (number, index) =
             locate(&state, &found, request, id).ok_or_else(ApiResponse::not_found)?;
-        let comment = repo(&state, &found).pull_requests[&number].review_comments[index].clone();
+        let comment = found.repo(&state).pull_requests[&number].review_comments[index].clone();
         Ok(ApiResponse::typed(200, &comment))
     }
 }
@@ -176,7 +157,7 @@ impl Handler for ops::PullsUpdateReviewComment {
         let id = comment_id(request)?;
         let (number, index) =
             locate(&state, &found, request, id).ok_or_else(ApiResponse::not_found)?;
-        let pull = pull_mut(&mut state, &found, number)?;
+        let pull = found.pull_mut(&mut state, number)?;
         let comment = &mut pull.review_comments[index];
         if !may_change(&found, comment, &caller.login) {
             return Err(ApiResponse::error(
@@ -184,7 +165,7 @@ impl Handler for ops::PullsUpdateReviewComment {
                 "Must have admin rights to Repository.",
             ));
         }
-        let now = render_now();
+        let now = crate::time::now_utc();
         comment.body = text;
         comment.updated_at = now;
         let comment = comment.clone();
@@ -203,7 +184,7 @@ impl Handler for ops::PullsDeleteReviewComment {
         let id = comment_id(request)?;
         let (number, index) =
             locate(&state, &found, request, id).ok_or_else(ApiResponse::not_found)?;
-        let pull = pull_mut(&mut state, &found, number)?;
+        let pull = found.pull_mut(&mut state, number)?;
         if !may_change(&found, &pull.review_comments[index], &caller.login) {
             return Err(ApiResponse::error(
                 403,
@@ -213,7 +194,7 @@ impl Handler for ops::PullsDeleteReviewComment {
         pull.review_comments.remove(index);
         if let Some(data) = &mut pull.data {
             data.review_comments = pull.review_comments.len() as i64;
-            data.updated_at = render_now();
+            data.updated_at = crate::time::now_utc();
         }
         Ok(ApiResponse::no_content())
     }
@@ -256,13 +237,13 @@ impl Handler for ops::PullsCreateReviewComment {
             Some(Value::String(sha)) => Some(sha.clone()),
             Some(_) => return Err(invalid("commit_id")),
         };
-        let author = author(&state, request, &caller.login)?;
+        let author = super::pulls::caller_user(&state, request, &caller.login)?;
         let id = state.next_id();
-        let pull = pull_mut(&mut state, &found, number)?;
+        let pull = found.pull_mut(&mut state, number)?;
         let data = pull
             .data
             .as_mut()
-            .ok_or_else(|| ApiResponse::error(500, "Pull request REST model is not seeded"))?;
+            .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?;
         let head = data.head.sha.clone();
         if commit_override.as_deref().is_some_and(|sha| sha != head) {
             return Err(ApiResponse::validation_failed(
@@ -312,17 +293,6 @@ impl Handler for ops::PullsCreateReplyForReviewComment {
     }
 }
 
-fn author(
-    state: &State,
-    request: &ApiRequest,
-    login: &str,
-) -> Result<types::SimpleUser, ApiResponse> {
-    state
-        .account(login)
-        .map(|account| crate::render::simple_user(request, account))
-        .ok_or_else(ApiResponse::not_found)
-}
-
 /// Appends `comment` to the pull request and queues its webhook.
 fn store(
     state: &mut State,
@@ -331,7 +301,7 @@ fn store(
     number: u64,
     comment: &types::PullRequestReviewComment,
 ) -> Result<(), ApiResponse> {
-    let pull = pull_mut(state, found, number)?;
+    let pull = found.pull_mut(state, number)?;
     pull.review_comments.push(comment.clone());
     let data = pull.data.as_mut().map(|data| {
         data.review_comments = pull.review_comments.len() as i64;
@@ -354,9 +324,9 @@ fn reply(
     text: String,
     login: &str,
 ) -> ApiResult {
-    let author = author(state, request, login)?;
+    let author = super::pulls::caller_user(state, request, login)?;
     let id = state.next_id();
-    let pull = pull_mut(state, found, number)?;
+    let pull = found.pull_mut(state, number)?;
     let parent = pull
         .review_comments
         .iter()

@@ -35,14 +35,6 @@ impl Handler for ops::PullsCheckIfMerged {
     }
 }
 
-fn unprocessable(message: &str) -> ApiResponse {
-    ApiResponse::error(422, message)
-}
-
-fn internal(error: impl std::fmt::Display) -> ApiResponse {
-    ApiResponse::error(500, &error.to_string())
-}
-
 /// Runs `git` against `git_dir` with the user's and system's configuration ignored.
 fn run(git_dir: &std::path::Path, args: &[&str]) -> std::io::Result<std::process::Output> {
     Command::new("git")
@@ -93,44 +85,46 @@ impl Handler for ops::PullsUpdateBranch {
         let git_dir = repo
             .git_dir
             .clone()
-            .ok_or_else(|| internal("no git store"))?;
+            .ok_or_else(|| ApiResponse::internal("no git store"))?;
         let data = repo
             .pull_requests
             .get(&number)
             .and_then(|pull| pull.data.as_ref())
             .ok_or_else(ApiResponse::not_found)?;
         if data.state != crate::types::PullRequestState::Open {
-            return Err(unprocessable("pull request is not open"));
+            return Err(ApiResponse::unprocessable("pull request is not open"));
         }
         if data.head.user.login != found.owner || data.base.user.login != found.owner {
-            return Err(unprocessable(
+            return Err(ApiResponse::unprocessable(
                 "only pull requests whose head branch is in this repository can be updated",
             ));
         }
         let (head_ref, base_ref) = (data.head.ref_.clone(), data.base.ref_.clone());
         let head = git::resolve_commit(&git_dir, &format!("refs/heads/{head_ref}"))
-            .map_err(internal)?
-            .ok_or_else(|| unprocessable("head branch does not exist"))?;
+            .map_err(ApiResponse::internal)?
+            .ok_or_else(|| ApiResponse::unprocessable("head branch does not exist"))?;
         let base = git::resolve_commit(&git_dir, &format!("refs/heads/{base_ref}"))
-            .map_err(internal)?
-            .ok_or_else(|| unprocessable("base branch does not exist"))?;
+            .map_err(ApiResponse::internal)?
+            .ok_or_else(|| ApiResponse::unprocessable("base branch does not exist"))?;
         if expected.is_some_and(|sha| sha != head) {
-            return Err(unprocessable(
+            return Err(ApiResponse::unprocessable(
                 "expected head sha didn't match current head ref.",
             ));
         }
         if git::new_commits(&git_dir, &base, &[&head])
-            .map_err(internal)?
+            .map_err(ApiResponse::internal)?
             .is_empty()
         {
-            return Err(unprocessable(
+            return Err(ApiResponse::unprocessable(
                 "There are no new commits on the base branch.",
             ));
         }
-        let merged =
-            run(&git_dir, &["merge-tree", "--write-tree", &head, &base]).map_err(internal)?;
+        let merged = run(&git_dir, &["merge-tree", "--write-tree", &head, &base])
+            .map_err(ApiResponse::internal)?;
         if !merged.status.success() {
-            return Err(unprocessable("merge conflict between base and head"));
+            return Err(ApiResponse::unprocessable(
+                "merge conflict between base and head",
+            ));
         }
         let output = String::from_utf8_lossy(&merged.stdout);
         let tree = output.lines().next().unwrap_or_default().trim().to_owned();
@@ -148,9 +142,11 @@ impl Handler for ops::PullsUpdateBranch {
                 &message,
             ],
         )
-        .map_err(internal)?;
+        .map_err(ApiResponse::internal)?;
         if !commit.status.success() {
-            return Err(internal(String::from_utf8_lossy(&commit.stderr).trim()));
+            return Err(ApiResponse::internal(
+                String::from_utf8_lossy(&commit.stderr).trim(),
+            ));
         }
         let sha = String::from_utf8_lossy(&commit.stdout).trim().to_owned();
         git::create_ref(
@@ -159,7 +155,7 @@ impl Handler for ops::PullsUpdateBranch {
             &sha,
             &super::BOT,
         )
-        .map_err(internal)?;
+        .map_err(ApiResponse::internal)?;
         let actor = state
             .account(&caller.login)
             .map(|account| crate::render::simple_user(request, account))
@@ -170,10 +166,10 @@ impl Handler for ops::PullsUpdateBranch {
             &found.name,
             &head_ref,
             &sha,
-            crate::render::timestamp(&crate::state::now()),
+            crate::time::now_utc(),
             &actor,
         )
-        .map_err(internal)?;
+        .map_err(ApiResponse::internal)?;
         let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
         for item in &moved {
             events::pull_request::synchronize(

@@ -8,7 +8,7 @@ use std::io;
 use std::path::Path;
 use std::sync::Mutex;
 
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{DateTime, Utc};
 use ninot_common::git;
 use serde_json::Value;
 
@@ -179,11 +179,6 @@ pub(crate) fn branch_moved(
     Ok(moved)
 }
 
-/// A timestamp as timeline events that type it as a string render it.
-fn text(time: &DateTime<Utc>) -> String {
-    time.to_rfc3339_opts(SecondsFormat::Secs, true)
-}
-
 /// Serializes a response model into one timeline entry.
 fn entry(value: &impl serde::Serialize) -> Value {
     serde_json::to_value(value).expect("timeline events serialize to JSON")
@@ -199,7 +194,7 @@ fn stored_event(api: &str, event: &TimelineEvent) -> Value {
         .map(|sha| format!("{api}/commits/{sha}"));
     let kind = event.kind.name();
     let node = node_id(kind, event.id);
-    let created_at = text(&event.created_at);
+    let created_at = crate::time::format(&event.created_at);
     match event.kind {
         TimelineEventKind::ReviewRequested => entry(&types::ReviewRequestedIssueEvent {
             actor: event.actor.clone(),
@@ -449,11 +444,6 @@ fn with_pull<T>(
     read(repo, pull, &api, &html)
 }
 
-/// Maps a git failure to an internal error response.
-fn internal(error: io::Error) -> ApiResponse {
-    ApiResponse::error(500, &error.to_string())
-}
-
 impl Handler for ops::IssuesListEventsForTimeline {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let rows = {
@@ -476,7 +466,7 @@ impl Handler for ops::IssuesListEventsForTimeline {
                     .pull_requests
                     .get(&number)
                     .ok_or_else(ApiResponse::not_found)?;
-                pull_timeline(&api, &html, repo, pull).map_err(internal)?
+                pull_timeline(&api, &html, repo, pull).map_err(ApiResponse::internal)?
             }
         };
         Ok(paginate(request, &request.path, rows))
@@ -489,9 +479,9 @@ impl Handler for ops::PullsListCommits {
             let data = pull
                 .data
                 .as_ref()
-                .ok_or_else(|| ApiResponse::error(500, "Pull request REST model is not seeded"))?;
+                .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?;
             Ok(pull_commits(repo.git_dir.as_deref(), data)
-                .map_err(internal)?
+                .map_err(ApiResponse::internal)?
                 .iter()
                 .map(|commit| render_commit(api, html, commit))
                 .collect::<Vec<_>>())

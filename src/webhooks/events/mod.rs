@@ -264,6 +264,5 @@ pub(crate) fn commit_simple(ctx: &Ctx, sha: &str) -> Value {
 
 /// `text` as an RFC 3339 timestamp, or the current time when `text` is not one.
 pub(crate) fn stamp(text: &str) -> String {
-    chrono::DateTime::parse_from_rfc3339(text)
-        .map_or_else(|_| crate::time::now(), |_| text.to_owned())
+    crate::time::parse(text).map_or_else(|_| crate::time::now(), |_| text.to_owned())
 }

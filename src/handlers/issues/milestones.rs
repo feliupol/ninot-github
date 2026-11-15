@@ -38,7 +38,7 @@ impl Handler for ops::IssuesListMilestones {
                 == "asc";
         let state = lock(state);
         let found = find_repo(&state, request)?;
-        let repo = super::repo(&state, &found);
+        let repo = found.repo(&state);
         let stored = repo.milestones.values().cloned().collect::<Vec<_>>();
         let mut rows = stored
             .iter()
@@ -71,8 +71,8 @@ impl Handler for ops::IssuesCreateMilestone {
         super::require_push(&found)?;
         let id = state.next_id();
         let creator = super::caller_user(&state, request, &caller.login)?;
-        let now = super::now();
-        let repo = super::repo_mut(&mut state, &found);
+        let now = crate::time::now_utc();
+        let repo = found.repo_mut(&mut state);
         if title_taken(repo, &title, None) {
             return Err(ApiResponse::validation_failed(
                 "Milestone",
@@ -104,7 +104,7 @@ impl Handler for ops::IssuesGetMilestone {
         let state = lock(state);
         let found = find_repo(&state, request)?;
         let number = super::milestone_number(request)?;
-        let repo = super::repo(&state, &found);
+        let repo = found.repo(&state);
         let milestone = repo
             .milestones
             .get(&number)
@@ -125,11 +125,11 @@ impl Handler for ops::IssuesUpdateMilestone {
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         let number = super::milestone_number(request)?;
-        if !super::repo(&state, &found).milestones.contains_key(&number) {
+        if !found.repo(&state).milestones.contains_key(&number) {
             return Err(ApiResponse::not_found());
         }
         super::require_push(&found)?;
-        let repo = super::repo_mut(&mut state, &found);
+        let repo = found.repo_mut(&mut state);
         if title
             .as_ref()
             .is_some_and(|title| title_taken(repo, title, Some(number)))
@@ -153,7 +153,7 @@ impl Handler for ops::IssuesUpdateMilestone {
         if let Some(milestone_state) = milestone_state {
             apply_state(milestone, milestone_state);
         }
-        milestone.updated_at = super::now();
+        milestone.updated_at = crate::time::now_utc();
         super::sync_milestones(repo, request, &found.owner, &found.name);
         let rendered = render_number(repo, request, &found.owner, &found.name, number);
         Ok(ApiResponse::typed(200, &rendered))
@@ -166,11 +166,11 @@ impl Handler for ops::IssuesDeleteMilestone {
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         let number = super::milestone_number(request)?;
-        if !super::repo(&state, &found).milestones.contains_key(&number) {
+        if !found.repo(&state).milestones.contains_key(&number) {
             return Err(ApiResponse::not_found());
         }
         super::require_push(&found)?;
-        let repo = super::repo_mut(&mut state, &found);
+        let repo = found.repo_mut(&mut state);
         repo.milestones.remove(&number);
         super::sync_milestones(repo, request, &found.owner, &found.name);
         Ok(ApiResponse::no_content())
@@ -182,7 +182,7 @@ impl Handler for ops::IssuesListLabelsForMilestone {
         let state = lock(state);
         let found = find_repo(&state, request)?;
         let number = super::milestone_number(request)?;
-        let repo = super::repo(&state, &found);
+        let repo = found.repo(&state);
         if !repo.milestones.contains_key(&number) {
             return Err(ApiResponse::not_found());
         }
@@ -349,7 +349,7 @@ fn title_taken(repo: &Repo, title: &str, except: Option<u64>) -> bool {
 fn apply_state(milestone: &mut Milestone, state: NullableMilestoneState) {
     match state {
         NullableMilestoneState::Closed if milestone.closed_at.is_none() => {
-            milestone.closed_at = Some(super::now());
+            milestone.closed_at = Some(crate::time::now_utc());
         }
         NullableMilestoneState::Open => milestone.closed_at = None,
         NullableMilestoneState::Closed => {}

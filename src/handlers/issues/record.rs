@@ -27,7 +27,7 @@ pub(crate) fn snapshot(repo: &Repo, number: u64) -> Result<Snapshot, crate::api:
         let data = pull
             .data
             .as_ref()
-            .ok_or_else(|| ApiResponse::error(500, "Pull request REST model is not seeded"))?;
+            .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?;
         return Ok(Snapshot {
             labels: data.labels.iter().map(super::label_from_pull).collect(),
             assignees: data.assignees.clone(),
@@ -145,10 +145,10 @@ pub(crate) fn record_changes(
             state.next_id(),
             kind,
             actor.clone(),
-            super::now(),
+            crate::time::now_utc(),
         ));
     }
-    append(super::repo_mut(state, found), number, events);
+    append(found.repo_mut(state), number, events);
 }
 
 /// Records a `labeled` event for `label`.
@@ -160,7 +160,7 @@ pub(crate) fn record_labeled(
     label: &types::Label,
 ) {
     let event = with_label(state, &actor, IssueEventKind::Labeled, label);
-    append(super::repo_mut(state, found), number, vec![event]);
+    append(found.repo_mut(state), number, vec![event]);
 }
 
 /// Records a `locked` event. `reason` is JSON null when absent.
@@ -171,9 +171,14 @@ pub(crate) fn record_locked(
     actor: types::SimpleUser,
     reason: Option<String>,
 ) {
-    let mut event = IssueEvent::new(state.next_id(), IssueEventKind::Locked, actor, super::now());
+    let mut event = IssueEvent::new(
+        state.next_id(),
+        IssueEventKind::Locked,
+        actor,
+        crate::time::now_utc(),
+    );
     event.lock_reason = reason;
-    append(super::repo_mut(state, found), number, vec![event]);
+    append(found.repo_mut(state), number, vec![event]);
 }
 
 /// Records an `unlocked` event.
@@ -187,9 +192,9 @@ pub(crate) fn record_unlocked(
         state.next_id(),
         IssueEventKind::Unlocked,
         actor,
-        super::now(),
+        crate::time::now_utc(),
     );
-    append(super::repo_mut(state, found), number, vec![event]);
+    append(found.repo_mut(state), number, vec![event]);
 }
 
 fn with_label(
@@ -198,7 +203,7 @@ fn with_label(
     kind: IssueEventKind,
     label: &types::Label,
 ) -> IssueEvent {
-    let mut event = IssueEvent::new(state.next_id(), kind, actor.clone(), super::now());
+    let mut event = IssueEvent::new(state.next_id(), kind, actor.clone(), crate::time::now_utc());
     event.label = Some(IssueEventLabel {
         name: label.name.clone(),
         color: label.color.clone(),
@@ -212,7 +217,7 @@ fn with_assignee(
     kind: IssueEventKind,
     assignee: &types::SimpleUser,
 ) -> IssueEvent {
-    let mut event = IssueEvent::new(state.next_id(), kind, actor.clone(), super::now());
+    let mut event = IssueEvent::new(state.next_id(), kind, actor.clone(), crate::time::now_utc());
     event.assignee = Some(assignee.clone());
     event
 }
@@ -223,7 +228,7 @@ fn with_milestone(
     kind: IssueEventKind,
     title: &str,
 ) -> IssueEvent {
-    let mut event = IssueEvent::new(state.next_id(), kind, actor.clone(), super::now());
+    let mut event = IssueEvent::new(state.next_id(), kind, actor.clone(), crate::time::now_utc());
     event.milestone_title = Some(title.to_owned());
     event
 }

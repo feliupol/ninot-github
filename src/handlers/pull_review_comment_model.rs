@@ -1,11 +1,9 @@
 //! The review comment model: where it attaches and how it renders.
 
-use chrono::{DateTime, Utc};
 use serde_json::{Map, Value};
 
 use super::repos::Found;
 use crate::api::{ApiRequest, ApiResponse};
-use crate::state;
 use crate::types;
 
 /// Where a review comment attaches in the diff.
@@ -126,7 +124,7 @@ pub(super) fn build(
     author: &types::SimpleUser,
     new: NewComment<'_>,
 ) -> types::PullRequestReviewComment {
-    let now = render_now();
+    let now = crate::time::now_utc();
     let id = crate::render::id(new.id);
     let pull_url = format!(
         "{}/repos/{}/{}/pulls/{number}",
@@ -190,8 +188,4 @@ pub(super) fn build(
         url,
         user: Some(author.clone().into()),
     }
-}
-
-pub(super) fn render_now() -> DateTime<Utc> {
-    crate::render::timestamp(&state::now())
 }

@@ -6,7 +6,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 
 use super::Handler;
-use super::git_store::{Located, empty_repository, internal, locate, wrapped_base64};
+use super::git_store::{Located, empty_repository, locate, wrapped_base64};
 use super::repos::{Found, find_repo};
 use crate::api::{ApiRequest, ApiResponse, ApiResult, paginate};
 use crate::operation::ops;
@@ -49,8 +49,8 @@ fn resolve_fork_network_branch(
     let Some(source) = source else {
         return Ok(None);
     };
-    crate::fixture_git::copy_refs(target_git_dir, &source).map_err(internal)?;
-    git::resolve_commit(target_git_dir, branch).map_err(internal)
+    crate::fixture_git::copy_refs(target_git_dir, &source).map_err(ApiResponse::internal)?;
+    git::resolve_commit(target_git_dir, branch).map_err(ApiResponse::internal)
 }
 
 /// A git reference as the REST API renders it.
@@ -85,7 +85,7 @@ impl Handler for ops::GitGetRef {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let located = locate(state, request)?;
         let name = format!("refs/{}", request.param("ref"));
-        let refs = git::refs(&located.git_dir, "refs/").map_err(internal)?;
+        let refs = git::refs(&located.git_dir, "refs/").map_err(ApiResponse::internal)?;
         if refs.is_empty() {
             return Err(empty_repository());
         }
@@ -130,7 +130,7 @@ impl Handler for ops::GitCreateRef {
             (
                 repo.git_dir
                     .clone()
-                    .ok_or_else(|| ApiResponse::error(500, "repository has no git storage"))?,
+                    .ok_or_else(|| ApiResponse::internal("repository has no git storage"))?,
                 repo.default_branch.clone(),
             )
         };
@@ -140,23 +140,24 @@ impl Handler for ops::GitCreateRef {
             .map(|id| id.to_string())
             .ok_or_else(|| ApiResponse::validation_failed("Reference", "sha", "invalid"))?;
         if git::refs(&git_dir, &body.ref_)
-            .map_err(internal)?
+            .map_err(ApiResponse::internal)?
             .iter()
             .any(|reference| reference.name == body.ref_)
         {
             return Err(ApiResponse::error(409, "Reference already exists"));
         }
-        git::create_ref(&git_dir, &body.ref_, &object, &super::BOT).map_err(internal)?;
+        git::create_ref(&git_dir, &body.ref_, &object, &super::BOT)
+            .map_err(ApiResponse::internal)?;
         let located = Located {
             found,
             git_dir: git_dir.clone(),
             default_branch,
         };
         let reference = git::refs(&git_dir, &body.ref_)
-            .map_err(internal)?
+            .map_err(ApiResponse::internal)?
             .into_iter()
             .find(|reference| reference.name == body.ref_)
-            .ok_or_else(|| ApiResponse::error(500, "created reference could not be read"))?;
+            .ok_or_else(|| ApiResponse::internal("created reference could not be read"))?;
         let response = types::GitCreateRefResponse(render_ref(request, &located, &reference));
         if let Some((short, kind)) = crate::webhooks::events::create::ref_kind(&body.ref_) {
             let mut ctx = crate::webhooks::events::Ctx::new(
@@ -174,7 +175,7 @@ impl Handler for ops::GitCreateRef {
 impl Handler for ops::GitListMatchingRefs {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let located = locate(state, request)?;
-        let refs = git::refs(&located.git_dir, "refs/").map_err(internal)?;
+        let refs = git::refs(&located.git_dir, "refs/").map_err(ApiResponse::internal)?;
         if refs.is_empty() {
             return Err(empty_repository());
         }
@@ -237,13 +238,15 @@ pub(crate) fn render_commit(api: &str, html: &str, commit: &git::Commit) -> type
 
 /// Resolves `reference` in a repository that must have commits.
 fn read_commit(located: &Located, reference: &str) -> Result<git::Commit, ApiResponse> {
-    if git::is_empty(&located.git_dir).map_err(internal)? {
+    if git::is_empty(&located.git_dir).map_err(ApiResponse::internal)? {
         return Err(empty_repository());
     }
     let sha = git::resolve_commit(&located.git_dir, reference)
-        .map_err(internal)?
-        .ok_or_else(|| ApiResponse::error(422, &format!("No commit found for SHA: {reference}")))?;
-    git::commit(&located.git_dir, &sha).map_err(internal)
+        .map_err(ApiResponse::internal)?
+        .ok_or_else(|| {
+            ApiResponse::unprocessable(&format!("No commit found for SHA: {reference}"))
+        })?;
+    git::commit(&located.git_dir, &sha).map_err(ApiResponse::internal)
 }
 
 impl Handler for ops::ReposGetCommit {
@@ -262,7 +265,7 @@ impl Handler for ops::ReposListBranches {
         let located = locate(state, request)?;
         let api = located.api(request);
         let items = git::refs(&located.git_dir, "refs/heads/")
-            .map_err(internal)?
+            .map_err(ApiResponse::internal)?
             .into_iter()
             .map(|found| types::ShortBranch {
                 commit: types::ShortBranchCommit {
@@ -285,11 +288,11 @@ impl Handler for ops::ReposGetBranch {
         let branch = request.param("branch");
         let name = format!("refs/heads/{branch}");
         let found = git::refs(&located.git_dir, &name)
-            .map_err(internal)?
+            .map_err(ApiResponse::internal)?
             .into_iter()
             .find(|found| found.name == name)
             .ok_or_else(|| ApiResponse::error(404, "Branch not found"))?;
-        let commit = git::commit(&located.git_dir, &found.sha).map_err(internal)?;
+        let commit = git::commit(&located.git_dir, &found.sha).map_err(ApiResponse::internal)?;
         let api = located.api(request);
         Ok(ApiResponse::typed(
             200,
@@ -389,26 +392,22 @@ fn gitlink(
     commit: &str,
     tree_entry: &TreeEntry,
 ) -> Result<Gitlink, ApiResponse> {
-    let unconfigured = || {
-        ApiResponse::error(
-            500,
-            &format!("no .gitmodules entry has path {}", tree_entry.path),
-        )
-    };
-    let Some(PathContent::File(file)) =
-        git::path_content(&located.git_dir, commit, ".gitmodules").map_err(internal)?
+    let unconfigured =
+        || ApiResponse::internal(format!("no .gitmodules entry has path {}", tree_entry.path));
+    let Some(PathContent::File(file)) = git::path_content(&located.git_dir, commit, ".gitmodules")
+        .map_err(ApiResponse::internal)?
     else {
         return Err(unconfigured());
     };
-    let bytes = git::blob(&located.git_dir, &file.sha).map_err(internal)?;
+    let bytes = git::blob(&located.git_dir, &file.sha).map_err(ApiResponse::internal)?;
     let modules = gix::submodule::File::from_bytes(&bytes, None, &Default::default())
-        .map_err(|error| ApiResponse::error(500, &format!("invalid .gitmodules: {error}")))?;
+        .map_err(|error| ApiResponse::internal(format!("invalid .gitmodules: {error}")))?;
     let name = modules
         .name_by_path(tree_entry.path.as_str().into())
         .ok_or_else(unconfigured)?;
     let url = modules
         .url(name)
-        .map_err(|error| ApiResponse::error(500, &format!("invalid .gitmodules: {error}")))?
+        .map_err(|error| ApiResponse::internal(format!("invalid .gitmodules: {error}")))?
         .to_bstring()
         .to_string();
     let hosted = url
@@ -461,7 +460,7 @@ fn directory_item(
 impl Handler for ops::ReposGetContent {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let located = locate(state, request)?;
-        if git::is_empty(&located.git_dir).map_err(internal)? {
+        if git::is_empty(&located.git_dir).map_err(ApiResponse::internal)? {
             return Err(ApiResponse::error(404, "This repository is empty."));
         }
         let reference = request
@@ -469,12 +468,12 @@ impl Handler for ops::ReposGetContent {
             .unwrap_or(&located.default_branch)
             .to_owned();
         let sha = git::resolve_commit(&located.git_dir, &reference)
-            .map_err(internal)?
+            .map_err(ApiResponse::internal)?
             .ok_or_else(|| {
                 ApiResponse::error(404, &format!("No commit found for the ref {reference}"))
             })?;
         let content = git::path_content(&located.git_dir, &sha, request.param("path"))
-            .map_err(internal)?
+            .map_err(ApiResponse::internal)?
             .ok_or_else(ApiResponse::not_found)?;
         match content {
             PathContent::Directory(entries) => Ok(ApiResponse::typed(
@@ -509,7 +508,8 @@ impl Handler for ops::ReposGetContent {
                 ))
             }
             PathContent::File(tree_entry) => {
-                let bytes = git::blob(&located.git_dir, &tree_entry.sha).map_err(internal)?;
+                let bytes =
+                    git::blob(&located.git_dir, &tree_entry.sha).map_err(ApiResponse::internal)?;
                 if request.accept().contains("application/vnd.github.raw") {
                     return Ok(ApiResponse::bytes(200, "application/octet-stream", bytes));
                 }
@@ -612,9 +612,7 @@ fn file_commit(
     let html = located.html(request);
     let file_entry = entry(request, located, branch, file);
     let person = |signature: &git::Signature| types::FileCommitCommitAuthor {
-        date: Some(
-            render::timestamp(&signature.date).to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-        ),
+        date: Some(crate::time::format(&render::timestamp(&signature.date))),
         email: Some(signature.email.clone()),
         name: Some(signature.name.clone()),
     };
@@ -678,7 +676,7 @@ impl Handler for ops::ReposCreateOrUpdateFileContents {
         let body: types::ReposCreateOrUpdateFileContentsRequest = request.json_as()?;
         let bytes = STANDARD
             .decode(body.content.split_whitespace().collect::<String>())
-            .map_err(|_| ApiResponse::error(422, "content is not valid Base64"))?;
+            .map_err(|_| ApiResponse::unprocessable("content is not valid Base64"))?;
         // The lock is held until the commit lands so concurrent writes see each other's sha.
         let state = lock(state);
         let found = find_repo(&state, request)?;
@@ -714,19 +712,19 @@ impl Handler for ops::ReposCreateOrUpdateFileContents {
             git_dir: repo
                 .git_dir
                 .clone()
-                .ok_or_else(|| ApiResponse::error(500, "repository has no git storage"))?,
+                .ok_or_else(|| ApiResponse::internal("repository has no git storage"))?,
             default_branch: repo.default_branch.clone(),
             found,
         };
         let branch = body.branch.as_deref().unwrap_or(&located.default_branch);
         let path = request.param("path").trim_matches('/');
-        let existing = if git::is_empty(&located.git_dir).map_err(internal)? {
+        let existing = if git::is_empty(&located.git_dir).map_err(ApiResponse::internal)? {
             None
         } else {
             let head = git::resolve_commit(&located.git_dir, &format!("refs/heads/{branch}"))
-                .map_err(internal)?
+                .map_err(ApiResponse::internal)?
                 .ok_or_else(|| ApiResponse::error(404, &format!("Branch {branch} not found")))?;
-            match git::path_content(&located.git_dir, &head, path).map_err(internal)? {
+            match git::path_content(&located.git_dir, &head, path).map_err(ApiResponse::internal)? {
                 Some(PathContent::File(file)) => Some(file.sha),
                 Some(PathContent::Directory(_)) => {
                     return Err(ApiResponse::validation_failed("Content", "path", "invalid"));
@@ -736,8 +734,7 @@ impl Handler for ops::ReposCreateOrUpdateFileContents {
         };
         match (&existing, body.sha.as_deref()) {
             (Some(_), None) => {
-                return Err(ApiResponse::error(
-                    422,
+                return Err(ApiResponse::unprocessable(
                     "Invalid request.\n\n\"sha\" wasn't supplied.",
                 ));
             }
@@ -751,7 +748,7 @@ impl Handler for ops::ReposCreateOrUpdateFileContents {
         }
         let now = crate::time::now();
         let branch_existed = git::resolve_commit(&located.git_dir, &format!("refs/heads/{branch}"))
-            .map_err(internal)?
+            .map_err(ApiResponse::internal)?
             .is_some();
         let sha = crate::fixture_git::commit(crate::fixture_git::Commit {
             git_dir: &located.git_dir,
@@ -767,7 +764,7 @@ impl Handler for ops::ReposCreateOrUpdateFileContents {
             if error.kind() == std::io::ErrorKind::InvalidInput {
                 ApiResponse::validation_failed("Content", "path", "invalid")
             } else {
-                internal(error)
+                ApiResponse::internal(error)
             }
         })?;
         let mut state = state;
@@ -784,7 +781,7 @@ impl Handler for ops::ReposCreateOrUpdateFileContents {
             render::timestamp(&now),
             &actor,
         )
-        .map_err(internal)?;
+        .map_err(ApiResponse::internal)?;
         {
             let mut ctx = crate::webhooks::events::Ctx::new(
                 &mut state,
@@ -806,11 +803,11 @@ impl Handler for ops::ReposCreateOrUpdateFileContents {
             }
         }
         drop(state);
-        let commit = git::commit(&located.git_dir, &sha).map_err(internal)?;
+        let commit = git::commit(&located.git_dir, &sha).map_err(ApiResponse::internal)?;
         let Some(PathContent::File(file)) =
-            git::path_content(&located.git_dir, &sha, path).map_err(internal)?
+            git::path_content(&located.git_dir, &sha, path).map_err(ApiResponse::internal)?
         else {
-            return Err(ApiResponse::error(500, "committed file could not be read"));
+            return Err(ApiResponse::internal("committed file could not be read"));
         };
         let status = if existing.is_some() { 200 } else { 201 };
         Ok(ApiResponse::typed(
@@ -828,22 +825,23 @@ impl Handler for ops::ReposCompareCommits {
         let (base, head) = request
             .param("basehead")
             .split_once("...")
-            .ok_or_else(|| ApiResponse::error(422, "base and head must be separated by ..."))?;
+            .ok_or_else(|| ApiResponse::unprocessable("base and head must be separated by ..."))?;
         let head_branch = head.split_once(':').map_or(head, |(_, branch)| branch);
         let base_sha = git::resolve_commit(&located.git_dir, base)
-            .map_err(internal)?
+            .map_err(ApiResponse::internal)?
             .ok_or_else(|| ApiResponse::error(404, "base commit not found"))?;
         let head_sha = if let Some((owner, branch)) = head.split_once(':') {
             resolve_fork_network_branch(state, &located.found, &located.git_dir, owner, branch)?
-                .or(git::resolve_commit(&located.git_dir, head_branch).map_err(internal)?)
+                .or(git::resolve_commit(&located.git_dir, head_branch)
+                    .map_err(ApiResponse::internal)?)
         } else {
-            git::resolve_commit(&located.git_dir, head_branch).map_err(internal)?
+            git::resolve_commit(&located.git_dir, head_branch).map_err(ApiResponse::internal)?
         }
         .ok_or_else(|| ApiResponse::error(404, "head commit not found"))?;
-        let ahead =
-            git::new_commits(&located.git_dir, &head_sha, &[&base_sha]).map_err(internal)?;
-        let behind =
-            git::new_commits(&located.git_dir, &base_sha, &[&head_sha]).map_err(internal)?;
+        let ahead = git::new_commits(&located.git_dir, &head_sha, &[&base_sha])
+            .map_err(ApiResponse::internal)?;
+        let behind = git::new_commits(&located.git_dir, &base_sha, &[&head_sha])
+            .map_err(ApiResponse::internal)?;
         let status = if ahead.is_empty() && behind.is_empty() {
             types::CommitComparisonStatus::Identical
         } else if behind.is_empty() {
@@ -857,9 +855,11 @@ impl Handler for ops::ReposCompareCommits {
             .iter()
             .map(|sha| git::commit(&located.git_dir, sha))
             .collect::<Result<Vec<_>, _>>()
-            .map_err(internal)?;
-        let base_commit = git::commit(&located.git_dir, &base_sha).map_err(internal)?;
-        let merge_base_commit = git::commit(&located.git_dir, &base_sha).map_err(internal)?;
+            .map_err(ApiResponse::internal)?;
+        let base_commit =
+            git::commit(&located.git_dir, &base_sha).map_err(ApiResponse::internal)?;
+        let merge_base_commit =
+            git::commit(&located.git_dir, &base_sha).map_err(ApiResponse::internal)?;
         let api = located.api(request);
         let html = located.html(request);
         let compare = format!("{base}...{head}");
@@ -908,7 +908,7 @@ impl Handler for ops::GitDeleteRef {
             .arg(&located.git_dir)
             .args(["check-ref-format", &reference])
             .output()
-            .map_err(internal)?;
+            .map_err(ApiResponse::internal)?;
         if !check.status.success() {
             return Err(ApiResponse::error(422, "invalid ref"));
         }
@@ -917,7 +917,7 @@ impl Handler for ops::GitDeleteRef {
             .arg(&located.git_dir)
             .args(["update-ref", "-d", &reference])
             .output()
-            .map_err(internal)?;
+            .map_err(ApiResponse::internal)?;
         if !deleted.status.success() {
             return Err(ApiResponse::not_found());
         }
@@ -955,17 +955,17 @@ impl Handler for ops::GitUpdateRef {
         let git_dir = repo
             .git_dir
             .clone()
-            .ok_or_else(|| ApiResponse::error(500, "repository has no git storage"))?;
+            .ok_or_else(|| ApiResponse::internal("repository has no git storage"))?;
         let default_branch = repo.default_branch.clone();
-        if git::is_empty(&git_dir).map_err(internal)? {
+        if git::is_empty(&git_dir).map_err(ApiResponse::internal)? {
             return Err(empty_repository());
         }
         let reference = format!("refs/{}", request.param("ref"));
         if gix::refs::FullName::try_from(reference.clone()).is_err() {
-            return Err(ApiResponse::error(422, "invalid ref"));
+            return Err(ApiResponse::unprocessable("invalid ref"));
         }
         let current = git::refs(&git_dir, &reference)
-            .map_err(internal)?
+            .map_err(ApiResponse::internal)?
             .into_iter()
             .find(|found| found.name == reference)
             .ok_or_else(|| ApiResponse::validation_failed("Reference", "ref", "invalid"))?;
@@ -977,9 +977,10 @@ impl Handler for ops::GitUpdateRef {
         };
         let force = body.force.unwrap_or(false);
         if !force && !super::git_store::is_ancestor(&git_dir, &current.sha, &new_sha)? {
-            return Err(ApiResponse::error(422, "Update is not a fast forward"));
+            return Err(ApiResponse::unprocessable("Update is not a fast forward"));
         }
-        git::create_ref(&git_dir, &reference, &new_sha, &super::BOT).map_err(internal)?;
+        git::create_ref(&git_dir, &reference, &new_sha, &super::BOT)
+            .map_err(ApiResponse::internal)?;
         let located = Located {
             found,
             git_dir: git_dir.clone(),
@@ -996,16 +997,16 @@ impl Handler for ops::GitUpdateRef {
                 &located.found.name,
                 branch,
                 &new_sha,
-                render::timestamp(&crate::time::now()),
+                crate::time::now_utc(),
                 &actor,
             )
-            .map_err(internal)?;
+            .map_err(ApiResponse::internal)?;
         }
         let updated = git::refs(&git_dir, &reference)
-            .map_err(internal)?
+            .map_err(ApiResponse::internal)?
             .into_iter()
             .find(|found| found.name == reference)
-            .ok_or_else(|| ApiResponse::error(500, "updated reference could not be read"))?;
+            .ok_or_else(|| ApiResponse::internal("updated reference could not be read"))?;
         let response = ApiResponse::typed(
             200,
             &types::GitUpdateRefResponse(render_ref(request, &located, &updated)),

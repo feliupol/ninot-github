@@ -483,7 +483,7 @@ fn set_pull_request_auto_merge(env: &Env, args: &Map, enabled: bool) -> Result<J
             "REBASE" => crate::types::AutoMergeMergeMethod::Rebase,
             _ => crate::types::AutoMergeMergeMethod::Squash,
         };
-        let enabled_at = crate::render::timestamp(&crate::state::now());
+        let enabled_at = crate::time::now_utc();
         data.auto_merge = Some(crate::types::AutoMerge {
             commit_message: String::new(),
             commit_title: String::new(),
@@ -586,7 +586,7 @@ fn set_pull_request_draft(env: &Env, args: &Map, draft: bool) -> Result<Json, Er
                                 crate::state::TimelineEventKind::ReadyForReview
                             },
                             actor,
-                            created_at: crate::render::timestamp(&crate::state::now()),
+                            created_at: crate::time::now_utc(),
                             commit_id: None,
                             requested_reviewer: None,
                             requested_team: None,
@@ -694,7 +694,7 @@ fn add_comment(env: &Env, _: &Map, args: &Map) -> Result<Json, Error> {
                             "pull request REST model does not exist".to_owned(),
                         ));
                     };
-                    let created_at = crate::render::timestamp(&crate::state::now());
+                    let created_at = crate::time::now_utc();
                     let comment_number =
                         i64::try_from(pull.issue_comments.len() + 1).unwrap_or(i64::MAX);
                     pull.issue_comments.push(crate::types::IssueComment {

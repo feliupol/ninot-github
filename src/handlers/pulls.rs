@@ -3,6 +3,7 @@
 use std::sync::Mutex;
 
 use super::Handler;
+use super::issues::{label_from_issue_item, label_from_pull};
 use super::repos::find_repo;
 use crate::api::{ApiRequest, ApiResponse, ApiResult, paginate};
 use crate::operation::ops;
@@ -11,7 +12,7 @@ use crate::types;
 use crate::webhooks::events::{self, Ctx};
 
 /// The authenticated caller as events and comments embed them.
-fn caller_user(
+pub(super) fn caller_user(
     state: &State,
     request: &ApiRequest,
     login: &str,
@@ -20,56 +21,6 @@ fn caller_user(
         .account(login)
         .map(|account| crate::render::simple_user(request, account))
         .ok_or_else(ApiResponse::not_found)
-}
-
-fn issue_label(label: &types::IssueLabelsItem) -> Option<types::Label> {
-    match label {
-        types::IssueLabelsItem::String(name) => Some(types::Label {
-            archived_at: None,
-            archived_by: None,
-            color: "ededed".to_owned(),
-            default: false,
-            description: Some(String::new()),
-            id: 0,
-            name: name.clone(),
-            node_id: String::new(),
-            url: String::new(),
-        }),
-        types::IssueLabelsItem::Object {
-            archived_by,
-            color,
-            default,
-            description,
-            id,
-            name,
-            node_id,
-            url,
-        } => Some(types::Label {
-            archived_at: None,
-            archived_by: archived_by.clone(),
-            color: color.clone().unwrap_or_else(|| "ededed".to_owned()),
-            default: default.unwrap_or(false),
-            description: description.clone(),
-            id: id.unwrap_or_default(),
-            name: name.clone().unwrap_or_default(),
-            node_id: node_id.clone().unwrap_or_default(),
-            url: url.clone().unwrap_or_default(),
-        }),
-    }
-}
-
-fn pull_label(label: &types::PullRequestLabelsItem) -> types::Label {
-    types::Label {
-        archived_at: None,
-        archived_by: label.archived_by.clone(),
-        color: label.color.clone(),
-        default: label.default,
-        description: label.description.clone(),
-        id: label.id,
-        name: label.name.clone(),
-        node_id: label.node_id.clone(),
-        url: label.url.clone(),
-    }
 }
 
 /// Expands a team reference into the full team model events embed.
@@ -159,9 +110,9 @@ impl Handler for ops::PullsGet {
         let data = pull
             .data
             .as_ref()
-            .ok_or_else(|| ApiResponse::error(500, "Pull request REST model is not seeded"))?;
+            .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?;
         let commits = super::timeline::pull_commits(repo.git_dir.as_deref(), data)
-            .map_err(|error| ApiResponse::error(500, &error.to_string()))?;
+            .map_err(ApiResponse::internal)?;
         if commits.is_empty() {
             return Ok(ApiResponse::typed(200, data));
         }
@@ -227,9 +178,9 @@ impl Handler for ops::PullsUpdate {
                 let git_dir = repo
                     .git_dir
                     .as_ref()
-                    .ok_or_else(|| ApiResponse::error(500, "repository has no git storage"))?;
+                    .ok_or_else(|| ApiResponse::internal("repository has no git storage"))?;
                 ninot_common::git::resolve_commit(git_dir, &format!("refs/heads/{branch}"))
-                    .map_err(|error| ApiResponse::error(500, &error.to_string()))?
+                    .map_err(ApiResponse::internal)?
                     .ok_or_else(|| ApiResponse::validation_failed("PullRequest", "base", "invalid"))
             })
             .transpose()?;
@@ -266,7 +217,7 @@ impl Handler for ops::PullsUpdate {
         if let Some(allowed) = body.maintainer_can_modify {
             data.maintainer_can_modify = allowed;
         }
-        let now = crate::render::timestamp(&crate::state::now());
+        let now = crate::time::now_utc();
         data.updated_at = now;
         if let Some(kind) = transition {
             pull.apply_event(TimelineEvent {
@@ -278,7 +229,7 @@ impl Handler for ops::PullsUpdate {
                 requested_reviewer: None,
                 requested_team: None,
             })
-            .map_err(|message| ApiResponse::error(422, &message))?;
+            .map_err(|message| ApiResponse::unprocessable(&message))?;
         }
         let data = pull.data.clone().expect("checked above");
         let mut changes = serde_json::Map::new();
@@ -393,7 +344,7 @@ impl Handler for ops::IssuesCreate {
         let body: types::IssuesCreateRequest = request.json_as()?;
         let title = body.title.to_string();
         if title.is_empty() {
-            return Err(ApiResponse::error(422, "title is required"));
+            return Err(ApiResponse::unprocessable("title is required"));
         }
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
@@ -493,12 +444,12 @@ impl Handler for ops::IssuesCreate {
             user: Some(user.clone().into()),
         };
         state.add_issue(&found.owner, &found.name, number, issue.clone());
-        for label in issue.labels.iter().filter_map(issue_label) {
+        for label in issue.labels.iter().filter_map(label_from_issue_item) {
             super::issues::record::record_labeled(&mut state, &found, number, user.clone(), &label);
         }
         let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
         events::issues::opened(&mut ctx, &issue);
-        for label in issue.labels.iter().filter_map(issue_label) {
+        for label in issue.labels.iter().filter_map(label_from_issue_item) {
             events::issues::labeled(&mut ctx, &issue, &label);
         }
         Ok(ApiResponse::typed(201, &issue))
@@ -550,13 +501,18 @@ impl Handler for ops::IssuesListLabelsOnIssue {
         let labels = if let Some(pull) = repo.pull_requests.get(&number) {
             pull.data
                 .as_ref()
-                .ok_or_else(|| ApiResponse::error(500, "Pull request REST model is not seeded"))?
+                .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?
                 .labels
                 .iter()
-                .map(pull_label)
+                .map(label_from_pull)
                 .collect::<Vec<_>>()
         } else if let Some(issue) = repo.issues.get(&number) {
-            issue.data.labels.iter().filter_map(issue_label).collect()
+            issue
+                .data
+                .labels
+                .iter()
+                .filter_map(label_from_issue_item)
+                .collect()
         } else {
             return Err(ApiResponse::not_found());
         };
@@ -592,7 +548,9 @@ impl Handler for ops::PullsCreate {
         let head_ref = body.head.as_str();
         let base_ref = body.base.as_str();
         if title.is_empty() || head_ref.is_empty() || base_ref.is_empty() {
-            return Err(ApiResponse::error(422, "title, head and base are required"));
+            return Err(ApiResponse::unprocessable(
+                "title, head and base are required",
+            ));
         }
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
@@ -623,7 +581,7 @@ impl Handler for ops::PullsCreate {
         let git_dir = repository
             .git_dir
             .as_ref()
-            .ok_or_else(|| ApiResponse::error(500, "repository has no git storage"))?;
+            .ok_or_else(|| ApiResponse::internal("repository has no git storage"))?;
         let target_lineage = repository
             .fork_source
             .clone()
@@ -661,19 +619,18 @@ impl Handler for ops::PullsCreate {
                     })
                 })
                 .ok_or_else(|| {
-                    ApiResponse::error(422, "head branch does not exist in this fork network")
+                    ApiResponse::unprocessable("head branch does not exist in this fork network")
                 })?
         };
         if head_git_dir != *git_dir {
-            crate::fixture_git::copy_refs(git_dir, &head_git_dir)
-                .map_err(|error| ApiResponse::error(500, &error.to_string()))?;
+            crate::fixture_git::copy_refs(git_dir, &head_git_dir).map_err(ApiResponse::internal)?;
         }
         let base_sha = ninot_common::git::resolve_commit(git_dir, base_ref)
-            .map_err(|error| ApiResponse::error(500, &error.to_string()))?
-            .ok_or_else(|| ApiResponse::error(422, "base branch does not exist"))?;
+            .map_err(ApiResponse::internal)?
+            .ok_or_else(|| ApiResponse::unprocessable("base branch does not exist"))?;
         let head_sha = ninot_common::git::resolve_commit(git_dir, head_name)
-            .map_err(|error| ApiResponse::error(500, &error.to_string()))?
-            .ok_or_else(|| ApiResponse::error(422, "head branch does not exist"))?;
+            .map_err(ApiResponse::internal)?
+            .ok_or_else(|| ApiResponse::unprocessable("head branch does not exist"))?;
         let api = format!("{}/repos/{}/{}", request.api_url, found.owner, found.name);
         let web = format!("{}/{}/{}", request.web_url, found.owner, found.name);
         let base = types::PullRequestBase {
@@ -690,7 +647,7 @@ impl Handler for ops::PullsCreate {
             sha: head_sha.clone(),
             user: head_user,
         };
-        let now = crate::render::timestamp(&crate::state::now());
+        let now = crate::time::now_utc();
         let link = |href: String| types::Link { href };
         let data = types::PullRequest {
             active_lock_reason: None,
@@ -766,8 +723,7 @@ impl Handler for ops::IssuesAddLabels {
         let requested_labels = match body {
             types::IssuesAddLabelsRequest::Variant0 { labels } => {
                 if labels.is_empty() {
-                    return Err(ApiResponse::error(
-                        422,
+                    return Err(ApiResponse::unprocessable(
                         "labels must contain at least one label",
                     ));
                 }
@@ -801,7 +757,7 @@ impl Handler for ops::IssuesAddLabels {
             let mut added = Vec::new();
             if let Some(pull) = repo.pull_requests.get_mut(&number) {
                 let pull = pull.data.as_mut().ok_or_else(|| {
-                    ApiResponse::error(500, "Pull request REST model is not seeded")
+                    ApiResponse::internal("Pull request REST model is not seeded")
                 })?;
                 for name in requested_labels {
                     if !pull.labels.iter().any(|label| label.name == name) {
@@ -819,11 +775,11 @@ impl Handler for ops::IssuesAddLabels {
                             node_id: format!("LA_{}_{}_{}", found.owner, found.name, id),
                             url: format!("{api}/labels/{name}"),
                         };
-                        added.push(pull_label(&item));
+                        added.push(label_from_pull(&item));
                         pull.labels.push(item);
                     }
                 }
-                let labels = pull.labels.iter().map(pull_label).collect::<Vec<_>>();
+                let labels = pull.labels.iter().map(label_from_pull).collect::<Vec<_>>();
                 (labels, Some(pull.clone()), None, added)
             } else if let Some(issue) = repo.issues.get_mut(&number) {
                 for name in requested_labels {
@@ -831,7 +787,7 @@ impl Handler for ops::IssuesAddLabels {
                         .data
                         .labels
                         .iter()
-                        .filter_map(issue_label)
+                        .filter_map(label_from_issue_item)
                         .any(|label| label.name == name);
                     if !found_label {
                         let id = number
@@ -847,7 +803,7 @@ impl Handler for ops::IssuesAddLabels {
                             node_id: Some(format!("LA_{}_{}_{}", found.owner, found.name, id)),
                             url: Some(format!("{api}/labels/{name}")),
                         };
-                        if let Some(label) = issue_label(&item) {
+                        if let Some(label) = label_from_issue_item(&item) {
                             added.push(label);
                         }
                         issue.data.labels.push(item);
@@ -857,7 +813,7 @@ impl Handler for ops::IssuesAddLabels {
                     .data
                     .labels
                     .iter()
-                    .filter_map(issue_label)
+                    .filter_map(label_from_issue_item)
                     .collect::<Vec<_>>();
                 (labels, None, Some(issue.data.clone()), added)
             } else {
@@ -889,7 +845,7 @@ impl Handler for ops::IssuesCreateComment {
         let body: types::IssuesCreateCommentRequest = request.json_as()?;
         let text = body.body.as_str();
         if text.is_empty() {
-            return Err(ApiResponse::error(422, "body is required"));
+            return Err(ApiResponse::unprocessable("body is required"));
         }
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
@@ -912,7 +868,7 @@ impl Handler for ops::IssuesCreateComment {
         if !exists {
             return Err(ApiResponse::not_found());
         }
-        let created_at = crate::render::timestamp(&crate::state::now());
+        let created_at = crate::time::now_utc();
         let comment = types::IssueComment {
             author_association: Some(types::AuthorAssociation::Owner),
             body: Some(text.to_owned()),
@@ -965,7 +921,7 @@ impl Handler for ops::PullsMerge {
         let data = pull
             .data
             .as_ref()
-            .ok_or_else(|| ApiResponse::error(500, "Pull request REST model is not seeded"))?;
+            .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?;
         let expected = body.sha.as_deref();
         if expected.is_some_and(|sha| data.head.sha != sha) {
             return Err(ApiResponse::error(409, "head SHA does not match"));
@@ -977,7 +933,7 @@ impl Handler for ops::PullsMerge {
             return Err(ApiResponse::error(405, "pull request is not mergeable"));
         }
         let sha = data.head.sha.clone();
-        let now = crate::render::timestamp(&crate::state::now());
+        let now = crate::time::now_utc();
         for (id, kind, commit_id) in [
             (merged_id, TimelineEventKind::Merged, Some(sha.clone())),
             (closed_id, TimelineEventKind::Closed, None),
@@ -996,7 +952,7 @@ impl Handler for ops::PullsMerge {
         let data = pull
             .data
             .clone()
-            .ok_or_else(|| ApiResponse::error(500, "Pull request REST model is not seeded"))?;
+            .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?;
         let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
         events::pull_request::closed(&mut ctx, &data);
         Ok(ApiResponse::typed(
@@ -1028,8 +984,7 @@ impl Handler for ops::PullsCreateReview {
         if !matches!(event, "APPROVE" | "PENDING")
             && body.body.as_deref().unwrap_or_default().is_empty()
         {
-            return Err(ApiResponse::error(
-                422,
+            return Err(ApiResponse::unprocessable(
                 "body is required for this review event",
             ));
         }
@@ -1061,12 +1016,11 @@ impl Handler for ops::PullsCreateReview {
         let data = pull
             .data
             .as_mut()
-            .ok_or_else(|| ApiResponse::error(500, "Pull request REST model is not seeded"))?;
+            .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?;
         if matches!(event, "APPROVE" | "REQUEST_CHANGES")
             && data.user.login.eq_ignore_ascii_case(&caller.login)
         {
-            return Err(ApiResponse::error(
-                422,
+            return Err(ApiResponse::unprocessable(
                 "A pull request author cannot approve or request changes on their own pull request",
             ));
         }
@@ -1165,7 +1119,7 @@ impl Handler for ops::PullsListRequestedReviewers {
         let data = pull
             .data
             .as_ref()
-            .ok_or_else(|| ApiResponse::error(500, "Pull request REST model is not seeded"))?;
+            .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?;
         let users = data
             .requested_reviewers
             .iter()
@@ -1195,8 +1149,7 @@ impl Handler for ops::PullsRequestReviewers {
         let body: types::PullsRequestReviewersRequest = request.json_as()?;
         let (reviewers, teams) = (body.reviewers, body.team_reviewers);
         if reviewers.is_empty() && teams.is_empty() {
-            return Err(ApiResponse::error(
-                422,
+            return Err(ApiResponse::unprocessable(
                 "reviewers or team_reviewers is required",
             ));
         }
@@ -1234,7 +1187,7 @@ impl Handler for ops::PullsRequestReviewers {
             .chain(resolved_teams.into_iter().map(|team| (None, Some(team))))
             .map(|(user, team)| (state.next_id(), user, team))
             .collect::<Vec<_>>();
-        let now = crate::render::timestamp(&crate::state::now());
+        let now = crate::time::now_utc();
         let (data, added_users, added_teams) = {
             let repo = state
                 .account_mut(&found.owner)
@@ -1248,7 +1201,7 @@ impl Handler for ops::PullsRequestReviewers {
             let mut added_teams = Vec::new();
             for (id, user, team) in requests {
                 let data = pull.data.as_ref().ok_or_else(|| {
-                    ApiResponse::error(500, "Pull request REST model is not seeded")
+                    ApiResponse::internal("Pull request REST model is not seeded")
                 })?;
                 let requested = match (&user, &team) {
                     (Some(user), _) => data
@@ -1277,13 +1230,13 @@ impl Handler for ops::PullsRequestReviewers {
                         requested_reviewer: user,
                         requested_team: team,
                     })
-                    .map_err(|message| ApiResponse::error(422, &message))?;
+                    .map_err(|message| ApiResponse::unprocessable(&message))?;
                 }
             }
             let data = pull
                 .data
                 .clone()
-                .ok_or_else(|| ApiResponse::error(500, "Pull request REST model is not seeded"))?;
+                .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?;
             (data, added_users, added_teams)
         };
         let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
@@ -1345,7 +1298,7 @@ impl Handler for ops::PullsRemoveRequestedReviewers {
         let data = pull
             .data
             .as_ref()
-            .ok_or_else(|| ApiResponse::error(500, "Pull request REST model is not seeded"))?;
+            .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?;
         let users = body
             .reviewers
             .iter()
@@ -1367,7 +1320,7 @@ impl Handler for ops::PullsRemoveRequestedReviewers {
             })
             .map(|team| (None, Some(team)));
         let removals = users.chain(teams).collect::<Vec<_>>();
-        let now = crate::render::timestamp(&crate::state::now());
+        let now = crate::time::now_utc();
         for ((user, team), id) in removals.into_iter().zip(ids) {
             pull.apply_event(TimelineEvent {
                 id,
@@ -1378,7 +1331,7 @@ impl Handler for ops::PullsRemoveRequestedReviewers {
                 requested_reviewer: user,
                 requested_team: team,
             })
-            .map_err(|message| ApiResponse::error(422, &message))?;
+            .map_err(|message| ApiResponse::unprocessable(&message))?;
         }
         let data = pull.data.as_ref().expect("checked above");
         Ok(ApiResponse::typed(

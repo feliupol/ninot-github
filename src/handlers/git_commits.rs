@@ -6,12 +6,11 @@ use chrono::{DateTime, Utc};
 
 use super::Handler;
 use super::git_store::{
-    Person, find_existing_object, git_committer_from_signature, git_user_from_signature, internal,
-    locate, locate_writable, object_id, object_node_id, open_repo, unsigned_commit_verification,
+    Person, find_existing_object, git_committer_from_signature, git_user_from_signature, locate,
+    locate_writable, object_id, object_node_id, open_repo, unsigned_commit_verification,
 };
 use crate::api::{ApiRequest, ApiResponse, ApiResult};
 use crate::operation::ops;
-use crate::render;
 use crate::state::{State, lock};
 use crate::types;
 
@@ -68,22 +67,24 @@ impl Handler for ops::GitCreateCommit {
         let tree = object_id(&body.tree)?;
         let header = repo
             .find_header(tree)
-            .map_err(|_| ApiResponse::error(422, "tree is not a valid git object"))?;
+            .map_err(|_| ApiResponse::unprocessable("tree is not a valid git object"))?;
         if header.kind() != gix::objs::Kind::Tree {
-            return Err(ApiResponse::error(422, "tree is not a valid git object"));
+            return Err(ApiResponse::unprocessable("tree is not a valid git object"));
         }
         let mut parents = Vec::new();
         for parent in &body.parents {
             let id = object_id(parent)?;
             let header = repo
                 .find_header(id)
-                .map_err(|_| ApiResponse::error(422, "parent is not a valid git object"))?;
+                .map_err(|_| ApiResponse::unprocessable("parent is not a valid git object"))?;
             if header.kind() != gix::objs::Kind::Commit {
-                return Err(ApiResponse::error(422, "parent is not a valid git object"));
+                return Err(ApiResponse::unprocessable(
+                    "parent is not a valid git object",
+                ));
             }
             parents.push(id);
         }
-        let now = render::timestamp(&crate::time::now());
+        let now = crate::time::now_utc();
         let state = lock(state);
         let account = state
             .account(&caller.login)
@@ -117,11 +118,12 @@ impl Handler for ops::GitCreateCommit {
         };
         let sha = repo
             .write_object(&commit)
-            .map_err(internal)?
+            .map_err(ApiResponse::internal)?
             .detach()
             .to_string();
         drop(repo);
-        let stored = ninot_common::git::commit(&located.git_dir, &sha).map_err(internal)?;
+        let stored =
+            ninot_common::git::commit(&located.git_dir, &sha).map_err(ApiResponse::internal)?;
         let url = commit_url(request, &located, &sha);
         Ok(ApiResponse::typed(
             201,
@@ -142,8 +144,8 @@ impl Handler for ops::GitGetCommit {
             return Err(ApiResponse::not_found());
         }
         drop(repo);
-        let stored =
-            ninot_common::git::commit(&located.git_dir, &id.to_string()).map_err(internal)?;
+        let stored = ninot_common::git::commit(&located.git_dir, &id.to_string())
+            .map_err(ApiResponse::internal)?;
         Ok(ApiResponse::typed(
             200,
             &types::GitGetCommitResponse(render_git_commit(request, &located, &stored)),

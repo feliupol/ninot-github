@@ -97,7 +97,7 @@ impl Handler for ops::AppsGetRepoInstallation {
         let account = state
             .account(&installation.owner)
             .expect("installation owner exists");
-        let timestamp = crate::render::timestamp(&crate::state::now());
+        let timestamp = crate::time::now_utc();
         Ok(ApiResponse::typed(
             200,
             &types::AppsGetRepoInstallationResponse(types::Installation {
@@ -156,7 +156,7 @@ impl Handler for ops::AppsCreateInstallationAccessToken {
             .repo(&installation.repository)
             .ok_or_else(ApiResponse::not_found)?;
         let repository_id = i64::try_from(repository.id)
-            .map_err(|_| ApiResponse::error(500, "Repository id exceeds API limits"))?;
+            .map_err(|_| ApiResponse::internal("Repository id exceeds API limits"))?;
         let repository_is_supported = body
             .repositories
             .iter()
@@ -166,8 +166,7 @@ impl Handler for ops::AppsCreateInstallationAccessToken {
                 .iter()
                 .all(|requested_id| *requested_id == repository_id);
         if !repository_is_supported {
-            return Err(ApiResponse::error(
-                422,
+            return Err(ApiResponse::unprocessable(
                 "Requested repositories exceed the installation grant",
             ));
         }
@@ -185,8 +184,7 @@ impl Handler for ops::AppsCreateInstallationAccessToken {
                 ) | (Some(types::AppPermissionsSecrets::Write), _)
             );
             if !within_grant {
-                return Err(ApiResponse::error(
-                    422,
+                return Err(ApiResponse::unprocessable(
                     "Requested permissions exceed the installation grant",
                 ));
             }

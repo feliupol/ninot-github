@@ -6,8 +6,8 @@ use gix::objs::tree::EntryKind;
 
 use super::Handler;
 use super::git_store::{
-    empty_repository, find_existing_object, internal, locate, locate_writable, object_id,
-    open_repo, tree_entry_kind, write_blob_in,
+    empty_repository, find_existing_object, locate, locate_writable, object_id, open_repo,
+    tree_entry_kind, write_blob_in,
 };
 use crate::api::{ApiRequest, ApiResponse, ApiResult};
 use crate::operation::ops;
@@ -57,9 +57,9 @@ fn collect_tree(
     recursive: bool,
     items: &mut Vec<types::GitTreeTreeItem>,
 ) -> Result<(), ApiResponse> {
-    let tree = repo.find_tree(tree_id).map_err(internal)?;
+    let tree = repo.find_tree(tree_id).map_err(ApiResponse::internal)?;
     for entry in tree.iter() {
-        let entry = entry.map_err(internal)?;
+        let entry = entry.map_err(ApiResponse::internal)?;
         let name = entry.filename().to_string();
         let path = if prefix.is_empty() {
             name
@@ -70,7 +70,9 @@ fn collect_tree(
         let sha = entry.object_id().to_string();
         let size = match kind {
             EntryKind::Blob | EntryKind::BlobExecutable | EntryKind::Link => {
-                let header = repo.find_header(entry.object_id()).map_err(internal)?;
+                let header = repo
+                    .find_header(entry.object_id())
+                    .map_err(ApiResponse::internal)?;
                 Some(header.size() as i64)
             }
             EntryKind::Tree | EntryKind::Commit => None,
@@ -96,11 +98,11 @@ fn collect_tree(
 
 fn peel_to_tree(repo: &gix::Repository, spec: &str) -> Result<gix::ObjectId, ApiResponse> {
     let id = super::git_store::resolve_object(repo, spec)?
-        .ok_or_else(|| ApiResponse::error(422, "The base_tree is not a valid git tree"))?;
-    let object = repo.find_object(id).map_err(internal)?;
+        .ok_or_else(|| ApiResponse::unprocessable("The base_tree is not a valid git tree"))?;
+    let object = repo.find_object(id).map_err(ApiResponse::internal)?;
     Ok(object
         .peel_to_tree()
-        .map_err(|_| ApiResponse::error(422, "The base_tree is not a valid git tree"))?
+        .map_err(|_| ApiResponse::unprocessable("The base_tree is not a valid git tree"))?
         .id)
 }
 
@@ -111,8 +113,7 @@ fn entry_sha_and_content(
     let content = item.content.clone();
     match (sha, content) {
         (Some(None), None) => Ok(TreeEntrySource::Delete),
-        (Some(Some(_)), Some(_)) | (Some(None), Some(_)) => Err(ApiResponse::error(
-            422,
+        (Some(Some(_)), Some(_)) | (Some(None), Some(_)) => Err(ApiResponse::unprocessable(
             "Cannot specify both sha and content for a tree entry",
         )),
         (Some(Some(sha)), None) => Ok(TreeEntrySource::Sha(sha)),
@@ -140,7 +141,7 @@ impl Handler for ops::GitCreateTree {
             Some(base) => peel_to_tree(&repo, base)?,
             None => gix::ObjectId::empty_tree(repo.object_hash()),
         };
-        let mut editor = repo.edit_tree(base).map_err(internal)?;
+        let mut editor = repo.edit_tree(base).map_err(ApiResponse::internal)?;
         for item in &body.tree {
             let path = item
                 .path
@@ -161,12 +162,11 @@ impl Handler for ops::GitCreateTree {
             match entry_sha_and_content(item)? {
                 TreeEntrySource::Delete => {
                     if editor.get(path).is_none() {
-                        return Err(ApiResponse::error(
-                            422,
-                            &format!("The path {path} does not exist in the tree"),
-                        ));
+                        return Err(ApiResponse::unprocessable(&format!(
+                            "The path {path} does not exist in the tree"
+                        )));
                     }
-                    editor.remove(path).map_err(internal)?;
+                    editor.remove(path).map_err(ApiResponse::internal)?;
                 }
                 TreeEntrySource::Content(content) => {
                     if kind != EntryKind::Blob
@@ -177,18 +177,22 @@ impl Handler for ops::GitCreateTree {
                     }
                     let sha = write_blob_in(&repo, content.as_bytes())?;
                     let id = object_id(&sha)?;
-                    editor.upsert(path, kind, id).map_err(internal)?;
+                    editor
+                        .upsert(path, kind, id)
+                        .map_err(ApiResponse::internal)?;
                 }
                 TreeEntrySource::Sha(sha) => {
                     let id = object_id(&sha)?;
                     if !repo.has_object(id) {
-                        return Err(ApiResponse::error(422, "The git object does not exist."));
+                        return Err(ApiResponse::unprocessable("The git object does not exist."));
                     }
-                    editor.upsert(path, kind, id).map_err(internal)?;
+                    editor
+                        .upsert(path, kind, id)
+                        .map_err(ApiResponse::internal)?;
                 }
             }
         }
-        let tree_id = editor.write().map_err(internal)?.detach();
+        let tree_id = editor.write().map_err(ApiResponse::internal)?.detach();
         let (_, items) = list_tree(&repo, &located, request, tree_id, false)?;
         let sha = tree_id.to_string();
         let url = tree_url(request, &located, &sha);

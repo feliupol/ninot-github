@@ -265,7 +265,7 @@ mod tests {
         edited(&mut ctx, &issue, Some("Earlier"), Some(""));
         let mut closed_issue = issue.clone();
         closed_issue.state = "closed".to_owned();
-        closed_issue.closed_at = Some(crate::render::timestamp(&crate::time::now()));
+        closed_issue.closed_at = Some(crate::time::now_utc());
         closed(&mut ctx, &closed_issue);
         reopened(&mut ctx, &issue);
         assigned(&mut ctx, &issue, &user);

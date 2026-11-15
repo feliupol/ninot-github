@@ -25,22 +25,6 @@ fn find(state: &State, request: &ApiRequest, write: bool) -> Result<Found, ApiRe
     Ok(found)
 }
 
-fn repo<'a>(state: &'a State, found: &Found) -> &'a Repo {
-    state
-        .account(&found.owner)
-        .unwrap()
-        .repo(&found.name)
-        .unwrap()
-}
-
-fn repo_mut<'a>(state: &'a mut State, found: &Found) -> &'a mut Repo {
-    state
-        .account_mut(&found.owner)
-        .unwrap()
-        .repo_mut(&found.name)
-        .unwrap()
-}
-
 fn render_asset(
     state: &State,
     request: &ApiRequest,
@@ -141,20 +125,20 @@ fn ensure_tag(repo: &Repo, tag: &str, target: &str) -> Result<bool, ApiResponse>
     let Some(git_dir) = &repo.git_dir else {
         return Ok(false);
     };
-    let internal = |error: std::io::Error| ApiResponse::error(500, &error.to_string());
     if git::resolve_commit(git_dir, &format!("refs/tags/{tag}"))
-        .map_err(internal)?
+        .map_err(ApiResponse::internal)?
         .is_some()
     {
         return Ok(false);
     }
-    if git::is_empty(git_dir).map_err(internal)? {
-        return Err(ApiResponse::error(422, "Repository is empty."));
+    if git::is_empty(git_dir).map_err(ApiResponse::internal)? {
+        return Err(ApiResponse::unprocessable("Repository is empty."));
     }
     let sha = git::resolve_commit(git_dir, target)
-        .map_err(internal)?
+        .map_err(ApiResponse::internal)?
         .ok_or_else(|| ApiResponse::validation_failed("Release", "target_commitish", "invalid"))?;
-    git::create_ref(git_dir, &format!("refs/tags/{tag}"), &sha, &super::BOT).map_err(internal)?;
+    git::create_ref(git_dir, &format!("refs/tags/{tag}"), &sha, &super::BOT)
+        .map_err(ApiResponse::internal)?;
     Ok(true)
 }
 
@@ -174,7 +158,7 @@ impl Handler for ops::ReposCreateRelease {
         let prerelease = body.prerelease;
         let mut state = lock(state);
         let found = find(&state, request, true)?;
-        let current = repo(&state, &found);
+        let current = found.repo(&state);
         if current
             .releases
             .iter()
@@ -209,12 +193,12 @@ impl Handler for ops::ReposCreateRelease {
             published_at: (!draft).then_some(created),
             assets: Vec::new(),
         };
-        repo_mut(&mut state, &found).releases.push(release);
+        found.repo_mut(&mut state).releases.push(release);
         let rendered = render_release(
             &state,
             request,
             &found,
-            repo(&state, &found).releases.last().unwrap(),
+            found.repo(&state).releases.last().unwrap(),
         );
         let action = if rendered.draft {
             "created"
@@ -237,7 +221,7 @@ impl Handler for ops::ReposListReleases {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let state = lock(state);
         let found = find(&state, request, false)?;
-        let items = visible(repo(&state, &found), &found)
+        let items = visible(found.repo(&state), &found)
             .map(|release| render_release(&state, request, &found, release))
             .collect();
         Ok(paginate(request, &request.path, items))
@@ -248,7 +232,8 @@ impl Handler for ops::ReposGetLatestRelease {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let state = lock(state);
         let found = find(&state, request, false)?;
-        let release = repo(&state, &found)
+        let release = found
+            .repo(&state)
             .releases
             .iter()
             .rev()
@@ -266,7 +251,8 @@ impl Handler for ops::ReposGetReleaseByTag {
         let state = lock(state);
         let found = find(&state, request, false)?;
         let tag = request.param("tag");
-        let release = repo(&state, &found)
+        let release = found
+            .repo(&state)
             .releases
             .iter()
             .find(|release| !release.draft && release.tag_name == tag)
@@ -283,7 +269,7 @@ impl Handler for ops::ReposGetRelease {
         let id = id_param(request, "release_id")?;
         let state = lock(state);
         let found = find(&state, request, false)?;
-        let release = visible(repo(&state, &found), &found)
+        let release = visible(found.repo(&state), &found)
             .find(|release| release.id == id)
             .ok_or_else(ApiResponse::not_found)?;
         Ok(ApiResponse::typed(
@@ -300,7 +286,7 @@ impl Handler for ops::ReposUpdateRelease {
         let body: types::ReposUpdateReleaseRequest = request.json_as()?;
         let mut state = lock(state);
         let found = find(&state, request, true)?;
-        let current = repo(&state, &found);
+        let current = found.repo(&state);
         let index = current
             .releases
             .iter()
@@ -335,7 +321,7 @@ impl Handler for ops::ReposUpdateRelease {
         } else {
             ensure_tag(current, &tag, &target)?
         };
-        let release = &mut repo_mut(&mut state, &found).releases[index];
+        let release = &mut found.repo_mut(&mut state).releases[index];
         if release.draft && !draft {
             release.published_at = Some(now());
         }
@@ -351,12 +337,7 @@ impl Handler for ops::ReposUpdateRelease {
         if let Some(text) = body.body {
             release.body = Some(text);
         }
-        let rendered = render_release(
-            &state,
-            request,
-            &found,
-            &repo(&state, &found).releases[index],
-        );
+        let rendered = render_release(&state, request, &found, &found.repo(&state).releases[index]);
         let mut ctx =
             crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
         if created_tag {
@@ -401,14 +382,16 @@ impl Handler for ops::ReposDeleteRelease {
         let mut state = lock(state);
         let found = find(&state, request, true)?;
         let rendered = {
-            let release = repo(&state, &found)
+            let release = found
+                .repo(&state)
                 .releases
                 .iter()
                 .find(|release| release.id == id)
                 .ok_or_else(ApiResponse::not_found)?;
             render_release(&state, request, &found, release)
         };
-        repo_mut(&mut state, &found)
+        found
+            .repo_mut(&mut state)
             .releases
             .retain(|release| release.id != id);
         let mut ctx =
@@ -423,7 +406,7 @@ impl Handler for ops::ReposListReleaseAssets {
         let id = id_param(request, "release_id")?;
         let state = lock(state);
         let found = find(&state, request, false)?;
-        let release = visible(repo(&state, &found), &found)
+        let release = visible(found.repo(&state), &found)
             .find(|release| release.id == id)
             .ok_or_else(ApiResponse::not_found)?;
         let items = release
@@ -459,7 +442,8 @@ impl Handler for ops::ReposUploadReleaseAsset {
         let mut state = lock(state);
         let found = find(&state, request, true)?;
         let asset_id = state.next_id();
-        let release = repo_mut(&mut state, &found)
+        let release = found
+            .repo_mut(&mut state)
             .releases
             .iter_mut()
             .find(|release| release.id == id)
@@ -481,7 +465,8 @@ impl Handler for ops::ReposUploadReleaseAsset {
             uploader: caller.login,
             created_at: now(),
         });
-        let release = repo(&state, &found)
+        let release = found
+            .repo(&state)
             .releases
             .iter()
             .find(|release| release.id == id)
@@ -512,7 +497,7 @@ impl Handler for ops::ReposGetReleaseAsset {
         let state = lock(state);
         let found = find(&state, request, false)?;
         let (release, asset) =
-            find_asset(repo(&state, &found), &found, id).ok_or_else(ApiResponse::not_found)?;
+            find_asset(found.repo(&state), &found, id).ok_or_else(ApiResponse::not_found)?;
         if request.accept().contains("application/octet-stream") {
             return Ok(ApiResponse::bytes(
                 200,
@@ -533,7 +518,7 @@ impl Handler for ops::ReposDeleteReleaseAsset {
         let id = id_param(request, "asset_id")?;
         let mut state = lock(state);
         let found = find(&state, request, true)?;
-        for release in &mut repo_mut(&mut state, &found).releases {
+        for release in &mut found.repo_mut(&mut state).releases {
             if let Some(index) = release.assets.iter().position(|asset| asset.id == id) {
                 release.assets.remove(index);
                 return Ok(ApiResponse::no_content());

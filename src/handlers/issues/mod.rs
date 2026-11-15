@@ -23,7 +23,7 @@ use serde_json::Value;
 use crate::api::{ApiRequest, ApiResponse};
 use crate::handlers::repos::Found;
 use crate::render::{self, MilestoneRender};
-use crate::state::{self, Account, AccountKind, Milestone, Repo, State};
+use crate::state::{Account, AccountKind, Milestone, Repo, State};
 use crate::types;
 
 /// Every label a repository currently has: stored labels, then labels that exist only as copies
@@ -54,7 +54,7 @@ fn catalog(repo: &Repo) -> BTreeMap<String, types::Label> {
     labels
 }
 
-fn label_from_issue_item(label: &types::IssueLabelsItem) -> Option<types::Label> {
+pub(super) fn label_from_issue_item(label: &types::IssueLabelsItem) -> Option<types::Label> {
     match label {
         types::IssueLabelsItem::String(name) => Some(types::Label {
             archived_at: None,
@@ -90,7 +90,7 @@ fn label_from_issue_item(label: &types::IssueLabelsItem) -> Option<types::Label>
     }
 }
 
-fn label_from_pull(label: &types::PullRequestLabelsItem) -> types::Label {
+pub(super) fn label_from_pull(label: &types::PullRequestLabelsItem) -> types::Label {
     types::Label {
         archived_at: None,
         archived_by: label.archived_by.clone(),
@@ -134,20 +134,6 @@ fn decode_param(value: &str) -> String {
 fn label_api_url(api: &str, name: &str) -> String {
     let encoded: String = url::form_urlencoded::byte_serialize(name.as_bytes()).collect();
     format!("{api}/labels/{}", encoded.replace('+', "%20"))
-}
-
-fn repo<'a>(state: &'a State, found: &Found) -> &'a Repo {
-    state
-        .account(&found.owner)
-        .and_then(|account| account.repo(&found.name))
-        .expect("find_repo found the repository")
-}
-
-fn repo_mut<'a>(state: &'a mut State, found: &Found) -> &'a mut Repo {
-    state
-        .account_mut(&found.owner)
-        .and_then(|account| account.repo_mut(&found.name))
-        .expect("find_repo found the repository")
 }
 
 fn issue_number(request: &ApiRequest) -> Result<u64, ApiResponse> {
@@ -240,12 +226,8 @@ fn json_body(request: &ApiRequest) -> Result<Value, ApiResponse> {
 fn object_body(request: &ApiRequest) -> Result<serde_json::Map<String, Value>, ApiResponse> {
     match json_body(request)? {
         Value::Object(object) => Ok(object),
-        _ => Err(ApiResponse::error(422, "Invalid request body")),
+        _ => Err(ApiResponse::unprocessable("Invalid request body")),
     }
-}
-
-fn now() -> DateTime<Utc> {
-    render::timestamp(&state::now())
 }
 
 /// Open and closed issue counts keyed by milestone number.
@@ -401,8 +383,7 @@ fn mentions(issue: &types::Issue, login: &str) -> bool {
 }
 
 fn parse_timestamp(value: &str, resource: &str, field: &str) -> Result<DateTime<Utc>, ApiResponse> {
-    DateTime::parse_from_rfc3339(value)
-        .map(|time| time.with_timezone(&Utc))
+    crate::time::parse(value)
         .map_err(|_| ApiResponse::validation_failed(resource, field, "invalid"))
 }
 
@@ -434,7 +415,7 @@ fn with_subject<T>(
             .pull_requests
             .get_mut(&number)
             .and_then(|pull| pull.data.as_mut())
-            .ok_or_else(|| ApiResponse::error(500, "Pull request REST model is not seeded"))?;
+            .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?;
         return on_pull(pull);
     }
     if let Some(issue) = repo.issues.get_mut(&number) {

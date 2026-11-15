@@ -763,7 +763,7 @@ impl Repository {
         };
         let reached = match committer {
             Some(committer) => crate::fixtures::parse_timestamp(&committer.date, "commit date")?,
-            None => crate::fixtures::current_timestamp(),
+            None => crate::time::now_utc(),
         };
         let moved = crate::handlers::timeline::branch_moved(
             &mut state,
@@ -910,7 +910,7 @@ impl Repository {
             ));
         }
         let name = seed.name;
-        let now = crate::fixtures::current_timestamp();
+        let now = crate::time::now_utc();
         repo.actions_secrets.insert(
             name.clone(),
             crate::state::StoredActionsSecret {
@@ -1449,7 +1449,7 @@ impl PullRequest {
                 "event {} at {} is earlier than the pull request's creation or latest event ({})",
                 seed.event,
                 seed.created_at,
-                earliest.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+                crate::time::format(&earliest)
             )));
         }
         let actor = match seed.actor {
@@ -1529,7 +1529,7 @@ impl PullRequest {
         self.repository.ensure_running()?;
         let at = match pushed_at {
             Some(value) => crate::fixtures::parse_timestamp(value, "pushed_at")?,
-            None => crate::fixtures::current_timestamp(),
+            None => crate::time::now_utc(),
         };
         let request = self.repository.api_request();
         let mut state = lock(&self.repository.app.state);
@@ -2169,7 +2169,7 @@ async fn dispatch(AxumState(app): AxumState<Arc<App>>, request: Request) -> Resp
         .await
         .unwrap_or_else(|_| {
             app.record(Hit::Panic { path });
-            into_response(ApiResponse::error(500, "handler panicked"), None)
+            into_response(ApiResponse::internal("handler panicked"), None)
         });
     let fault = response.extensions().get::<Fault>().cloned();
     match fault {
@@ -2436,7 +2436,7 @@ impl App {
                         || archive.write_all(log.as_bytes()).is_err()
                     {
                         return into_response(
-                            ApiResponse::error(500, "could not build workflow log archive"),
+                            ApiResponse::internal("could not build workflow log archive"),
                             None,
                         );
                     }
@@ -2445,7 +2445,7 @@ impl App {
                     Ok(bytes) => bytes.into_inner(),
                     Err(_) => {
                         return into_response(
-                            ApiResponse::error(500, "could not build workflow log archive"),
+                            ApiResponse::internal("could not build workflow log archive"),
                             None,
                         );
                     }
@@ -2576,7 +2576,7 @@ impl App {
                 "ninot-github returned a response that does not match the spec: {mismatch}"
             );
             return served(into_response(
-                ApiResponse::error(500, &message),
+                ApiResponse::internal(&message),
                 request.caller.as_ref(),
             ));
         }
@@ -2675,7 +2675,7 @@ impl App {
                 }
             }
             if let Some(pusher) = &pusher {
-                let at = crate::render::timestamp(&crate::state::now());
+                let at = crate::time::now_utc();
                 let mut moved = Vec::new();
                 for (name_of_ref, sha) in &after {
                     let Some(branch) = name_of_ref.strip_prefix("refs/heads/") else {

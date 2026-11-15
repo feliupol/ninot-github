@@ -4,7 +4,6 @@
 use std::collections::HashMap;
 
 use super::State;
-use crate::fixtures::current_timestamp;
 use crate::types;
 
 /// Where a queued job is in its life.
@@ -202,7 +201,7 @@ impl State {
         self.update_job(&job, |run, stored| {
             run.status = Some("in_progress".to_owned());
             stored.status = types::JobStatus::InProgress;
-            stored.started_at = current_timestamp();
+            stored.started_at = crate::time::now_utc();
             stored.runner_id = Some(i64::try_from(runner.id).unwrap());
             stored.runner_name = Some(runner.name.clone());
             stored.runner_group_id = Some(i64::try_from(runner.group_id).unwrap());
@@ -246,7 +245,7 @@ impl State {
                 }
             }
         }
-        let now = current_timestamp();
+        let now = crate::time::now_utc();
         self.update_job(&job, |run, stored| {
             run.status = Some("completed".to_owned());
             run.conclusion = Some(conclusion.to_string());

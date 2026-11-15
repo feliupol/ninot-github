@@ -77,10 +77,10 @@ fn tenant_credential(state: &State, token: &str, body: &[u8], web_url: &str) -> 
     let kind = match event {
         Some("register") => RunnerTokenKind::Registration,
         Some("remove") => RunnerTokenKind::Removal,
-        _ => return ApiResponse::error(422, "runner_event must be register or remove"),
+        _ => return ApiResponse::unprocessable("runner_event must be register or remove"),
     };
     let Some(org) = org_of_url(&body) else {
-        return ApiResponse::error(422, "url must name an organization");
+        return ApiResponse::unprocessable("url must name an organization");
     };
     if token_org(state, token, kind, &org).is_none() {
         return ApiResponse::not_found();
@@ -144,13 +144,13 @@ fn runners_named(state: &State, token: &str, org: &str, query: Option<&str>) -> 
 fn add_runner(state: &mut State, token: &str, body: &[u8], web_url: &str) -> ApiResponse {
     let body = parse_body(body);
     let Some(org) = org_of_url(&body) else {
-        return ApiResponse::error(422, "url must name an organization");
+        return ApiResponse::unprocessable("url must name an organization");
     };
     if token_org(state, token, RunnerTokenKind::Registration, &org).is_none() {
         return ApiResponse::not_found();
     }
     let Some(name) = body.get("name").and_then(Value::as_str) else {
-        return ApiResponse::error(422, "name is required");
+        return ApiResponse::unprocessable("name is required");
     };
     let labels: Vec<&str> = body
         .get("labels")
@@ -187,7 +187,7 @@ fn add_runner(state: &mut State, token: &str, body: &[u8], web_url: &str) -> Api
         },
     ) {
         Ok(id) => id,
-        Err(_) => return ApiResponse::error(422, "could not add the runner"),
+        Err(_) => return ApiResponse::unprocessable("could not add the runner"),
     };
     ApiResponse::ok(json!({
         "id": id,

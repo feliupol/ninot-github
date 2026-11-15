@@ -11,7 +11,7 @@ use super::Handler;
 use crate::api::{ApiRequest, ApiResponse, ApiResult, DOCS_URL, paginate};
 use crate::operation::ops;
 use crate::render;
-use crate::state::{AccountKind, Permission, Settings, State, lock};
+use crate::state::{AccountKind, Permission, Repo, Settings, State, lock};
 use crate::types;
 use ninot_common::git;
 
@@ -20,6 +20,37 @@ pub struct Found {
     pub owner: String,
     pub name: String,
     pub permission: Permission,
+}
+
+impl Found {
+    /// The repository `find_repo` resolved.
+    pub(crate) fn repo<'a>(&self, state: &'a State) -> &'a Repo {
+        state
+            .account(&self.owner)
+            .and_then(|account| account.repo(&self.name))
+            .expect("find_repo found the repository")
+    }
+
+    /// The repository `find_repo` resolved, for writing.
+    pub(crate) fn repo_mut<'a>(&self, state: &'a mut State) -> &'a mut Repo {
+        state
+            .account_mut(&self.owner)
+            .and_then(|account| account.repo_mut(&self.name))
+            .expect("find_repo found the repository")
+    }
+
+    /// Pull request `number` of the found repository, or 404.
+    pub(crate) fn pull_mut<'a>(
+        &self,
+        state: &'a mut State,
+        number: u64,
+    ) -> Result<&'a mut crate::state::PullRequest, ApiResponse> {
+        state
+            .account_mut(&self.owner)
+            .and_then(|account| account.repo_mut(&self.name))
+            .and_then(|repo| repo.pull_requests.get_mut(&number))
+            .ok_or_else(ApiResponse::not_found)
+    }
 }
 
 /// Resolves `{owner}/{repo}` for the caller: invisible repositories are 404, and renamed or
@@ -233,7 +264,7 @@ fn create(
     };
     if let Some((git_dir, branch)) = &storage {
         init_storage(state, owner, &name, git_dir, branch, auto_init)
-            .map_err(|error| ApiResponse::error(500, &error.to_string()))?;
+            .map_err(ApiResponse::internal)?;
     }
     let mut state = lock(state);
     let repo = state
@@ -421,7 +452,7 @@ impl Handler for ops::ReposUpdate {
         let branch = body.default_branch.as_deref();
         if let (Some(branch), Some(git_dir)) = (branch, &current.git_dir) {
             let exists = git::resolve_commit(git_dir, &format!("refs/heads/{branch}"))
-                .map_err(|error| ApiResponse::error(500, &error.to_string()))?
+                .map_err(ApiResponse::internal)?
                 .is_some();
             if !exists {
                 return Err(ApiResponse::validation_failed(
@@ -453,7 +484,7 @@ impl Handler for ops::ReposUpdate {
         }
         if let Some(branch) = branch {
             repo.set_default_branch(branch)
-                .map_err(|error| ApiResponse::error(500, &error.to_string()))?;
+                .map_err(ApiResponse::internal)?;
         }
         repo.updated_at = crate::state::now();
         Ok(ApiResponse::typed(

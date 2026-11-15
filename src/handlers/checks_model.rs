@@ -118,8 +118,9 @@ pub(crate) fn open_suite(
     app_id: i64,
     reference: &str,
 ) -> (i64, bool) {
-    let head = snapshot(repo(state, found), reference);
-    if let Some(id) = repo(state, found)
+    let head = snapshot(found.repo(state), reference);
+    if let Some(id) = found
+        .repo(state)
         .check_suites
         .values()
         .find(|suite| suite.app_id == app_id && suite.head_sha == head.sha)
@@ -129,8 +130,8 @@ pub(crate) fn open_suite(
     }
     let raw = state.next_id();
     let id = render::id(raw);
-    let now = render::timestamp(&crate::time::now());
-    repo_mut(state, found).check_suites.insert(
+    let now = crate::time::now_utc();
+    found.repo_mut(state).check_suites.insert(
         id,
         CheckSuiteRecord {
             id,
@@ -151,7 +152,7 @@ pub(crate) fn open_suite(
 pub(crate) fn touch_suite(repo: &mut Repo, suite_id: i64) {
     if let Some(suite) = repo.check_suites.get_mut(&suite_id) {
         suite.rerequested = false;
-        suite.updated_at = render::timestamp(&crate::time::now());
+        suite.updated_at = crate::time::now_utc();
     }
 }
 
@@ -161,7 +162,7 @@ pub(crate) fn mark_rerequested(repo: &mut Repo, suite_id: i64) -> bool {
         return false;
     };
     suite.rerequested = true;
-    suite.updated_at = render::timestamp(&crate::time::now());
+    suite.updated_at = crate::time::now_utc();
     true
 }
 
@@ -278,20 +279,6 @@ pub(crate) fn render_suite(
     })
 }
 
-fn repo<'a>(state: &'a State, found: &Found) -> &'a Repo {
-    state
-        .account(&found.owner)
-        .and_then(|account| account.repo(&found.name))
-        .expect("repository exists")
-}
-
-fn repo_mut<'a>(state: &'a mut State, found: &Found) -> &'a mut Repo {
-    state
-        .account_mut(&found.owner)
-        .and_then(|account| account.repo_mut(&found.name))
-        .expect("repository exists")
-}
-
 fn snapshot(repo: &Repo, reference: &str) -> Head {
     let sha = commit_key(repo, reference);
     let branch = branch_of(repo, reference, &sha);
@@ -385,9 +372,7 @@ fn dotted_email(email: &str) -> bool {
 }
 
 fn git_time(text: &str, fallback: DateTime<Utc>) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339(text)
-        .map(|time| time.with_timezone(&Utc))
-        .unwrap_or(fallback)
+    crate::time::parse(text).unwrap_or(fallback)
 }
 
 fn app_installed(state: &State, owner: &str, name: &str, app_id: i64) -> bool {

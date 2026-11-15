@@ -6,7 +6,6 @@
 
 use std::sync::Mutex;
 
-use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{Value, json};
 
 use super::super::Handler;
@@ -25,7 +24,7 @@ impl Handler for ops::IssuesListEvents {
         let state = lock(state);
         let found = find_repo(&state, request)?;
         let number = super::issue_number(request)?;
-        let repo = super::repo(&state, &found);
+        let repo = found.repo(&state);
         let api = format!("{}/repos/{}/{}", request.api_url, found.owner, found.name);
         let events = events_for(repo, number)?;
         let rows = events
@@ -40,7 +39,7 @@ impl Handler for ops::IssuesListEventsForRepo {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let state = lock(state);
         let found = find_repo(&state, request)?;
-        let repo = super::repo(&state, &found);
+        let repo = found.repo(&state);
         let api = format!("{}/repos/{}/{}", request.api_url, found.owner, found.name);
         let rows = repo_events(repo)
             .into_iter()
@@ -58,7 +57,7 @@ impl Handler for ops::IssuesGetEvent {
             .param("event_id")
             .parse::<u64>()
             .map_err(|_| ApiResponse::not_found())?;
-        let repo = super::repo(&state, &found);
+        let repo = found.repo(&state);
         let api = format!("{}/repos/{}/{}", request.api_url, found.owner, found.name);
         let (event, issue) = repo_events(repo)
             .into_iter()
@@ -137,7 +136,7 @@ fn kind_from_timeline(kind: TimelineEventKind) -> IssueEventKind {
 }
 
 fn render_event(api: &str, event: &IssueEvent, issue: Option<&types::Issue>) -> Value {
-    let created_at = text(&event.created_at);
+    let created_at = crate::time::format(&event.created_at);
     let commit_url = event
         .commit_id
         .as_ref()
@@ -187,8 +186,4 @@ fn render_event(api: &str, event: &IssueEvent, issue: Option<&types::Issue>) -> 
         }
     }
     row
-}
-
-fn text(time: &DateTime<Utc>) -> String {
-    time.to_rfc3339_opts(SecondsFormat::Secs, true)
 }

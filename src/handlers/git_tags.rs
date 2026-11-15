@@ -4,8 +4,8 @@ use std::sync::Mutex;
 
 use super::Handler;
 use super::git_store::{
-    Person, find_existing_object, internal, locate, locate_writable, object_id, object_node_id,
-    open_repo, unsigned_verification,
+    Person, find_existing_object, locate, locate_writable, object_id, object_node_id, open_repo,
+    unsigned_verification,
 };
 use crate::api::{ApiRequest, ApiResponse, ApiResult};
 use crate::operation::ops;
@@ -36,9 +36,9 @@ fn render_tag(
     let target = tag.target();
     let tagger = tag
         .tagger()
-        .map_err(internal)?
-        .ok_or_else(|| internal("tag has no tagger"))?;
-    let time = tagger.time().map_err(internal)?;
+        .map_err(ApiResponse::internal)?
+        .ok_or_else(|| ApiResponse::internal("tag has no tagger"))?;
+    let time = tagger.time().map_err(ApiResponse::internal)?;
     let date = render::timestamp(&time.format_or_unix(gix::date::time::format::ISO8601_STRICT));
     Ok(types::GitTag {
         message: tag.message.to_string(),
@@ -51,7 +51,7 @@ fn render_tag(
         sha: sha.to_owned(),
         tag: tag.name.to_string(),
         tagger: types::GitTagTagger {
-            date: date.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            date: crate::time::format(&date),
             email: tagger.email.to_string(),
             name: tagger.name.to_string(),
         },
@@ -68,19 +68,18 @@ impl Handler for ops::GitCreateTag {
         let target = object_id(&body.object)?;
         let header = repo
             .find_header(target)
-            .map_err(|_| ApiResponse::error(422, "object does not exist"))?;
+            .map_err(|_| ApiResponse::unprocessable("object does not exist"))?;
         let expected = match body.type_ {
             types::GitCreateTagRequestType::Commit => gix::objs::Kind::Commit,
             types::GitCreateTagRequestType::Tree => gix::objs::Kind::Tree,
             types::GitCreateTagRequestType::Blob => gix::objs::Kind::Blob,
         };
         if header.kind() != expected {
-            return Err(ApiResponse::error(
-                422,
+            return Err(ApiResponse::unprocessable(
                 "object type does not match the provided type",
             ));
         }
-        let now = render::timestamp(&crate::time::now());
+        let now = crate::time::now_utc();
         let mutex = state;
         let state = lock(mutex);
         let account = state
@@ -104,13 +103,13 @@ impl Handler for ops::GitCreateTag {
         };
         let sha = repo
             .write_object(&tag)
-            .map_err(internal)?
+            .map_err(ApiResponse::internal)?
             .detach()
             .to_string();
         let stored = repo
-            .find_tag(gix::ObjectId::from_hex(sha.as_bytes()).map_err(internal)?)
-            .map_err(internal)?;
-        let decoded = stored.decode().map_err(internal)?;
+            .find_tag(gix::ObjectId::from_hex(sha.as_bytes()).map_err(ApiResponse::internal)?)
+            .map_err(ApiResponse::internal)?;
+        let decoded = stored.decode().map_err(ApiResponse::internal)?;
         let url = tag_url(request, &located, &sha);
         {
             let mut state = lock(mutex);
@@ -140,8 +139,8 @@ impl Handler for ops::GitGetTag {
         if header.kind() != gix::objs::Kind::Tag {
             return Err(ApiResponse::not_found());
         }
-        let stored = repo.find_tag(id).map_err(internal)?;
-        let decoded = stored.decode().map_err(internal)?;
+        let stored = repo.find_tag(id).map_err(ApiResponse::internal)?;
+        let decoded = stored.decode().map_err(ApiResponse::internal)?;
         Ok(ApiResponse::typed(
             200,
             &types::GitGetTagResponse(render_tag(request, &located, &id.to_string(), decoded)?),

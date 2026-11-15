@@ -55,7 +55,8 @@ fn load_issue(
     login: &str,
     number: u64,
 ) -> Result<Loaded, ApiResponse> {
-    let issue = super::repo(state, found)
+    let issue = found
+        .repo(state)
         .issues
         .get(&number)
         .ok_or_else(ApiResponse::not_found)?;
@@ -140,7 +141,7 @@ fn parse_labels(
         return Ok(None);
     };
     let names = label_names(value)?;
-    let repo = super::repo(state, found);
+    let repo = found.repo(state);
     super::labels::require_labels(repo, &names, &loaded.labels).map(Some)
 }
 
@@ -224,7 +225,7 @@ fn parse_milestone(
     let Some(number) = milestone_number(value)? else {
         return Ok(Some(None));
     };
-    let repo = super::repo(state, found);
+    let repo = found.repo(state);
     let Some(source) = repo.milestones.get(&number).cloned() else {
         return Err(ApiResponse::validation_failed(
             "Issue",
@@ -395,8 +396,9 @@ fn apply_change(
     change: Change,
 ) -> Result<types::Issue, ApiResponse> {
     let actor = super::caller_user(state, request, login)?;
-    let before = super::record::snapshot(super::repo(state, found), number)?;
-    let issue_before = super::repo(state, found)
+    let before = super::record::snapshot(found.repo(state), number)?;
+    let issue_before = found
+        .repo(state)
         .issues
         .get(&number)
         .expect("issue exists")
@@ -408,15 +410,16 @@ fn apply_change(
         .filter(|transition| transition.closing)
         .map(|_| actor.clone());
     {
-        let repo = super::repo_mut(state, found);
+        let repo = found.repo_mut(state);
         if let Some(issue) = repo.issues.get_mut(&number) {
             apply_fields(&mut issue.data, &change, closer);
         }
         super::sync_milestones(repo, request, &found.owner, &found.name);
     }
-    let after = super::record::snapshot(super::repo(state, found), number)?;
+    let after = super::record::snapshot(found.repo(state), number)?;
     super::record::record_changes(state, found, number, &actor, &before, &after);
-    let issue_after = super::repo(state, found)
+    let issue_after = found
+        .repo(state)
         .issues
         .get(&number)
         .expect("issue exists")
@@ -447,12 +450,12 @@ fn apply_fields(issue: &mut types::Issue, change: &Change, actor: Option<types::
         issue.state.clone_from(&transition.state);
         issue.state_reason = Some(transition.reason);
         if transition.closing {
-            issue.closed_at = Some(super::now());
+            issue.closed_at = Some(crate::time::now_utc());
             issue.closed_by = actor.map(Into::into);
         } else {
             issue.closed_at = None;
             issue.closed_by = None;
         }
     }
-    issue.updated_at = super::now();
+    issue.updated_at = crate::time::now_utc();
 }

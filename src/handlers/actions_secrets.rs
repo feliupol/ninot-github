@@ -117,7 +117,7 @@ impl Handler for ops::ActionsCreateOrUpdateRepoSecret {
             return Err(ApiResponse::validation_failed("Secret", "key_id", "custom"));
         }
         let name = request.param("secret_name").to_owned();
-        let timestamp = crate::render::timestamp(&crate::state::now());
+        let timestamp = crate::time::now_utc();
         let existed = repo.actions_secrets.contains_key(&name);
         let created_at = repo
             .actions_secrets

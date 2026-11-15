@@ -31,9 +31,7 @@ pub fn web_host(web_url: &str) -> String {
 /// Parses a timestamp the fake recorded, such as `2026-09-29T20:38:27Z`, or one git reported
 /// with an offset.
 pub fn timestamp(text: &str) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339(text)
-        .unwrap_or_else(|error| panic!("invalid timestamp {text}: {error}"))
-        .with_timezone(&Utc)
+    crate::time::parse(text).unwrap_or_else(|error| panic!("invalid timestamp {text}: {error}"))
 }
 
 /// An id as the spec types it.
@@ -1266,9 +1264,7 @@ pub fn label_on_issue(label: &types::Label) -> types::IssueLabelsItem {
 pub fn label_on_pull(label: &types::Label) -> types::PullRequestLabelsItem {
     types::PullRequestLabelsItem {
         archived_at: match label.archived_at {
-            Some(time) => {
-                serde_json::Value::String(time.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
-            }
+            Some(time) => serde_json::Value::String(crate::time::format(&time)),
             None => serde_json::Value::Null,
         },
         archived_by: label.archived_by.clone(),

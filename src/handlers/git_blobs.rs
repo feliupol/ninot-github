@@ -7,8 +7,8 @@ use base64::engine::general_purpose::STANDARD;
 
 use super::Handler;
 use super::git_store::{
-    empty_repository, find_existing_object, internal, locate, locate_writable, object_node_id,
-    open_repo, wrapped_base64, write_blob,
+    empty_repository, find_existing_object, locate, locate_writable, object_node_id, open_repo,
+    wrapped_base64, write_blob,
 };
 use crate::api::{ApiRequest, ApiResponse, ApiResult};
 use crate::operation::ops;
@@ -21,11 +21,10 @@ fn decode_content(content: &str, encoding: &str) -> Result<Vec<u8>, ApiResponse>
         "utf-8" => Ok(content.as_bytes().to_vec()),
         "base64" => STANDARD
             .decode(content.split_whitespace().collect::<String>())
-            .map_err(|_| ApiResponse::error(422, "content is not valid Base64")),
-        _ => Err(ApiResponse::error(
-            422,
-            &format!("The encoding '{encoding}' is not supported"),
-        )),
+            .map_err(|_| ApiResponse::unprocessable("content is not valid Base64")),
+        _ => Err(ApiResponse::unprocessable(&format!(
+            "The encoding '{encoding}' is not supported"
+        ))),
     }
 }
 
@@ -70,7 +69,11 @@ impl Handler for ops::GitGetBlob {
         if header.kind() != gix::objs::Kind::Blob {
             return Err(ApiResponse::not_found());
         }
-        let bytes = repo.find_blob(id).map_err(internal)?.data.clone();
+        let bytes = repo
+            .find_blob(id)
+            .map_err(ApiResponse::internal)?
+            .data
+            .clone();
         if request.accept().contains("application/vnd.github.raw") {
             return Ok(ApiResponse::bytes(200, "application/octet-stream", bytes));
         }

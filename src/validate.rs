@@ -232,7 +232,7 @@ pub(crate) fn check_request(info: &'static OperationInfo, body: &[u8]) -> Result
             .map_err(|_| refusal(400, "Problems parsing JSON".to_owned()))?
     };
     let validator = validator(format!("{} request", info.id), schema)
-        .map_err(|error| ApiResponse::error(500, &error))?;
+        .map_err(|error| ApiResponse::internal(&error))?;
     let mut lines = Vec::new();
     let mut missing = BTreeMap::new();
     for error in validator.iter_errors(&body) {

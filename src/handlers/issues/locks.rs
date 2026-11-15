@@ -24,18 +24,18 @@ impl Handler for ops::IssuesLock {
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         let number = super::issue_number(request)?;
-        ensure_subject(super::repo(&state, &found), number)?;
+        ensure_subject(found.repo(&state), number)?;
         super::require_push(&found)?;
         let reason = lock_reason(&body)?;
         let actor = super::caller_user(&state, request, &caller.login)?;
         super::with_subject(
-            super::repo_mut(&mut state, &found),
+            found.repo_mut(&mut state),
             number,
             |issue| lock_issue(issue, reason.clone()),
             |pull| lock_pull(pull, reason.clone()),
         )?;
         super::record::record_locked(&mut state, &found, number, actor, reason);
-        if let Some(issue) = super::stored_issue(super::repo(&state, &found), number) {
+        if let Some(issue) = super::stored_issue(found.repo(&state), number) {
             let mut ctx = super::webhook_ctx(&mut state, request, &found);
             events::issues::locked(&mut ctx, &issue);
         }
@@ -49,19 +49,19 @@ impl Handler for ops::IssuesUnlock {
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         let number = super::issue_number(request)?;
-        ensure_subject(super::repo(&state, &found), number)?;
+        ensure_subject(found.repo(&state), number)?;
         super::require_push(&found)?;
-        let was_locked = super::record::snapshot(super::repo(&state, &found), number)?.locked;
+        let was_locked = super::record::snapshot(found.repo(&state), number)?.locked;
         let actor = super::caller_user(&state, request, &caller.login)?;
         super::with_subject(
-            super::repo_mut(&mut state, &found),
+            found.repo_mut(&mut state),
             number,
             unlock_issue,
             unlock_pull,
         )?;
         if was_locked {
             super::record::record_unlocked(&mut state, &found, number, actor);
-            if let Some(issue) = super::stored_issue(super::repo(&state, &found), number) {
+            if let Some(issue) = super::stored_issue(found.repo(&state), number) {
                 let mut ctx = super::webhook_ctx(&mut state, request, &found);
                 events::issues::unlocked(&mut ctx, &issue);
             }
@@ -73,8 +73,7 @@ impl Handler for ops::IssuesUnlock {
 fn ensure_subject(repo: &Repo, number: u64) -> Result<(), ApiResponse> {
     if let Some(pull) = repo.pull_requests.get(&number) {
         if pull.data.is_none() {
-            return Err(ApiResponse::error(
-                500,
+            return Err(ApiResponse::internal(
                 "Pull request REST model is not seeded",
             ));
         }
@@ -91,7 +90,7 @@ fn lock_reason(body: &Value) -> Result<Option<String>, ApiResponse> {
     let value = match body {
         Value::Null => return Ok(None),
         Value::Object(object) => object.get("lock_reason"),
-        _ => return Err(ApiResponse::error(422, "Invalid request body")),
+        _ => return Err(ApiResponse::unprocessable("Invalid request body")),
     };
     match value {
         None | Some(Value::Null) => Ok(None),
@@ -112,7 +111,7 @@ fn lock_issue(issue: &mut types::Issue, reason: Option<String>) -> Result<(), Ap
     }
     issue.locked = true;
     issue.active_lock_reason = reason;
-    issue.updated_at = super::now();
+    issue.updated_at = crate::time::now_utc();
     Ok(())
 }
 
@@ -122,7 +121,7 @@ fn lock_pull(pull: &mut types::PullRequest, reason: Option<String>) -> Result<()
     }
     pull.locked = true;
     pull.active_lock_reason = reason;
-    pull.updated_at = super::now();
+    pull.updated_at = crate::time::now_utc();
     Ok(())
 }
 
@@ -130,7 +129,7 @@ fn unlock_issue(issue: &mut types::Issue) -> Result<(), ApiResponse> {
     if issue.locked || issue.active_lock_reason.is_some() {
         issue.locked = false;
         issue.active_lock_reason = None;
-        issue.updated_at = super::now();
+        issue.updated_at = crate::time::now_utc();
     }
     Ok(())
 }
@@ -139,7 +138,7 @@ fn unlock_pull(pull: &mut types::PullRequest) -> Result<(), ApiResponse> {
     if pull.locked || pull.active_lock_reason.is_some() {
         pull.locked = false;
         pull.active_lock_reason = None;
-        pull.updated_at = super::now();
+        pull.updated_at = crate::time::now_utc();
     }
     Ok(())
 }

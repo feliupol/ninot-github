@@ -26,21 +26,11 @@ fn find_admin(state: &State, request: &ApiRequest) -> Result<Found, ApiResponse>
 }
 
 fn hooks<'a>(state: &'a State, found: &Found) -> &'a Vec<Hook> {
-    &state
-        .account(&found.owner)
-        .unwrap()
-        .repo(&found.name)
-        .unwrap()
-        .hooks
+    &found.repo(state).hooks
 }
 
 fn hooks_mut<'a>(state: &'a mut State, found: &Found) -> &'a mut Vec<Hook> {
-    &mut state
-        .account_mut(&found.owner)
-        .unwrap()
-        .repo_mut(&found.name)
-        .unwrap()
-        .hooks
+    &mut found.repo_mut(state).hooks
 }
 
 fn hook_id(request: &ApiRequest) -> Result<u64, ApiResponse> {
@@ -186,7 +176,7 @@ fn host_refused(policy: webhooks::TargetPolicy, url: &Url) -> bool {
 impl Handler for ops::ReposCreateWebhook {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let body: Option<types::ReposCreateWebhookRequestBody> = request.json_as()?;
-        let body = body.ok_or_else(|| ApiResponse::error(422, "Invalid request body"))?;
+        let body = body.ok_or_else(|| ApiResponse::unprocessable("Invalid request body"))?;
         let config = body.config.unwrap_or_default();
         let mut state = lock(state);
         let found = find_admin(&state, request)?;
