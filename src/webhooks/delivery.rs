@@ -6,6 +6,7 @@ use std::sync::{Mutex, Weak};
 use std::time::{Duration, Instant};
 
 use hmac::{Hmac, Mac};
+use serde::Serialize;
 use serde_json::Value;
 use sha2::Sha256;
 
@@ -80,20 +81,51 @@ pub fn enqueue(
     owner: &str,
     name: &str,
     event: &str,
+    payload: &impl Serialize,
+    only_hook: Option<u64>,
+) {
+    let payload = serde_json::to_value(payload).expect("webhook payloads serialize to JSON");
+    let mismatch = if state.validate_payloads {
+        validate::check_webhook(event, &payload).err()
+    } else {
+        None
+    };
+    let error = mismatch.map(|mismatch| {
+        format!("ninot-github built a payload that does not match the spec: {mismatch}")
+    });
+    record(state, owner, name, event, &payload, error, only_hook);
+}
+
+/// Records a `null` delivery of `event`, with `error`, to every hook of `owner/name` that wants
+/// it, for a payload that could not be built. Nothing is queued.
+pub(crate) fn record_unbuilt(
+    state: &mut State,
+    owner: &str,
+    name: &str,
+    event: &str,
+    error: &impl std::fmt::Display,
+) {
+    let error = format!("ninot-github could not build the payload: {error}");
+    record(state, owner, name, event, &Value::Null, Some(error), None);
+}
+
+/// Records a delivery of `payload` to every hook of `owner/name` that wants `event`, and queues
+/// it unless `error` is set.
+fn record(
+    state: &mut State,
+    owner: &str,
+    name: &str,
+    event: &str,
     payload: &Value,
+    error: Option<String>,
     only_hook: Option<u64>,
 ) {
     let Some(repo) = state.account(owner).and_then(|account| account.repo(name)) else {
         return;
     };
     let repository_id = repo.id;
-    let mismatch = if state.validate_payloads {
-        validate::check_webhook(event, payload).err()
-    } else {
-        None
-    };
-    if let Some(mismatch) = &mismatch {
-        eprintln!("ninot-github: {mismatch}");
+    if let Some(error) = &error {
+        eprintln!("ninot-github: {error}");
     }
     let targets: Vec<(u64, String, String, Option<String>)> = repo
         .hooks
@@ -141,14 +173,12 @@ pub fn enqueue(
             body,
             delivered_at: now(),
             status_code: None,
-            error: mismatch.as_ref().map(|mismatch| {
-                format!("ninot-github built a payload that does not match the spec: {mismatch}")
-            }),
+            error: error.clone(),
             duration_ms: 0,
         });
         // The sender thread only stops on its own once the state is gone, so a closed queue
         // means it died.
-        let stopped = mismatch.is_none()
+        let stopped = error.is_none()
             && state
                 .webhook_queue
                 .as_ref()

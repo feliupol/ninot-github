@@ -257,11 +257,11 @@ impl Handler for ops::PullsUpdate {
         }
         let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
         match transition {
-            Some(TimelineEventKind::Closed) => events::pull_request::closed(&mut ctx, &data),
-            Some(TimelineEventKind::Reopened) => events::pull_request::reopened(&mut ctx, &data),
+            Some(TimelineEventKind::Closed) => events::pull_request::closed(&mut ctx, &data)?,
+            Some(TimelineEventKind::Reopened) => events::pull_request::reopened(&mut ctx, &data)?,
             _ => {}
         }
-        events::pull_request::edited(&mut ctx, &data, changes);
+        events::pull_request::edited(&mut ctx, &data, changes)?;
         Ok(ApiResponse::typed(200, &types::PullsUpdateResponse(data)))
     }
 }
@@ -454,9 +454,9 @@ impl Handler for ops::IssuesCreate {
             super::issues::record::record_labeled(&mut state, &found, number, user.clone(), &label);
         }
         let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
-        events::issues::opened(&mut ctx, &issue);
+        events::issues::opened(&mut ctx, &issue)?;
         for label in issue.labels.iter().filter_map(label_from_issue_item) {
-            events::issues::labeled(&mut ctx, &issue, &label);
+            events::issues::labeled(&mut ctx, &issue, &label)?;
         }
         Ok(ApiResponse::typed(201, &issue))
     }
@@ -718,7 +718,7 @@ impl Handler for ops::PullsCreate {
         };
         state.add_pull_request(&found.owner, &found.name, number, data.clone());
         let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
-        events::pull_request::opened(&mut ctx, &data);
+        events::pull_request::opened(&mut ctx, &data)?;
         Ok(ApiResponse::typed(201, &data))
     }
 }
@@ -834,12 +834,12 @@ impl Handler for ops::IssuesAddLabels {
         let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
         if let Some(pull) = &pull {
             for label in &added {
-                events::pull_request::labeled(&mut ctx, pull, label);
+                events::pull_request::labeled(&mut ctx, pull, label)?;
             }
         }
         if let Some(issue) = &issue {
             for label in &added {
-                events::issues::labeled(&mut ctx, issue, label);
+                events::issues::labeled(&mut ctx, issue, label)?;
             }
         }
         Ok(ApiResponse::typed(200, &labels))
@@ -900,7 +900,7 @@ impl Handler for ops::IssuesCreateComment {
         };
         state.add_issue_comment(&found.owner, &found.name, number, comment.clone());
         let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
-        events::issue_comment::created(&mut ctx, number, &comment);
+        events::issue_comment::created(&mut ctx, number, &comment)?;
         Ok(ApiResponse::typed(201, &comment))
     }
 }
@@ -968,7 +968,7 @@ impl Handler for ops::PullsMerge {
             .clone()
             .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?;
         let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
-        events::pull_request::closed(&mut ctx, &data);
+        events::pull_request::closed(&mut ctx, &data)?;
         Ok(ApiResponse::typed(
             200,
             &types::PullRequestMergeResult {
@@ -1100,10 +1100,10 @@ impl Handler for ops::PullsCreateReview {
         let pull_data = pull.data.clone();
         if let Some(pull_data) = pull_data {
             let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
-            events::pull_request_review::submitted(&mut ctx, &pull_data, &review);
+            events::pull_request_review::submitted(&mut ctx, &pull_data, &review)?;
             if event != "PENDING" {
                 for comment in &inline {
-                    events::pull_request_review_comment::created(&mut ctx, &pull_data, comment);
+                    events::pull_request_review_comment::created(&mut ctx, &pull_data, comment)?;
                 }
             }
         }
@@ -1253,10 +1253,10 @@ impl Handler for ops::PullsRequestReviewers {
         };
         let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
         for user in &added_users {
-            events::pull_request::review_requested_user(&mut ctx, &data, user);
+            events::pull_request::review_requested_user(&mut ctx, &data, user)?;
         }
         for team in &added_teams {
-            events::pull_request::review_requested_team(&mut ctx, &data, team);
+            events::pull_request::review_requested_team(&mut ctx, &data, team)?;
         }
         Ok(ApiResponse::typed(
             201,

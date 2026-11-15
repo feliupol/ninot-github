@@ -583,13 +583,20 @@ impl App {
                 }
                 let mut ctx = crate::webhooks::events::Ctx::new(&mut state, &urls, &owner, &name);
                 for item in &moved {
-                    crate::webhooks::events::pull_request::synchronize(
+                    // The push has landed, so a payload that cannot be built only fails its
+                    // delivery, which records the error.
+                    if let Err(error) = crate::webhooks::events::pull_request::synchronize(
                         &mut ctx,
                         &item.pull,
                         &item.before,
                         &item.after,
                         pusher,
-                    );
+                    ) {
+                        eprintln!(
+                            "ninot-github: no synchronize payload for #{}: {error}",
+                            item.pull.number
+                        );
+                    }
                 }
             }
             drop(state);

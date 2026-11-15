@@ -1,9 +1,8 @@
 //! The `pull_request_review` event.
 
-use serde_json::json;
-
-use super::{Ctx, json_of, rename_links};
+use super::{Ctx, PayloadError, model};
 use crate::types;
+use crate::webhook_types as wt;
 
 /// Queues `pull_request_review` `submitted` for a review that is not pending.
 ///
@@ -12,61 +11,85 @@ pub(crate) fn submitted(
     ctx: &mut Ctx,
     pull: &types::PullRequest,
     review: &types::PullRequestReview,
-) {
+) -> Result<(), PayloadError> {
     if review.state.eq_ignore_ascii_case("pending") {
-        return;
+        return Ok(());
     }
     if !ctx.wants("pull_request_review") {
-        return;
+        return Ok(());
     }
-    let Some(repository) = ctx.repository_value() else {
-        return;
+    let (Some(repository), Some(sender)) = (ctx.repository(), ctx.sender(None)) else {
+        return Ok(());
     };
-    let Some(sender) = ctx.sender_value(None) else {
-        return;
-    };
-    let payload = json!({
-        "action": "submitted",
-        "review": prepare(review, &pull.head.sha, &sender),
-        "pull_request": super::pull_request::prepare(pull, &repository),
-        "repository": repository,
-        "sender": sender,
-    });
-    ctx.enqueue(
-        "pull_request_review",
-        "pull_request_review-submitted",
-        payload,
-    );
+    let payload = submitted_payload(pull, review, repository, sender);
+    ctx.enqueue_built("pull_request_review", payload)
 }
 
-fn prepare(
+/// The `submitted` payload for `review` of `pull`.
+fn submitted_payload(
+    pull: &types::PullRequest,
+    review: &types::PullRequestReview,
+    repository: wt::Repository,
+    sender: wt::User,
+) -> Result<wt::PullRequestReviewSubmitted, PayloadError> {
+    Ok(wt::PullRequestReviewSubmitted {
+        action: wt::PullRequestReviewSubmittedAction::Submitted,
+        installation: None,
+        organization: None,
+        pull_request: simple_pull_request(pull, &repository)?,
+        review: pull_review(review, &pull.head.sha, &sender)?,
+        repository,
+        sender,
+    })
+}
+
+/// The pull request a review belongs to, whose head and base are in `repository`.
+fn simple_pull_request(
+    pull: &types::PullRequest,
+    repository: &wt::Repository,
+) -> Result<wt::SimplePullRequest, PayloadError> {
+    Ok(model::pull_request_object!(
+        SimplePullRequest,
+        SimplePullRequestBase,
+        SimplePullRequestHead,
+        SimplePullRequestLinks,
+        pull,
+        repository,
+        { draft: pull.draft.unwrap_or(false), }
+    ))
+}
+
+/// The webhook review for `review` of the commit `head`, by `sender` when it has no author.
+fn pull_review(
     review: &types::PullRequestReview,
     head: &str,
-    sender: &serde_json::Value,
-) -> serde_json::Value {
-    let mut value = json_of(review);
-    rename_links(&mut value);
-    let Some(object) = value.as_object_mut() else {
-        return value;
-    };
-    if object
-        .get("commit_id")
-        .is_none_or(|commit| commit.as_str().unwrap_or("").is_empty())
-    {
-        object.insert("commit_id".to_owned(), serde_json::Value::from(head));
-    }
-    if object.get("user").is_none_or(serde_json::Value::is_null) {
-        object.insert("user".to_owned(), sender.clone());
-    }
-    if object.get("body").is_some_and(serde_json::Value::is_null) {
-        object.insert("body".to_owned(), serde_json::Value::from(""));
-    }
-    if let Some(links) = object
-        .get_mut("_links")
-        .and_then(serde_json::Value::as_object_mut)
-        && let Some(self_link) = links.remove("self_")
-    {
-        links.entry("self".to_owned()).or_insert(self_link);
-    }
-    value
+    sender: &wt::User,
+) -> Result<wt::PullRequestReview, PayloadError> {
+    Ok(wt::PullRequestReview {
+        author_association: model::author_association(&review.author_association)?,
+        body: Some(review.body.clone()),
+        commit_id: review
+            .commit_id
+            .clone()
+            .filter(|commit| !commit.is_empty())
+            .unwrap_or_else(|| head.to_owned()),
+        html_url: review.html_url.clone(),
+        id: review.id,
+        links: wt::PullRequestReviewLinks {
+            html: wt::Link {
+                href: review.links.html.href.clone(),
+            },
+            pull_request: wt::Link {
+                href: review.links.pull_request.href.clone(),
+            },
+        },
+        node_id: review.node_id.clone(),
+        pull_request_url: review.pull_request_url.clone(),
+        state: model::parse("review.state", &review.state.to_ascii_lowercase())?,
+        submitted_at: review.submitted_at,
+        user: review
+            .user
+            .as_ref()
+            .map_or_else(|| sender.clone(), model::nullable_user),
+    })
 }

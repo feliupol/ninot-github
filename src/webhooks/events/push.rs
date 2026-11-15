@@ -5,8 +5,6 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Mutex;
 
-use serde_json::Value;
-
 use crate::api::{ApiRequest, Caller};
 use crate::render;
 use crate::state::{Permission, State, lock};
@@ -69,7 +67,7 @@ pub fn enqueue_push(
     };
     let urls = request.urls().repo(owner, name);
     let changed = changed_refs(before, after);
-    let payloads: Vec<Value> = changed
+    let payloads: Vec<webhook_types::PushEvent> = changed
         .iter()
         .map(|(reference, old, new)| {
             let commits = if *new == ZERO_SHA {
@@ -78,7 +76,7 @@ pub fn enqueue_push(
                 let excluded: Vec<&str> = before.values().map(String::as_str).collect();
                 push_commits(git_dir, &urls, new, &excluded)
             };
-            let payload = webhook_types::PushEvent {
+            webhook_types::PushEvent {
                 after: (*new).to_owned(),
                 base_ref: None,
                 before: (*old).to_owned(),
@@ -99,8 +97,7 @@ pub fn enqueue_push(
                 ref_: (*reference).to_owned(),
                 repository: repository.clone(),
                 sender: sender.clone(),
-            };
-            serde_json::to_value(payload).expect("payloads serialize to JSON")
+            }
         })
         .collect();
     let mut state = lock(state);

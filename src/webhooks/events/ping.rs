@@ -1,7 +1,5 @@
 //! The `ping` event, sent when a hook is created or pinged.
 
-use serde_json::Value;
-
 use crate::api::ApiRequest;
 use crate::render;
 use crate::state::{Permission, State};
@@ -9,13 +7,13 @@ use crate::types;
 use crate::webhook_types;
 
 /// The payload of `ping` for `hook`, rendered as the hook API returns it.
-pub fn ping_payload(
+pub(crate) fn ping_payload(
     request: &ApiRequest,
     state: &State,
     owner: &str,
     name: &str,
     hook: &types::Hook,
-) -> Value {
+) -> webhook_types::PingEvent {
     let account = state.account(owner).unwrap();
     let repository = render::full_repository(
         request,
@@ -23,7 +21,7 @@ pub fn ping_payload(
         account.repo(name).unwrap(),
         Permission::default(),
     );
-    let payload = webhook_types::PingEvent {
+    webhook_types::PingEvent {
         hook: ping_hook(hook),
         hook_id: hook.id,
         organization: None,
@@ -34,8 +32,7 @@ pub fn ping_payload(
             .and_then(|caller| state.account(&caller.login))
             .map(|sender| render::simple_user(request, sender).into()),
         zen: "Keep it logically awesome.".to_owned(),
-    };
-    serde_json::to_value(payload).expect("payloads serialize to JSON")
+    }
 }
 
 /// The `hook` of a `ping` payload. octokit/webhooks describes only the `last_response` of a

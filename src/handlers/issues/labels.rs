@@ -14,7 +14,7 @@ use crate::operation::ops;
 use crate::render;
 use crate::state::{Repo, State, lock};
 use crate::types;
-use crate::webhooks::events;
+use crate::webhooks::events::{self, PayloadError};
 
 impl Handler for ops::IssuesSetLabels {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
@@ -67,7 +67,7 @@ impl Handler for ops::IssuesSetLabels {
                 Ok(())
             },
         )?;
-        fire_label_diff(&mut state, request, &found, number, &added, &removed);
+        fire_label_diff(&mut state, request, &found, number, &added, &removed)?;
         let after = super::record::snapshot(found.repo(&state), number)?;
         super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
         Ok(ApiResponse::typed(200, &labels))
@@ -108,7 +108,7 @@ impl Handler for ops::IssuesRemoveAllLabels {
                 Ok(())
             },
         )?;
-        fire_label_diff(&mut state, request, &found, number, &[], &removed);
+        fire_label_diff(&mut state, request, &found, number, &[], &removed)?;
         let after = super::record::snapshot(found.repo(&state), number)?;
         super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
         Ok(ApiResponse::no_content())
@@ -139,7 +139,7 @@ impl Handler for ops::IssuesRemoveLabel {
             .collect::<Vec<_>>();
         let actor = super::caller_user(&state, request, &caller.login)?;
         let remaining = remove_named(&mut state, &found, number, &key)?;
-        fire_label_diff(&mut state, request, &found, number, &[], &removed);
+        fire_label_diff(&mut state, request, &found, number, &[], &removed)?;
         let after = super::record::snapshot(found.repo(&state), number)?;
         super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
         let repo = found.repo(&state);
@@ -263,23 +263,24 @@ fn fire_label_diff(
     number: u64,
     added: &[types::Label],
     removed: &[types::Label],
-) {
+) -> Result<(), PayloadError> {
     let issue = super::stored_issue(found.repo(state), number);
     let pull = super::stored_pull(found.repo(state), number);
     let mut ctx = super::webhook_ctx(state, request, found);
     if let Some(issue) = &issue {
         for label in added {
-            events::issues::labeled(&mut ctx, issue, label);
+            events::issues::labeled(&mut ctx, issue, label)?;
         }
         for label in removed {
-            events::issues::unlabeled(&mut ctx, issue, label);
+            events::issues::unlabeled(&mut ctx, issue, label)?;
         }
     }
     if let Some(pull) = &pull {
         for label in added {
-            events::pull_request::labeled(&mut ctx, pull, label);
+            events::pull_request::labeled(&mut ctx, pull, label)?;
         }
     }
+    Ok(())
 }
 
 fn labels_named(repo: &Repo, names: &[String]) -> Vec<types::Label> {

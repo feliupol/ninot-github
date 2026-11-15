@@ -167,17 +167,44 @@ const RESPONSE_OPERATIONS: [&str; 70] = [
 ];
 
 /// Payload schemas from octokit/webhooks, `payload-schemas/api.github.com` of the commit in
-/// `spec/webhooks/SOURCE`. `scripts/update-webhook-schemas.sh` pins the events below, every
-/// per-action schema of the events this fake delivers, and the schemas they reference.
+/// `spec/webhooks/SOURCE`. `scripts/update-webhook-schemas.sh` pins the aggregate and per-action
+/// schemas of every event this fake delivers, and the schemas they reference. Each event schema
+/// becomes a payload type, such as `PushEvent` or `PullRequestOpened`.
 const WEBHOOK_SCHEMAS: &str = "spec/webhooks";
 
-/// Events whose aggregate schema is `<event>/event.schema.json`. Per-action payloads, such as
-/// `pull_request/opened.schema.json`, live in the same tree and are validated only.
+/// Events whose aggregate schema is `<event>/event.schema.json`. The other events are published
+/// as one schema per action, such as `pull_request/opened.schema.json`.
 const WEBHOOK_EVENTS: [&str; 5] = ["create", "delete", "ping", "push", "status"];
 
-/// Aggregate events typify generates as Rust payload types. The other schemas in
-/// [`WEBHOOK_SCHEMAS`] are checked by `validate` and are not generated.
-const WEBHOOK_TYPED_EVENTS: [&str; 2] = ["ping", "push"];
+/// Optional properties the payloads carry even when `null` or `[]`:
+/// `(definition, JSON pointer to the object schema, property)`. octokit/webhooks'
+/// `payload-examples/api.github.com/check_run/created.payload.json` shows an app's `events: []`
+/// and a check run output's `title: null`; the pull request `auto_merge` and `merged_at` keep
+/// the `null` the fake sends from its REST pull request.
+const WEBHOOK_ALWAYS_SENT: [(&str, &str, &str); 6] = [
+    ("app", "", "events"),
+    (
+        "check_run-completed",
+        "/properties/check_run/properties/output",
+        "title",
+    ),
+    (
+        "check_run-created",
+        "/properties/check_run/properties/output",
+        "title",
+    ),
+    (
+        "check_run-rerequested",
+        "/properties/check_run/properties/output",
+        "title",
+    ),
+    ("issue", "/properties/pull_request", "merged_at"),
+    (
+        "pull_request_review_comment-created",
+        "/properties/pull_request",
+        "auto_merge",
+    ),
+];
 
 /// One correction to the component schema `schema` at the JSON pointer `path` inside it.
 #[derive(Deserialize)]
@@ -233,8 +260,8 @@ fn main() {
     fs::write(out.join("types.rs"), prettyplease::unparse(&file))
         .expect("cannot write the generated types");
 
-    let definitions = webhook_definitions(Path::new(WEBHOOK_SCHEMAS));
-    let typed = webhook_type_definitions(&definitions);
+    let (definitions, events) = webhook_definitions(Path::new(WEBHOOK_SCHEMAS));
+    let typed = webhook_type_definitions(&definitions, &events);
     // `validate` checks payloads against this bundle.
     let bundle = json!({
         "$schema": "http://json-schema.org/draft-07/schema",
@@ -291,9 +318,11 @@ fn multi_segment_params(spec: &Value) -> String {
 }
 
 /// The schemas under `dir` as definitions of one document, keyed by [`definition_name`], with
-/// their references rewritten to `#/definitions/<name>`.
-fn read_webhook_definitions(dir: &Path) -> BTreeMap<String, Value> {
+/// their references rewritten to `#/definitions/<name>`, and the names of the event schemas
+/// among them, whose `$id` is `<event>$<action>` rather than a path such as `common/user`.
+fn read_webhook_definitions(dir: &Path) -> (BTreeMap<String, Value>, BTreeSet<String>) {
     let mut schemas = BTreeMap::new();
+    let mut events = BTreeSet::new();
     let mut pending = vec![dir.to_owned()];
     while let Some(path) = pending.pop() {
         if path.is_dir() {
@@ -318,33 +347,36 @@ fn read_webhook_definitions(dir: &Path) -> BTreeMap<String, Value> {
             // References resolve against the `$id`, relative to the schemas directory.
             let base = id.rsplit_once('/').map_or("", |(base, _)| base);
             rewrite_references(&mut schema, base);
+            if id.contains('$') {
+                events.insert(definition_name(&id));
+            }
             schemas.insert(definition_name(&id), schema);
         }
     }
-    schemas
+    (schemas, events)
 }
 
 /// [`read_webhook_definitions`] for the pinned `spec/webhooks` tree, which must contain every
 /// aggregate event in [`WEBHOOK_EVENTS`].
-fn webhook_definitions(dir: &Path) -> BTreeMap<String, Value> {
-    let schemas = read_webhook_definitions(dir);
+fn webhook_definitions(dir: &Path) -> (BTreeMap<String, Value>, BTreeSet<String>) {
+    let (schemas, events) = read_webhook_definitions(dir);
     for event in WEBHOOK_EVENTS {
         assert!(
             schemas.contains_key(&format!("{event}-event")),
             "{WEBHOOK_SCHEMAS} has no schema for {event}"
         );
     }
-    schemas
+    (schemas, events)
 }
 
-/// Schemas reachable from [`WEBHOOK_TYPED_EVENTS`]. Action payloads stay in the validation
-/// bundle and are not generated as Rust types.
-fn webhook_type_definitions(schemas: &BTreeMap<String, Value>) -> BTreeMap<String, Value> {
+/// The `events` schemas and every schema they reference, with each per-action narrowing of a
+/// shared schema collapsed to that schema (see [`collapse_narrowing`]).
+fn webhook_type_definitions(
+    schemas: &BTreeMap<String, Value>,
+    events: &BTreeSet<String>,
+) -> BTreeMap<String, Value> {
     let mut needed = BTreeSet::new();
-    let mut pending: Vec<String> = WEBHOOK_TYPED_EVENTS
-        .iter()
-        .map(|event| format!("{event}-event"))
-        .collect();
+    let mut pending: Vec<String> = events.iter().cloned().collect();
     while let Some(name) = pending.pop() {
         let schema = schemas
             .get(&name)
@@ -353,13 +385,121 @@ fn webhook_type_definitions(schemas: &BTreeMap<String, Value>) -> BTreeMap<Strin
             referenced(schema, &mut pending);
         }
     }
-    needed
+    let mut definitions: BTreeMap<String, Value> = needed
         .into_iter()
         .map(|name| {
             let schema = schemas[&name].clone();
             (name, schema)
         })
-        .collect()
+        .collect();
+    let mut narrowed_required = BTreeMap::new();
+    for event in events {
+        let schema = definitions.get_mut(event).expect("events are needed");
+        collapse_narrowing(schema, schemas, &mut narrowed_required);
+    }
+    for (name, keys) in narrowed_required {
+        let required = definitions
+            .get_mut(&name)
+            .expect("a narrowed schema is needed")
+            .as_object_mut()
+            .expect("a narrowed schema is an object")
+            .entry("required")
+            .or_insert_with(|| Value::Array(Vec::new()))
+            .as_array_mut()
+            .expect("required is an array");
+        for key in keys {
+            if !required.iter().any(|item| item == key.as_str()) {
+                required.push(Value::from(key));
+            }
+        }
+    }
+    for (name, pointer, property) in WEBHOOK_ALWAYS_SENT {
+        let object = definitions
+            .get_mut(name)
+            .and_then(|schema| schema.pointer_mut(pointer))
+            .unwrap_or_else(|| panic!("{WEBHOOK_SCHEMAS} has no {name}{pointer}"));
+        assert!(
+            object["properties"].get(property).is_some(),
+            "{name}{pointer} has no property {property}"
+        );
+        let required = object
+            .as_object_mut()
+            .expect("an object schema")
+            .entry("required")
+            .or_insert_with(|| Value::Array(Vec::new()))
+            .as_array_mut()
+            .expect("required is an array");
+        if !required.iter().any(|item| item == property) {
+            required.push(Value::from(property));
+        }
+    }
+    for (name, schema) in &mut definitions {
+        integer_numbers(schema);
+        if name == "committer" {
+            // Git signatures keep their author's UTC offset, which `DateTime<Utc>` drops.
+            schema["properties"]["date"]
+                .as_object_mut()
+                .expect("a committer has a date")
+                .remove("format");
+        }
+    }
+    definitions
+}
+
+/// Replaces each top-level property of the event `schema` that is an `allOf` of one shared
+/// schema and parts that only narrow its properties, such as `pull_request` in
+/// `pull_request/opened` (the shared pull request with `state` `open`), by the shared schema.
+/// Every action of an event then carries the same Rust type for the object, and `validate`
+/// checks the narrowing at delivery. Properties a narrowing requires are added to
+/// `narrowed_required` under the shared schema's name, so the shared type always carries them.
+fn collapse_narrowing(
+    schema: &mut Value,
+    schemas: &BTreeMap<String, Value>,
+    narrowed_required: &mut BTreeMap<String, BTreeSet<String>>,
+) {
+    let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) else {
+        return;
+    };
+    for property in properties.values_mut() {
+        let Some(Value::Array(parts)) = property.get("allOf") else {
+            continue;
+        };
+        let references: Vec<&Value> = parts
+            .iter()
+            .filter(|part| part.get("$ref").is_some())
+            .collect();
+        let [reference] = references[..] else {
+            continue;
+        };
+        let name = reference["$ref"]
+            .as_str()
+            .and_then(|target| target.strip_prefix("#/definitions/"))
+            .expect("references point at definitions")
+            .to_owned();
+        let target = schemas[&name]
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("an allOf references an object schema");
+        for part in parts.iter().filter(|part| part.get("$ref").is_none()) {
+            let narrows = part
+                .get("properties")
+                .and_then(Value::as_object)
+                .is_none_or(|properties| properties.keys().all(|key| target.contains_key(key)));
+            assert!(narrows, "an allOf adds properties to {name}");
+            let required = part
+                .get("required")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_owned);
+            narrowed_required
+                .entry(name.clone())
+                .or_default()
+                .extend(required);
+        }
+        *property = reference.clone();
+    }
 }
 
 /// Names the schema `push$event` `push-event` and `common/commit.schema.json` `commit`.
@@ -420,7 +560,30 @@ fn webhook_types(mut definitions: BTreeMap<String, Value>) -> TokenStream {
     space
         .add_ref_types(definitions)
         .expect("typify cannot convert the webhook schemas");
-    space.to_stream()
+    let types = space.to_stream();
+    // The schemas describe variants and fields the fake never sends.
+    quote::quote! {
+        #[allow(dead_code)]
+        mod generated {
+            #types
+        }
+        pub use generated::*;
+    }
+}
+
+/// Types `number` properties as integers. octokit/webhooks types some ids, such as a workflow
+/// job's `run_id`, as `number`; its `workflow_job/queued.payload.json` example sends an integer.
+fn integer_numbers(value: &mut Value) {
+    match value {
+        Value::Array(items) => items.iter_mut().for_each(integer_numbers),
+        Value::Object(object) => {
+            if object.get("type") == Some(&Value::from("number")) {
+                object.insert("type".to_owned(), Value::from("integer"));
+            }
+            object.values_mut().for_each(integer_numbers);
+        }
+        _ => {}
+    }
 }
 
 /// Removes `additionalProperties: false` from `value` and every schema inside it.

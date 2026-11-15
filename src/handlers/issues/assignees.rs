@@ -73,7 +73,7 @@ impl Handler for ops::IssuesAddAssignees {
         if let Some(issue) = super::stored_issue(found.repo(&state), number) {
             let mut ctx = super::webhook_ctx(&mut state, request, &found);
             for user in &newly {
-                events::issues::assigned(&mut ctx, &issue, user);
+                events::issues::assigned(&mut ctx, &issue, user)?;
             }
         }
         let after = super::record::snapshot(found.repo(&state), number)?;
@@ -123,7 +123,7 @@ impl Handler for ops::IssuesRemoveAssignees {
         if let Some(issue) = super::stored_issue(found.repo(&state), number) {
             let mut ctx = super::webhook_ctx(&mut state, request, &found);
             for user in &removed {
-                events::issues::unassigned(&mut ctx, &issue, user);
+                events::issues::unassigned(&mut ctx, &issue, user)?;
             }
         }
         let after = super::record::snapshot(found.repo(&state), number)?;

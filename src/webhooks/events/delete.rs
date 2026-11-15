@@ -3,34 +3,32 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use serde_json::json;
-
 use super::{Ctx, create::ref_kind, push};
 use crate::api::ApiRequest;
 use crate::state::{State, lock};
+use crate::webhook_types as wt;
 
 /// Queues `delete` for a removed branch or tag named `name`.
 pub(crate) fn reference(ctx: &mut Ctx, name: &str, ref_type: &str) {
     if name.is_empty() || !ctx.wants("delete") {
         return;
     }
-    let Some(repository) = ctx.repository_value() else {
+    let (Some(repository), Some(sender)) = (ctx.repository(), ctx.sender(None)) else {
         return;
     };
-    let Some(sender) = ctx.sender_value(None) else {
-        return;
+    let payload = wt::DeleteEvent {
+        installation: None,
+        organization: None,
+        pusher_type: "user".to_owned(),
+        ref_: name.to_owned(),
+        ref_type: match ref_type {
+            "tag" => wt::DeleteEventRefType::Tag,
+            _ => wt::DeleteEventRefType::Branch,
+        },
+        repository,
+        sender,
     };
-    ctx.enqueue(
-        "delete",
-        "delete-event",
-        json!({
-            "ref": name,
-            "ref_type": ref_type,
-            "pusher_type": "user",
-            "repository": repository,
-            "sender": sender,
-        }),
-    );
+    ctx.enqueue("delete", &payload);
 }
 
 /// Queues `delete` for each branch or tag a push removed.

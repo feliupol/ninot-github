@@ -490,7 +490,8 @@ impl Repository {
                 &item.before,
                 &item.after,
                 &owner,
-            );
+            )
+            .map_err(io::Error::other)?;
         }
         if branch_created {
             crate::webhooks::events::create::reference(&mut ctx, branch, "branch");
@@ -678,9 +679,10 @@ impl Repository {
         let labels = crate::webhooks::events::issues::issue_labels(&issue);
         let mut ctx =
             crate::webhooks::events::Ctx::new(&mut state, &request, &self.owner, &self.name);
-        crate::webhooks::events::issues::opened(&mut ctx, &issue);
+        crate::webhooks::events::issues::opened(&mut ctx, &issue).map_err(io::Error::other)?;
         for label in &labels {
-            crate::webhooks::events::issues::labeled(&mut ctx, &issue, label);
+            crate::webhooks::events::issues::labeled(&mut ctx, &issue, label)
+                .map_err(io::Error::other)?;
         }
         Ok(Issue {
             repository: self.clone(),
@@ -752,9 +754,11 @@ impl Repository {
             let labels = crate::webhooks::events::pull_request::pull_labels(&data);
             let mut ctx =
                 crate::webhooks::events::Ctx::new(&mut state, &request, &self.owner, &self.name);
-            crate::webhooks::events::pull_request::opened(&mut ctx, &data);
+            crate::webhooks::events::pull_request::opened(&mut ctx, &data)
+                .map_err(io::Error::other)?;
             for label in &labels {
-                crate::webhooks::events::pull_request::labeled(&mut ctx, &data, label);
+                crate::webhooks::events::pull_request::labeled(&mut ctx, &data, label)
+                    .map_err(io::Error::other)?;
             }
         }
         Ok(PullRequest {
@@ -998,7 +1002,8 @@ impl PullRequest {
                 &self.repository.owner,
                 &self.repository.name,
             );
-            crate::webhooks::events::pull_request_review::submitted(&mut ctx, &pull, &stored);
+            crate::webhooks::events::pull_request_review::submitted(&mut ctx, &pull, &stored)
+                .map_err(io::Error::other)?;
         }
         Ok(Review {
             pull_request: self.clone(),
@@ -1317,7 +1322,8 @@ impl PullRequest {
                 &before_sha,
                 &data.head.sha,
                 &actor,
-            );
+            )
+            .map_err(io::Error::other)?;
         }
         if !branch_existed {
             crate::webhooks::events::create::reference(&mut ctx, &branch, "branch");
@@ -1449,9 +1455,10 @@ impl Commit {
             &self.repository.name,
         );
         if first {
-            crate::webhooks::events::check_suite::requested(&mut ctx, &check);
+            crate::webhooks::events::check_suite::requested(&mut ctx, &check)
+                .map_err(io::Error::other)?;
         }
-        crate::webhooks::events::check_run::created(&mut ctx, &check);
+        crate::webhooks::events::check_run::created(&mut ctx, &check).map_err(io::Error::other)?;
         Ok(())
     }
 
@@ -1488,7 +1495,8 @@ impl Commit {
             &self.repository.owner,
             &self.repository.name,
         );
-        crate::webhooks::events::status::commit_status(&mut ctx, &self.sha, &rendered);
+        crate::webhooks::events::status::commit_status(&mut ctx, &self.sha, &rendered)
+            .map_err(io::Error::other)?;
         Ok(())
     }
 }
@@ -1664,7 +1672,8 @@ fn create_issue_comment(
         &repository.owner,
         &repository.name,
     );
-    crate::webhooks::events::issue_comment::created(&mut ctx, number, &comment);
+    crate::webhooks::events::issue_comment::created(&mut ctx, number, &comment)
+        .map_err(io::Error::other)?;
     Ok(())
 }
 
@@ -1755,7 +1764,8 @@ fn create_review_comment(
             &repository.owner,
             &repository.name,
         );
-        crate::webhooks::events::pull_request_review_comment::created(&mut ctx, &pull, &comment);
+        crate::webhooks::events::pull_request_review_comment::created(&mut ctx, &pull, &comment)
+            .map_err(io::Error::other)?;
     }
     Ok(())
 }

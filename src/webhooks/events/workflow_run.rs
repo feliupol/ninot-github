@@ -1,10 +1,9 @@
 //! The `workflow_run` event.
 
-use crate::urls::RepoUrls;
-use serde_json::{Value, json};
-
-use super::{Ctx, commit_simple, fill_null, json_of};
+use super::{Ctx, model};
 use crate::types;
+use crate::urls::RepoUrls;
+use crate::webhook_types as wt;
 
 /// Queues `workflow_run` for `run`.
 ///
@@ -14,156 +13,148 @@ pub(crate) fn deliver(ctx: &mut Ctx, run: &types::WorkflowRun) {
     if !ctx.wants("workflow_run") {
         return;
     }
-    let Some(repository) = ctx.repository_value() else {
+    let (Some(repository), Some(sender)) = (ctx.repository(), ctx.sender(None)) else {
         return;
     };
-    let Some(lite) = ctx.repository_lite() else {
-        return;
-    };
-    let Some(sender) = ctx.sender_value(None) else {
-        return;
-    };
-    let prepared = prepare(ctx, run, &lite, &sender);
-    let action = prepared
-        .get("status")
-        .and_then(Value::as_str)
-        .map(run_action)
-        .unwrap_or("requested");
-    let workflow = workflow(&prepared, &ctx.urls());
-    ctx.enqueue(
-        "workflow_run",
-        &format!("workflow_run-{action}"),
-        json!({
-            "action": action,
-            "workflow": workflow,
-            "workflow_run": prepared,
-            "repository": repository,
-            "sender": sender,
-        }),
-    );
-}
-
-fn run_action(status: &str) -> &'static str {
-    match status {
-        "completed" => "completed",
-        "in_progress" => "in_progress",
-        _ => "requested",
+    let workflow_run = workflow_run(ctx, run, &repository, &sender);
+    let workflow = workflow(run, &ctx.urls());
+    macro_rules! payload {
+        ($type:ident, $action:ident::$variant:ident) => {
+            ctx.enqueue(
+                "workflow_run",
+                &wt::$type {
+                    action: wt::$action::$variant,
+                    installation: None,
+                    organization: None,
+                    repository,
+                    sender,
+                    workflow,
+                    workflow_run,
+                },
+            )
+        };
+    }
+    match workflow_run.status {
+        wt::WorkflowRunStatus::Completed => {
+            payload!(WorkflowRunCompleted, WorkflowRunCompletedAction::Completed)
+        }
+        wt::WorkflowRunStatus::InProgress => {
+            payload!(
+                WorkflowRunInProgress,
+                WorkflowRunInProgressAction::InProgress
+            )
+        }
+        _ => payload!(WorkflowRunRequested, WorkflowRunRequestedAction::Requested),
     }
 }
 
-fn prepare(ctx: &Ctx, run: &types::WorkflowRun, lite: &Value, sender: &Value) -> Value {
-    let mut value = json_of(run);
-    let Some(object) = value.as_object_mut() else {
-        return value;
-    };
-    let status = object
-        .get("status")
-        .and_then(Value::as_str)
-        .unwrap_or("queued")
-        .to_ascii_lowercase();
-    let status = if matches!(
-        status.as_str(),
-        "requested" | "in_progress" | "completed" | "queued" | "waiting"
-    ) {
-        status
-    } else {
-        "queued".to_owned()
-    };
-    let action = run_action(&status);
-    object.insert("status".to_owned(), Value::from(status.clone()));
-    let conclusion = object
-        .get("conclusion")
-        .and_then(Value::as_str)
-        .map(|text| text.to_ascii_lowercase());
-    let allowed = [
-        "success",
-        "failure",
-        "neutral",
-        "cancelled",
-        "timed_out",
-        "action_required",
-        "stale",
-        "skipped",
-    ];
-    let conclusion = match conclusion {
-        Some(text) if allowed.contains(&text.as_str()) => Value::from(text),
-        _ if action == "completed" => Value::from("neutral"),
-        _ => Value::Null,
-    };
-    object.insert("conclusion".to_owned(), conclusion);
-    fill_null(object, "name", Value::from("CI"));
-    fill_null(object, "head_branch", Value::from("main"));
-    fill_null(object, "event", Value::from("push"));
-    fill_null(object, "path", Value::from(".github/workflows/ci.yml"));
-    let name = object.get("name").cloned().unwrap_or(Value::from("CI"));
-    fill_null(object, "display_title", name);
-    fill_null(object, "run_attempt", Value::from(1));
-    let created = object
-        .get("created_at")
-        .cloned()
-        .unwrap_or_else(|| Value::from(crate::time::now()));
-    fill_null(object, "run_started_at", created);
-    if object.get("check_suite_id").is_none_or(Value::is_null) {
-        let id = object.get("id").cloned().unwrap_or(Value::from(1));
-        object.insert("check_suite_id".to_owned(), id);
+/// The webhook run for `run`, acted on by `sender` in `repository`. A status the schema does not
+/// know is `queued`, and a completed run without a conclusion it knows is `neutral`.
+fn workflow_run(
+    ctx: &Ctx,
+    run: &types::WorkflowRun,
+    repository: &wt::Repository,
+    sender: &wt::User,
+) -> wt::WorkflowRun {
+    let status = run
+        .status
+        .as_deref()
+        .and_then(|status| status.to_ascii_lowercase().parse().ok())
+        .unwrap_or(wt::WorkflowRunStatus::Queued);
+    let conclusion = run
+        .conclusion
+        .as_deref()
+        .and_then(|conclusion| conclusion.to_ascii_lowercase().parse().ok())
+        .or((status == wt::WorkflowRunStatus::Completed)
+            .then_some(wt::WorkflowRunConclusion::Neutral));
+    let lite = model::repository_lite(repository);
+    let name = run.name.clone().unwrap_or_else(|| "CI".to_owned());
+    wt::WorkflowRun {
+        actor: sender.clone(),
+        artifacts_url: run.artifacts_url.clone(),
+        cancel_url: run.cancel_url.clone(),
+        check_suite_id: run.check_suite_id.unwrap_or(run.id),
+        check_suite_node_id: run
+            .check_suite_node_id
+            .clone()
+            .unwrap_or_else(|| format!("CS_{}", run.id)),
+        check_suite_url: run.check_suite_url.clone(),
+        conclusion,
+        created_at: run.created_at,
+        display_title: run.display_title.clone(),
+        event: run.event.clone(),
+        head_branch: run.head_branch.clone().unwrap_or_else(|| "main".to_owned()),
+        head_commit: model::commit_simple(ctx, &run.head_sha),
+        head_repository: lite.clone(),
+        head_sha: run.head_sha.clone(),
+        html_url: run.html_url.clone(),
+        id: run.id,
+        jobs_url: run.jobs_url.clone(),
+        logs_url: run.logs_url.clone(),
+        name,
+        node_id: run.node_id.clone(),
+        path: run.path.clone(),
+        previous_attempt_url: run.previous_attempt_url.clone(),
+        pull_requests: run
+            .pull_requests
+            .iter()
+            .flatten()
+            .map(|pull| {
+                let minimal = model::minimal_pull(pull);
+                wt::WorkflowRunPullRequestsItem {
+                    base: wt::WorkflowRunPullRequestsItemBase {
+                        ref_: minimal.base.ref_,
+                        repo: minimal.base.repo,
+                        sha: minimal.base.sha,
+                    },
+                    head: wt::WorkflowRunPullRequestsItemHead {
+                        ref_: minimal.head.ref_,
+                        repo: minimal.head.repo,
+                        sha: minimal.head.sha,
+                    },
+                    id: minimal.id,
+                    number: minimal.number,
+                    url: minimal.url,
+                }
+            })
+            .collect(),
+        referenced_workflows: run
+            .referenced_workflows
+            .iter()
+            .flatten()
+            .map(|workflow| wt::ReferencedWorkflow {
+                path: workflow.path.clone(),
+                ref_: workflow.ref_.clone(),
+                sha: workflow.sha.clone(),
+            })
+            .collect(),
+        repository: lite,
+        rerun_url: run.rerun_url.clone(),
+        run_attempt: run.run_attempt.unwrap_or(1),
+        run_number: run.run_number,
+        run_started_at: run.run_started_at.unwrap_or(run.created_at),
+        status,
+        triggering_actor: sender.clone(),
+        updated_at: run.updated_at,
+        url: run.url.clone(),
+        workflow_id: run.workflow_id,
+        workflow_url: run.workflow_url.clone(),
     }
-    if object.get("check_suite_node_id").is_none_or(Value::is_null) {
-        let id = object.get("id").and_then(Value::as_i64).unwrap_or(1);
-        object.insert(
-            "check_suite_node_id".to_owned(),
-            Value::from(format!("CS_{id}")),
-        );
-    }
-    let sha = object
-        .get("head_sha")
-        .and_then(Value::as_str)
-        .unwrap_or("0000000000000000000000000000000000000000")
-        .to_owned();
-    object.insert("head_commit".to_owned(), commit_simple(ctx, &sha));
-    object.insert("actor".to_owned(), sender.clone());
-    object.insert("triggering_actor".to_owned(), sender.clone());
-    object.insert("repository".to_owned(), lite.clone());
-    object.insert("head_repository".to_owned(), lite.clone());
-    if object
-        .get("pull_requests")
-        .is_none_or(|pulls| !pulls.is_array())
-    {
-        object.insert("pull_requests".to_owned(), Value::Array(Vec::new()));
-    }
-    value
 }
 
-fn workflow(run: &Value, repo: &RepoUrls) -> Value {
-    let id = run
-        .get("workflow_id")
-        .cloned()
-        .filter(|id| !id.is_null())
-        .or_else(|| run.get("id").cloned())
-        .unwrap_or(Value::from(1));
-    let name = run
-        .get("name")
-        .and_then(Value::as_str)
-        .unwrap_or("CI")
-        .to_owned();
-    let path = run
-        .get("path")
-        .and_then(Value::as_str)
-        .unwrap_or(".github/workflows/ci.yml");
-    let created = run
-        .get("created_at")
-        .and_then(Value::as_str)
-        .unwrap_or("1970-01-01T00:00:00Z");
-    let numeric = id.as_i64().unwrap_or(1);
-    json!({
-        "badge_url": repo.workflow_badge(numeric),
-        "created_at": created,
-        "html_url": repo.blob_html("HEAD", path),
-        "id": id,
-        "name": name,
-        "node_id": format!("W_{numeric}"),
-        "path": path,
-        "state": "active",
-        "updated_at": run.get("updated_at").and_then(Value::as_str).unwrap_or(created),
-        "url": repo.workflow(numeric),
-    })
+/// The workflow `run` belongs to.
+fn workflow(run: &types::WorkflowRun, repo: &RepoUrls) -> wt::Workflow {
+    let id = run.workflow_id;
+    wt::Workflow {
+        badge_url: repo.workflow_badge(id),
+        created_at: run.created_at,
+        html_url: repo.blob_html("HEAD", &run.path),
+        id,
+        name: run.name.clone().unwrap_or_else(|| "CI".to_owned()),
+        node_id: format!("W_{id}"),
+        path: run.path.clone(),
+        state: "active".to_owned(),
+        updated_at: run.updated_at,
+        url: repo.workflow(id),
+    }
 }

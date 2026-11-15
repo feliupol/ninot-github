@@ -60,7 +60,7 @@ impl Handler for ops::IssuesUpdateComment {
             .unwrap_or_default();
         let comment = write_body(found.repo_mut(&mut state), &place, text);
         let mut ctx = super::webhook_ctx(&mut state, request, &found);
-        events::issue_comment::edited(&mut ctx, number, &comment, &old_body);
+        events::issue_comment::edited(&mut ctx, number, &comment, &old_body)?;
         Ok(ApiResponse::typed(200, &comment))
     }
 }
@@ -86,7 +86,7 @@ impl Handler for ops::IssuesDeleteComment {
         let comment = comment_at(found.repo(&state), &place).clone();
         remove_comment(found.repo_mut(&mut state), &place);
         let mut ctx = super::webhook_ctx(&mut state, request, &found);
-        events::issue_comment::deleted(&mut ctx, number, &comment);
+        events::issue_comment::deleted(&mut ctx, number, &comment)?;
         Ok(ApiResponse::no_content())
     }
 }

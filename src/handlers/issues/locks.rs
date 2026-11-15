@@ -38,7 +38,7 @@ impl Handler for ops::IssuesLock {
         super::record::record_locked(&mut state, &found, number, actor, reason);
         if let Some(issue) = super::stored_issue(found.repo(&state), number) {
             let mut ctx = super::webhook_ctx(&mut state, request, &found);
-            events::issues::locked(&mut ctx, &issue);
+            events::issues::locked(&mut ctx, &issue)?;
         }
         Ok(ApiResponse::no_content())
     }
@@ -65,7 +65,7 @@ impl Handler for ops::IssuesUnlock {
             super::record::record_unlocked(&mut state, &found, number, actor);
             if let Some(issue) = super::stored_issue(found.repo(&state), number) {
                 let mut ctx = super::webhook_ctx(&mut state, request, &found);
-                events::issues::unlocked(&mut ctx, &issue);
+                events::issues::unlocked(&mut ctx, &issue)?;
             }
         }
         Ok(ApiResponse::no_content())

@@ -182,7 +182,7 @@ impl Handler for ops::PullsUpdateBranch {
                 &item.before,
                 &item.after,
                 &actor,
-            );
+            )?;
         }
         Ok(ApiResponse::json(
             202,

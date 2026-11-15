@@ -811,7 +811,7 @@ impl Handler for ops::ReposCreateOrUpdateFileContents {
                     &item.before,
                     &item.after,
                     &actor,
-                );
+                )?;
             }
             if !branch_existed {
                 crate::webhooks::events::create::reference(&mut ctx, branch, "branch");

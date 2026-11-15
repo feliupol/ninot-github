@@ -5,5 +5,5 @@ pub mod delivery;
 pub mod events;
 
 pub use delivery::{DeliveryHeaders, TargetPolicy, enqueue, spawn_sender};
-pub use events::ping::ping_payload;
+pub(crate) use events::ping::ping_payload;
 pub use events::push::enqueue_push;

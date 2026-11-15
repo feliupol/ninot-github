@@ -1,45 +1,58 @@
-//! The `status` event.
+//! The `status` event, sent when a commit status is created.
 
-use crate::urls::RepoUrls;
-use serde_json::{Value, json};
-
-use super::{Ctx, stamp};
+use super::{Ctx, PayloadError, model};
 use crate::types;
+use crate::urls::RepoUrls;
+use crate::webhook_types as wt;
 
 /// Queues `status` for a commit status on `sha`.
-pub(crate) fn commit_status(ctx: &mut Ctx, sha: &str, status: &types::Status) {
+pub(crate) fn commit_status(
+    ctx: &mut Ctx,
+    sha: &str,
+    status: &types::Status,
+) -> Result<(), PayloadError> {
     if !ctx.wants("status") {
-        return;
+        return Ok(());
     }
-    let Some(repository) = ctx.repository_value() else {
-        return;
-    };
-    let Some(sender) = ctx.sender_value(None) else {
-        return;
+    let (Some(repository), Some(sender)) = (ctx.repository(), ctx.sender(None)) else {
+        return Ok(());
     };
     let urls = ctx.urls();
-    ctx.enqueue(
-        "status",
-        "status-event",
-        json!({
-            "id": status.id,
-            "sha": sha,
-            "name": status.context,
-            "target_url": status.target_url,
-            "context": status.context,
-            "description": status.description,
-            "state": status.state.to_ascii_lowercase(),
-            "commit": commit_object(ctx, sha, &urls),
-            "branches": branches(ctx, sha, &urls),
-            "created_at": status.created_at,
-            "updated_at": status.updated_at,
-            "repository": repository,
-            "sender": sender,
-        }),
-    );
+    let payload = status_event(ctx, sha, status, &urls, repository, sender);
+    ctx.enqueue_built("status", payload)
 }
 
-fn commit_object(ctx: &Ctx, sha: &str, repo: &RepoUrls) -> Value {
+/// The `status` payload for `status` on `sha`.
+fn status_event(
+    ctx: &Ctx,
+    sha: &str,
+    status: &types::Status,
+    urls: &RepoUrls,
+    repository: wt::Repository,
+    sender: wt::User,
+) -> Result<wt::StatusEvent, PayloadError> {
+    Ok(wt::StatusEvent {
+        avatar_url: None,
+        branches: branches(ctx, sha, urls),
+        commit: commit(ctx, sha, urls),
+        context: status.context.clone(),
+        created_at: model::timestamp("status.created_at", &status.created_at)?,
+        description: status.description.clone(),
+        id: status.id,
+        installation: None,
+        name: status.context.clone(),
+        organization: None,
+        repository,
+        sender,
+        sha: sha.to_owned(),
+        state: model::parse("status.state", &status.state.to_ascii_lowercase())?,
+        target_url: status.target_url.clone(),
+        updated_at: model::timestamp("status.updated_at", &status.updated_at)?,
+    })
+}
+
+/// The commit `sha`, from git when the repository has it.
+fn commit(ctx: &Ctx, sha: &str, repo: &RepoUrls) -> wt::StatusEventCommit {
     let urls = repo.commit(sha);
     let commit = ctx
         .git_dir()
@@ -48,87 +61,89 @@ fn commit_object(ctx: &Ctx, sha: &str, repo: &RepoUrls) -> Value {
         Some(commit) => (
             commit.tree,
             commit.message,
-            person(&commit.author),
-            person(&commit.committer),
+            model::committer(&commit.author),
+            model::committer(&commit.committer),
             commit.parents,
         ),
         None => (
             sha.to_owned(),
             String::new(),
-            person_stub(),
-            person_stub(),
+            model::stub_committer(),
+            model::stub_committer(),
             Vec::new(),
         ),
     };
-    json!({
-        "sha": sha,
-        "node_id": format!("C_{sha}"),
-        "commit": {
-            "author": author,
-            "committer": committer,
-            "message": message,
-            "tree": {"sha": tree, "url": repo.git_tree(&tree)},
-            "url": urls.git,
-            "comment_count": 0,
-            "verification": {
-                "verified": false,
-                "reason": "unsigned",
-                "signature": Value::Null,
-                "payload": Value::Null,
-            }
+    wt::StatusEventCommit {
+        author: None,
+        comments_url: urls.comments(),
+        commit: wt::StatusEventCommitCommit {
+            author: wt::StatusEventCommitCommitAuthor {
+                date: author.date.unwrap_or_else(crate::time::now),
+                email: author.email,
+                name: author.name,
+                username: None,
+            },
+            comment_count: 0,
+            committer: wt::StatusEventCommitCommitCommitter {
+                date: committer.date.unwrap_or_else(crate::time::now),
+                email: committer.email,
+                name: committer.name,
+                username: None,
+            },
+            message,
+            tree: wt::StatusEventCommitCommitTree {
+                url: repo.git_tree(&tree),
+                sha: tree,
+            },
+            url: urls.git.clone(),
+            verification: wt::StatusEventCommitCommitVerification {
+                payload: None,
+                reason: wt::StatusEventCommitCommitVerificationReason::Unsigned,
+                signature: None,
+                verified: false,
+            },
         },
-        "url": urls.api,
-        "html_url": urls.html,
-        "comments_url": urls.comments(),
-        "author": Value::Null,
-        "committer": Value::Null,
-        "parents": parents.iter().map(|parent| json!({
-            "sha": parent,
-            "url": repo.commit(parent).api,
-            "html_url": repo.commit(parent).html,
-        })).collect::<Vec<_>>(),
-    })
-}
-
-fn person(signature: &ninot_common::git::Signature) -> Value {
-    json!({
-        "name": signature.name,
-        "email": signature.email,
-        "date": stamp(&signature.date),
-    })
-}
-
-fn person_stub() -> Value {
-    json!({
-        "name": "ninot-github",
-        "email": Value::Null,
-        "date": crate::time::now(),
-    })
-}
-
-fn branches(ctx: &Ctx, sha: &str, repo: &RepoUrls) -> Value {
-    let Some(dir) = ctx.git_dir() else {
-        return Value::Array(Vec::new());
-    };
-    let Ok(refs) = ninot_common::git::refs(&dir, "refs/heads/") else {
-        return Value::Array(Vec::new());
-    };
-    Value::Array(
-        refs.into_iter()
-            .filter(|reference| reference.sha == sha)
-            .take(10)
-            .map(|reference| {
-                let name = reference
-                    .name
-                    .strip_prefix("refs/heads/")
-                    .unwrap_or(&reference.name)
-                    .to_owned();
-                json!({
-                    "name": name,
-                    "commit": {"sha": reference.sha, "url": repo.commit(&reference.sha).api},
-                    "protected": false,
-                })
+        committer: None,
+        html_url: urls.html.clone(),
+        node_id: format!("C_{sha}"),
+        parents: parents
+            .iter()
+            .map(|parent| {
+                let urls = repo.commit(parent);
+                wt::StatusEventCommitParentsItem {
+                    html_url: urls.html,
+                    sha: parent.clone(),
+                    url: urls.api,
+                }
             })
             .collect(),
-    )
+        sha: sha.to_owned(),
+        url: urls.api.clone(),
+    }
+}
+
+/// Up to ten branches whose head is `sha`.
+fn branches(ctx: &Ctx, sha: &str, repo: &RepoUrls) -> Vec<wt::StatusEventBranchesItem> {
+    let Some(dir) = ctx.git_dir() else {
+        return Vec::new();
+    };
+    let Ok(refs) = ninot_common::git::refs(&dir, "refs/heads/") else {
+        return Vec::new();
+    };
+    refs.into_iter()
+        .filter(|reference| reference.sha == sha)
+        .take(10)
+        .map(|reference| wt::StatusEventBranchesItem {
+            commit: wt::StatusEventBranchesItemCommit {
+                url: repo.commit(&reference.sha).api,
+                sha: reference.sha,
+            },
+            name: reference
+                .name
+                .strip_prefix("refs/heads/")
+                .unwrap_or(&reference.name)
+                .to_owned(),
+            protected: false,
+        })
+        .collect()
 }

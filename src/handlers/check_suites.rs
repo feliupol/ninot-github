@@ -32,7 +32,7 @@ impl Handler for ops::ChecksCreateSuite {
         if created {
             let mut ctx =
                 crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
-            crate::webhooks::events::check_suite::requested_suite(&mut ctx, &suite);
+            crate::webhooks::events::check_suite::requested_suite(&mut ctx, &suite)?;
         }
         // Source: OpenAPI checks/create-suite 200
         let status = if created { 201 } else { 200 };
@@ -145,7 +145,7 @@ impl Handler for ops::ChecksRerequestSuite {
         let suite = render_suite(&state, request, &found, id)?;
         let mut ctx =
             crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
-        crate::webhooks::events::check_suite::rerequested(&mut ctx, &suite);
+        crate::webhooks::events::check_suite::rerequested(&mut ctx, &suite)?;
         Ok(ApiResponse::typed(
             201,
             &types::ChecksRerequestSuiteResponse(types::EmptyObject {}),

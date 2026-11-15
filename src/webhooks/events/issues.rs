@@ -1,33 +1,61 @@
 //! The `issues` event.
 
-use serde_json::{Value, json};
+use serde::Serialize;
 
-use super::{Ctx, empty_reactions, json_of, label_value, user_value};
+use super::{Ctx, PayloadError, model};
 use crate::types;
+use crate::webhook_types as wt;
 
-/// Queues `issues` `opened`.
-pub(crate) fn opened(ctx: &mut Ctx, issue: &types::Issue) {
-    deliver(ctx, "opened", issue, json!({}));
+/// Queues `issues` `opened`. An opened issue was never closed.
+pub(crate) fn opened(ctx: &mut Ctx, issue: &types::Issue) -> Result<(), PayloadError> {
+    deliver(ctx, issue, |mut issue, repository, sender| {
+        issue.closed_at = None;
+        wt::IssuesOpened {
+            action: wt::IssuesOpenedAction::Opened,
+            changes: None,
+            installation: None,
+            issue,
+            organization: None,
+            repository,
+            sender,
+        }
+    })
 }
 
 /// Queues one `issues` `labeled` event for `label`. Pull requests use `pull_request` instead.
-pub(crate) fn labeled(ctx: &mut Ctx, issue: &types::Issue, label: &types::Label) {
-    deliver(
-        ctx,
-        "labeled",
+pub(crate) fn labeled(
+    ctx: &mut Ctx,
+    issue: &types::Issue,
+    label: &types::Label,
+) -> Result<(), PayloadError> {
+    deliver(ctx, issue, |issue, repository, sender| wt::IssuesLabeled {
+        action: wt::IssuesLabeledAction::Labeled,
+        installation: None,
         issue,
-        json!({ "label": label_value(label) }),
-    );
+        label: Some(model::label(label)),
+        organization: None,
+        repository,
+        sender,
+    })
 }
 
 /// Queues one `issues` `unlabeled` event for `label`.
-pub(crate) fn unlabeled(ctx: &mut Ctx, issue: &types::Issue, label: &types::Label) {
-    deliver(
-        ctx,
-        "unlabeled",
-        issue,
-        json!({ "label": label_value(label) }),
-    );
+pub(crate) fn unlabeled(
+    ctx: &mut Ctx,
+    issue: &types::Issue,
+    label: &types::Label,
+) -> Result<(), PayloadError> {
+    deliver(ctx, issue, |issue, repository, sender| {
+        wt::IssuesUnlabeled {
+            action: wt::IssuesUnlabeledAction::Unlabeled,
+            installation: None,
+            issue,
+            label: Some(model::label(label)),
+            organization: None,
+            repository,
+            sender,
+        }
+    })
 }
 
 /// Queues `issues` `edited` describing the previous title and/or body.
@@ -36,58 +64,115 @@ pub(crate) fn edited(
     issue: &types::Issue,
     title_from: Option<&str>,
     body_from: Option<&str>,
-) {
-    let mut changes = json!({});
-    if let Some(from) = title_from {
-        changes["title"] = json!({ "from": from });
+) -> Result<(), PayloadError> {
+    if title_from.is_none() && body_from.is_none() {
+        return Ok(());
     }
-    if let Some(from) = body_from {
-        changes["body"] = json!({ "from": from });
-    }
-    if changes.as_object().is_none_or(|object| object.is_empty()) {
-        return;
-    }
-    deliver(ctx, "edited", issue, json!({ "changes": changes }));
+    let changes = wt::IssuesEditedChanges {
+        body: body_from.map(|from| wt::IssuesEditedChangesBody {
+            from: from.to_owned(),
+        }),
+        title: title_from.map(|from| wt::IssuesEditedChangesTitle {
+            from: from.to_owned(),
+        }),
+    };
+    deliver(ctx, issue, |issue, repository, sender| wt::IssuesEdited {
+        action: wt::IssuesEditedAction::Edited,
+        changes,
+        installation: None,
+        issue,
+        label: None,
+        organization: None,
+        repository,
+        sender,
+    })
 }
 
 /// Queues `issues` `closed`.
-pub(crate) fn closed(ctx: &mut Ctx, issue: &types::Issue) {
-    deliver(ctx, "closed", issue, json!({}));
+pub(crate) fn closed(ctx: &mut Ctx, issue: &types::Issue) -> Result<(), PayloadError> {
+    deliver(ctx, issue, |issue, repository, sender| wt::IssuesClosed {
+        action: wt::IssuesClosedAction::Closed,
+        installation: None,
+        issue,
+        organization: None,
+        repository,
+        sender,
+    })
 }
 
 /// Queues `issues` `reopened`.
-pub(crate) fn reopened(ctx: &mut Ctx, issue: &types::Issue) {
-    deliver(ctx, "reopened", issue, json!({}));
+pub(crate) fn reopened(ctx: &mut Ctx, issue: &types::Issue) -> Result<(), PayloadError> {
+    deliver(ctx, issue, |issue, repository, sender| wt::IssuesReopened {
+        action: wt::IssuesReopenedAction::Reopened,
+        installation: None,
+        issue,
+        organization: None,
+        repository,
+        sender,
+    })
 }
 
 /// Queues `issues` `assigned` for `assignee`.
-pub(crate) fn assigned(ctx: &mut Ctx, issue: &types::Issue, assignee: &types::SimpleUser) {
-    deliver(
-        ctx,
-        "assigned",
+pub(crate) fn assigned(
+    ctx: &mut Ctx,
+    issue: &types::Issue,
+    assignee: &types::SimpleUser,
+) -> Result<(), PayloadError> {
+    deliver(ctx, issue, |issue, repository, sender| wt::IssuesAssigned {
+        action: wt::IssuesAssignedAction::Assigned,
+        assignee: Some(model::user(assignee)),
+        installation: None,
         issue,
-        json!({ "assignee": user_value(assignee) }),
-    );
+        organization: None,
+        repository,
+        sender,
+    })
 }
 
 /// Queues `issues` `unassigned` for `assignee`.
-pub(crate) fn unassigned(ctx: &mut Ctx, issue: &types::Issue, assignee: &types::SimpleUser) {
-    deliver(
-        ctx,
-        "unassigned",
-        issue,
-        json!({ "assignee": user_value(assignee) }),
-    );
+pub(crate) fn unassigned(
+    ctx: &mut Ctx,
+    issue: &types::Issue,
+    assignee: &types::SimpleUser,
+) -> Result<(), PayloadError> {
+    deliver(ctx, issue, |issue, repository, sender| {
+        wt::IssuesUnassigned {
+            action: wt::IssuesUnassignedAction::Unassigned,
+            assignee: Some(model::user(assignee)),
+            installation: None,
+            issue,
+            organization: None,
+            repository,
+            sender,
+        }
+    })
 }
 
 /// Queues `issues` `locked`.
-pub(crate) fn locked(ctx: &mut Ctx, issue: &types::Issue) {
-    deliver(ctx, "locked", issue, json!({}));
+pub(crate) fn locked(ctx: &mut Ctx, issue: &types::Issue) -> Result<(), PayloadError> {
+    deliver(ctx, issue, |issue, repository, sender| wt::IssuesLocked {
+        action: wt::IssuesLockedAction::Locked,
+        installation: None,
+        issue,
+        organization: None,
+        repository,
+        sender,
+    })
 }
 
-/// Queues `issues` `unlocked`.
-pub(crate) fn unlocked(ctx: &mut Ctx, issue: &types::Issue) {
-    deliver(ctx, "unlocked", issue, json!({}));
+/// Queues `issues` `unlocked`. An unlocked issue has no lock reason.
+pub(crate) fn unlocked(ctx: &mut Ctx, issue: &types::Issue) -> Result<(), PayloadError> {
+    deliver(ctx, issue, |mut issue, repository, sender| {
+        issue.active_lock_reason = None;
+        wt::IssuesUnlocked {
+            action: wt::IssuesUnlockedAction::Unlocked,
+            installation: None,
+            issue,
+            organization: None,
+            repository,
+            sender,
+        }
+    })
 }
 
 /// Queues `issues` `milestoned` for `milestone`.
@@ -95,122 +180,70 @@ pub(crate) fn milestoned(
     ctx: &mut Ctx,
     issue: &types::Issue,
     milestone: &types::NullableMilestone,
-) {
-    deliver(
-        ctx,
-        "milestoned",
-        issue,
-        json!({ "milestone": json_of(milestone) }),
-    );
+) -> Result<(), PayloadError> {
+    try_deliver(ctx, issue, |issue, repository, sender| {
+        Ok(wt::IssuesMilestoned {
+            action: wt::IssuesMilestonedAction::Milestoned,
+            installation: None,
+            issue,
+            milestone: model::milestone(milestone)?,
+            organization: None,
+            repository,
+            sender,
+        })
+    })
 }
 
-/// Queues `issues` `demilestoned` for the removed `milestone`.
+/// Queues `issues` `demilestoned` for the removed `milestone`. The issue has no milestone.
 pub(crate) fn demilestoned(
     ctx: &mut Ctx,
     issue: &types::Issue,
     milestone: &types::NullableMilestone,
-) {
-    deliver(
-        ctx,
-        "demilestoned",
-        issue,
-        json!({ "milestone": json_of(milestone) }),
-    );
-}
-
-/// Labels on `issue` as the webhook label model.
-pub(crate) fn issue_labels(issue: &types::Issue) -> Vec<types::Label> {
-    issue
-        .labels
-        .iter()
-        .map(|label| match label {
-            types::IssueLabelsItem::String(name) => types::Label {
-                archived_at: None,
-                archived_by: None,
-                color: "ededed".to_owned(),
-                default: false,
-                description: Some(String::new()),
-                id: 0,
-                name: name.clone(),
-                node_id: String::new(),
-                url: String::new(),
-            },
-            types::IssueLabelsItem::Object {
-                archived_by,
-                color,
-                default,
-                description,
-                id,
-                name,
-                node_id,
-                url,
-            } => types::Label {
-                archived_at: None,
-                archived_by: archived_by.clone(),
-                color: color.clone().unwrap_or_else(|| "ededed".to_owned()),
-                default: default.unwrap_or(false),
-                description: description.clone(),
-                id: id.unwrap_or_default(),
-                name: name.clone().unwrap_or_default(),
-                node_id: node_id.clone().unwrap_or_default(),
-                url: url.clone().unwrap_or_default(),
-            },
+) -> Result<(), PayloadError> {
+    try_deliver(ctx, issue, |mut issue, repository, sender| {
+        issue.milestone = None;
+        Ok(wt::IssuesDemilestoned {
+            action: wt::IssuesDemilestonedAction::Demilestoned,
+            installation: None,
+            issue,
+            milestone: model::milestone(milestone)?,
+            organization: None,
+            repository,
+            sender,
         })
-        .collect()
+    })
 }
 
-fn deliver(ctx: &mut Ctx, action: &str, issue: &types::Issue, extra: Value) {
+/// Labels on `issue` as REST labels.
+pub(crate) fn issue_labels(issue: &types::Issue) -> Vec<types::Label> {
+    model::issue_labels(issue)
+}
+
+/// Builds the payload from the webhook issue, repository and sender, and queues it.
+fn deliver<P: Serialize>(
+    ctx: &mut Ctx,
+    issue: &types::Issue,
+    payload: impl FnOnce(wt::Issue, wt::Repository, wt::User) -> P,
+) -> Result<(), PayloadError> {
+    try_deliver(ctx, issue, |issue, repository, sender| {
+        Ok(payload(issue, repository, sender))
+    })
+}
+
+/// [`deliver`] for a payload whose own parts can fail to build.
+fn try_deliver<P: Serialize>(
+    ctx: &mut Ctx,
+    issue: &types::Issue,
+    payload: impl FnOnce(wt::Issue, wt::Repository, wt::User) -> Result<P, PayloadError>,
+) -> Result<(), PayloadError> {
     if !ctx.wants("issues") {
-        return;
+        return Ok(());
     }
-    let Some(payload) = project(ctx, action, issue, extra) else {
-        return;
+    let (Some(repository), Some(sender)) = (ctx.repository(), ctx.sender(None)) else {
+        return Ok(());
     };
-    // `project` already applied the schema; enqueue projects again, which is stable.
-    ctx.enqueue("issues", &format!("issues-{action}"), payload);
-}
-
-fn project(ctx: &Ctx, action: &str, issue: &types::Issue, extra: Value) -> Option<Value> {
-    let repository = ctx.repository_value()?;
-    let sender = ctx.sender_value(None)?;
-    let mut payload = json!({
-        "action": action,
-        "issue": issue_json(issue),
-        "repository": repository,
-        "sender": sender,
-    });
-    if let (Some(object), Some(extra)) = (payload.as_object_mut(), extra.as_object()) {
-        object.extend(extra.clone());
-    }
-    Some(super::project::project(
-        &format!("issues-{action}"),
-        payload,
-    ))
-}
-
-/// Issue JSON with the associations and reactions a webhook requires.
-pub(crate) fn issue_json(issue: &types::Issue) -> Value {
-    let mut value = json_of(issue);
-    let Some(object) = value.as_object_mut() else {
-        return value;
-    };
-    if object.get("author_association").is_none_or(Value::is_null) {
-        object.insert("author_association".to_owned(), Value::from("NONE"));
-    }
-    if object.get("state").is_none_or(Value::is_null) {
-        object.insert("state".to_owned(), Value::from("open"));
-    }
-    if object.get("locked").is_none_or(Value::is_null) {
-        object.insert("locked".to_owned(), Value::Bool(false));
-    }
-    if object.get("reactions").is_none_or(Value::is_null) {
-        let url = object.get("url").and_then(Value::as_str).map_or_else(
-            || "https://github.com/issues/reactions".to_owned(),
-            |url| format!("{url}/reactions"),
-        );
-        object.insert("reactions".to_owned(), empty_reactions(&url));
-    }
-    value
+    let payload = model::issue(issue).and_then(|issue| payload(issue, repository, sender));
+    ctx.enqueue_built("issues", payload)
 }
 
 #[cfg(test)]
@@ -262,22 +295,22 @@ mod tests {
         .unwrap();
         state.add_issue("admin", "tool", 1, issue.clone());
         let mut ctx = Ctx::new(&mut state, &request, "admin", "tool");
-        edited(&mut ctx, &issue, Some("Earlier"), Some(""));
+        edited(&mut ctx, &issue, Some("Earlier"), Some("")).unwrap();
         let mut closed_issue = issue.clone();
         closed_issue.state = "closed".to_owned();
         closed_issue.closed_at = Some(crate::time::now_utc());
-        closed(&mut ctx, &closed_issue);
-        reopened(&mut ctx, &issue);
-        assigned(&mut ctx, &issue, &user);
-        unassigned(&mut ctx, &issue, &user);
+        closed(&mut ctx, &closed_issue).unwrap();
+        reopened(&mut ctx, &issue).unwrap();
+        assigned(&mut ctx, &issue, &user).unwrap();
+        unassigned(&mut ctx, &issue, &user).unwrap();
         let labels = issue_labels(&issue);
         if let Some(label) = labels.first() {
-            unlabeled(&mut ctx, &issue, label);
+            unlabeled(&mut ctx, &issue, label).unwrap();
         }
         let mut locked_issue = issue.clone();
         locked_issue.locked = true;
-        locked(&mut ctx, &locked_issue);
-        unlocked(&mut ctx, &issue);
+        locked(&mut ctx, &locked_issue).unwrap();
+        unlocked(&mut ctx, &issue).unwrap();
         for delivery in &ctx.state.deliveries {
             check_webhook("issues", &delivery.payload()).unwrap_or_else(|error| {
                 panic!("{} {}\n{error}", delivery.event, delivery.payload());

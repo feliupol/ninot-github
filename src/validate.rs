@@ -437,12 +437,6 @@ pub(crate) fn check_component(name: &str, body: &Value) -> Result<(), String> {
     errors(&*validator(name.to_owned(), &schema)?, name, body)
 }
 
-/// One definition from the embedded octokit/webhooks bundle, such as `push-event` or
-/// `pull_request-opened`.
-pub(crate) fn webhook_definition(name: &str) -> Option<&'static Value> {
-    webhook_schemas()["definitions"].get(name)
-}
-
 /// `"{event}-event"` when that aggregate schema exists, otherwise `"{event}-{action}"` taken
 /// from `body`. Ping, push, create, delete and status use the aggregate form; the other events
 /// are published as one schema per action.

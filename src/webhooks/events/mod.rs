@@ -1,4 +1,5 @@
-//! Payload builders, one module per webhook event.
+//! Payload builders, one module per webhook event. Each builds the payload type generated from
+//! its octokit/webhooks schema, and [`Ctx::enqueue`] serializes it.
 
 pub mod ping;
 pub mod push;
@@ -10,7 +11,7 @@ pub(crate) mod delete;
 pub(crate) mod issue_changes;
 pub(crate) mod issue_comment;
 pub(crate) mod issues;
-pub(crate) mod project;
+pub(crate) mod model;
 pub(crate) mod pull_request;
 pub(crate) mod pull_request_review;
 pub(crate) mod pull_request_review_comment;
@@ -25,7 +26,6 @@ mod schema;
 use std::path::PathBuf;
 
 use serde::Serialize;
-use serde_json::{Map, Value, json};
 
 use crate::api::ApiRequest;
 use crate::render;
@@ -33,7 +33,9 @@ use crate::state::{Permission, State};
 use crate::types;
 use crate::urls::RepoUrls;
 use crate::webhook_types;
+use crate::webhooks::delivery::record_unbuilt;
 use crate::webhooks::enqueue;
+pub(crate) use model::PayloadError;
 
 /// Projects the REST repository into the webhook contract.
 fn repository(repository: &types::FullRepository) -> webhook_types::Repository {
@@ -77,11 +79,11 @@ impl<'a> Ctx<'a> {
     }
 
     /// The webhook repository object, when the repository still exists.
-    pub(crate) fn repository_value(&self) -> Option<Value> {
+    pub(crate) fn repository(&self) -> Option<webhook_types::Repository> {
         let account = self.state.account(self.owner)?;
         let repo = account.repo(self.name)?;
         let full = render::full_repository(self.request, account, repo, Permission::default());
-        Some(json_of(&webhook_types::Repository::from(full)))
+        Some(repository(&full))
     }
 
     /// Locations of the repository, spelled as state stores its owner and name.
@@ -94,16 +96,13 @@ impl<'a> Ctx<'a> {
         self.request.urls().repo(owner, name)
     }
 
-    /// [`repository_value`] projected onto the `repository-lite` definition.
-    pub(crate) fn repository_lite(&self) -> Option<Value> {
-        self.repository_value()
-            .map(|value| project::project("repository-lite", value))
-    }
-
     /// The webhook user for `explicit`, or the caller, or the repository owner.
-    pub(crate) fn sender_value(&self, explicit: Option<&types::SimpleUser>) -> Option<Value> {
+    pub(crate) fn sender(
+        &self,
+        explicit: Option<&types::SimpleUser>,
+    ) -> Option<webhook_types::User> {
         if let Some(user) = explicit {
-            return Some(user_value(user));
+            return Some(model::user(user));
         }
         let login = self
             .request
@@ -111,7 +110,7 @@ impl<'a> Ctx<'a> {
             .as_ref()
             .map_or(self.owner, |caller| caller.login.as_str());
         let account = self.state.account(login)?;
-        Some(user_value(&render::simple_user(self.request, account)))
+        Some(model::user(&render::simple_user(self.request, account)))
     }
 
     /// The default branch and description stored for the repository.
@@ -128,152 +127,32 @@ impl<'a> Ctx<'a> {
             .and_then(|repo| repo.git_dir.clone())
     }
 
-    /// Projects `payload` onto `definition` and records a delivery when a hook wants `event`.
-    pub(crate) fn enqueue(&mut self, event: &str, definition: &str, payload: Value) {
+    /// Records a delivery of `payload` as `event` to every hook that wants it.
+    pub(crate) fn enqueue(&mut self, event: &str, payload: &impl Serialize) {
+        if self.wants(event) {
+            enqueue(self.state, self.owner, self.name, event, payload, None);
+        }
+    }
+
+    /// [`Self::enqueue`] for a payload that may have failed to build. A failure is recorded on
+    /// the delivery with its error, not queued, and returned.
+    pub(crate) fn enqueue_built(
+        &mut self,
+        event: &str,
+        payload: Result<impl Serialize, PayloadError>,
+    ) -> Result<(), PayloadError> {
         if !self.wants(event) {
-            return;
+            return Ok(());
         }
-        let payload = project::project(definition, payload);
-        enqueue(self.state, self.owner, self.name, event, &payload, None);
-    }
-}
-
-/// Serializes `value` as JSON.
-pub(crate) fn json_of(value: &impl Serialize) -> Value {
-    serde_json::to_value(value).expect("webhook values serialize to JSON")
-}
-
-/// The webhook user for `user`. A null `name` is omitted: the schema types it as a string and
-/// does not require it.
-pub(crate) fn user_value(user: &types::SimpleUser) -> Value {
-    let mut value = json_of(&webhook_types::User::from(user.clone()));
-    if value.get("name").is_some_and(Value::is_null) {
-        value
-            .as_object_mut()
-            .expect("a user is an object")
-            .remove("name");
-    }
-    value
-}
-
-/// Renames a REST `links` object to the webhook `_links` key when the model used the former.
-///
-/// A `self_` key inside that object becomes `self`.
-pub(crate) fn rename_links(value: &mut Value) {
-    let Some(object) = value.as_object_mut() else {
-        return;
-    };
-    if let Some(links) = object.remove("links") {
-        object.entry("_links".to_owned()).or_insert(links);
-    }
-    if let Some(links) = object.get_mut("_links").and_then(Value::as_object_mut)
-        && let Some(self_link) = links.remove("self_")
-    {
-        links.entry("self".to_owned()).or_insert(self_link);
-    }
-}
-
-/// Inserts `value` when `key` is absent or JSON null.
-pub(crate) fn fill_null(object: &mut Map<String, Value>, key: &str, value: Value) {
-    if object.get(key).is_none_or(Value::is_null) {
-        object.insert(key.to_owned(), value);
-    }
-}
-
-/// Label JSON with a real URL when the REST model left `url` or `node_id` empty.
-pub(crate) fn label_value(label: &types::Label) -> Value {
-    let mut value = json_of(label);
-    if let Some(object) = value.as_object_mut() {
-        if object
-            .get("url")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .is_empty()
-        {
-            object.insert(
-                "url".to_owned(),
-                Value::from(format!("https://github.com/labels/{}", label.name)),
-            );
-        }
-        if object
-            .get("node_id")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .is_empty()
-        {
-            object.insert("node_id".to_owned(), Value::from(format!("L_{}", label.id)));
+        match payload {
+            Ok(payload) => {
+                enqueue(self.state, self.owner, self.name, event, &payload, None);
+                Ok(())
+            }
+            Err(error) => {
+                record_unbuilt(self.state, self.owner, self.name, event, &error);
+                Err(error)
+            }
         }
     }
-    value
-}
-
-/// An empty reactions object. `url` is the reactions collection URL.
-pub(crate) fn empty_reactions(url: &str) -> Value {
-    json!({
-        "url": url,
-        "total_count": 0,
-        "+1": 0,
-        "-1": 0,
-        "laugh": 0,
-        "hooray": 0,
-        "confused": 0,
-        "heart": 0,
-        "rocket": 0,
-        "eyes": 0
-    })
-}
-
-/// A stand-in GitHub App used when a check payload has no app of its own.
-pub(crate) fn stub_app(owner: &Value, now: &str) -> Value {
-    json!({
-        "id": 1,
-        "node_id": "A_ninot",
-        "owner": owner,
-        "name": "ninot-github",
-        "description": null,
-        "external_url": "https://github.com/apps/ninot-github",
-        "html_url": "https://github.com/apps/ninot-github",
-        "created_at": now,
-        "updated_at": now
-    })
-}
-
-/// A [`commit-simple`](https://github.com/octokit/webhooks) object for `sha`.
-///
-/// Uses the git commit when the repository has it, and a stub signature otherwise.
-pub(crate) fn commit_simple(ctx: &Ctx, sha: &str) -> Value {
-    if let Some(dir) = ctx.git_dir()
-        && let Ok(commit) = ninot_common::git::commit(&dir, sha)
-    {
-        let person = |signature: &ninot_common::git::Signature| {
-            json!({
-                "name": signature.name,
-                "email": signature.email,
-                "date": stamp(&signature.date),
-            })
-        };
-        return json!({
-            "id": commit.sha,
-            "tree_id": commit.tree,
-            "message": commit.message,
-            "timestamp": stamp(&commit.author.date),
-            "author": person(&commit.author),
-            "committer": person(&commit.committer),
-        });
-    }
-    let now = crate::time::now();
-    let person = json!({"name": "ninot-github", "email": null, "date": now});
-    json!({
-        "id": sha,
-        "tree_id": sha,
-        "message": "",
-        "timestamp": now,
-        "author": person,
-        "committer": {"name": "ninot-github", "email": null, "date": now},
-    })
-}
-
-/// `text` as an RFC 3339 timestamp, or the current time when `text` is not one.
-pub(crate) fn stamp(text: &str) -> String {
-    crate::time::parse(text).map_or_else(|_| crate::time::now(), |_| text.to_owned())
 }

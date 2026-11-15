@@ -434,7 +434,7 @@ fn apply_change(
         .data
         .clone();
     let mut ctx = crate::webhooks::events::Ctx::new(state, request, &found.owner, &found.name);
-    crate::webhooks::events::issue_changes::from_update(&mut ctx, &issue_before, &issue_after);
+    crate::webhooks::events::issue_changes::from_update(&mut ctx, &issue_before, &issue_after)?;
     Ok(issue_after)
 }
 

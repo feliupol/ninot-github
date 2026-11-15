@@ -249,9 +249,9 @@ impl Handler for ops::PullsSubmitReview {
             .cloned()
             .collect::<Vec<_>>();
         let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
-        events::pull_request_review::submitted(&mut ctx, &data, &review);
+        events::pull_request_review::submitted(&mut ctx, &data, &review)?;
         for comment in &comments {
-            events::pull_request_review_comment::created(&mut ctx, &data, comment);
+            events::pull_request_review_comment::created(&mut ctx, &data, comment)?;
         }
         Ok(ApiResponse::typed(200, &review))
     }

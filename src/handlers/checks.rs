@@ -76,9 +76,9 @@ impl Handler for ops::ChecksCreate {
         }
         let mut ctx =
             crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
-        crate::webhooks::events::check_run::created(&mut ctx, &run);
+        crate::webhooks::events::check_run::created(&mut ctx, &run)?;
         if run.status == types::CheckRunStatus::Completed {
-            crate::webhooks::events::check_run::completed(&mut ctx, &run);
+            crate::webhooks::events::check_run::completed(&mut ctx, &run)?;
         }
         Ok(ApiResponse::typed(201, &types::ChecksCreateResponse(run)))
     }
@@ -147,7 +147,7 @@ impl Handler for ops::ChecksUpdate {
         if !was_completed && updated.status == types::CheckRunStatus::Completed {
             let mut ctx =
                 crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
-            crate::webhooks::events::check_run::completed(&mut ctx, &updated);
+            crate::webhooks::events::check_run::completed(&mut ctx, &updated)?;
         }
         Ok(ApiResponse::typed(
             200,
@@ -194,7 +194,7 @@ impl Handler for ops::ChecksRerequestRun {
         }
         let mut ctx =
             crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
-        crate::webhooks::events::check_run::rerequested(&mut ctx, &run);
+        crate::webhooks::events::check_run::rerequested(&mut ctx, &run)?;
         Ok(ApiResponse::typed(
             201,
             &types::ChecksRerequestRunResponse(types::EmptyObject {}),

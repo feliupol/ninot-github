@@ -3,11 +3,10 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use serde_json::json;
-
 use super::{Ctx, push};
 use crate::api::ApiRequest;
 use crate::state::{State, lock};
+use crate::webhook_types as wt;
 
 /// The short name and `branch` or `tag` kind of `reference`, when it is a head or a tag.
 pub(crate) fn ref_kind(reference: &str) -> Option<(&str, &'static str)> {
@@ -25,28 +24,27 @@ pub(crate) fn reference(ctx: &mut Ctx, name: &str, ref_type: &str) {
     if name.is_empty() || !ctx.wants("create") {
         return;
     }
-    let Some(repository) = ctx.repository_value() else {
-        return;
-    };
-    let Some(sender) = ctx.sender_value(None) else {
+    let (Some(repository), Some(sender)) = (ctx.repository(), ctx.sender(None)) else {
         return;
     };
     let Some((master_branch, description)) = ctx.branch_and_description() else {
         return;
     };
-    ctx.enqueue(
-        "create",
-        "create-event",
-        json!({
-            "ref": name,
-            "ref_type": ref_type,
-            "master_branch": master_branch,
-            "description": description,
-            "pusher_type": "user",
-            "repository": repository,
-            "sender": sender,
-        }),
-    );
+    let payload = wt::CreateEvent {
+        description,
+        installation: None,
+        master_branch,
+        organization: None,
+        pusher_type: "user".to_owned(),
+        ref_: name.to_owned(),
+        ref_type: match ref_type {
+            "tag" => wt::CreateEventRefType::Tag,
+            _ => wt::CreateEventRefType::Branch,
+        },
+        repository,
+        sender,
+    };
+    ctx.enqueue("create", &payload);
 }
 
 /// Queues `create` for each branch or tag a push added.

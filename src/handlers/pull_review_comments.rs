@@ -314,7 +314,7 @@ fn store(
     });
     if let Some(data) = data {
         let mut ctx = Ctx::new(state, request, &found.owner, &found.name);
-        events::pull_request_review_comment::created(&mut ctx, &data, comment);
+        events::pull_request_review_comment::created(&mut ctx, &data, comment)?;
     }
     Ok(())
 }

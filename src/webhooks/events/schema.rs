@@ -1,14 +1,15 @@
 //! Builds every webhook payload from the fixture models and checks the pinned schema.
 //!
 //! The HTTP suite records the same deliveries. This test does not open a socket, so a payload
-//! that the projector cannot satisfy fails here.
+//! that does not match its schema fails here.
 
 use std::collections::BTreeMap;
 
 use serde_json::{Map, Value, json};
 
+use super::pull_request;
 use super::workflow_run;
-use super::{Ctx, check_run, check_suite, create, delete, issue_comment, issues, pull_request};
+use super::{Ctx, PayloadError, check_run, check_suite, create, delete, issue_comment, issues};
 use super::{pull_request_review, pull_request_review_comment, release, status, workflow_job};
 use crate::api::ApiRequest;
 use crate::fixtures::{self, IssueSeed, LabelSeed, PullRequestSeed, SeedField};
@@ -99,25 +100,25 @@ fn every_event_payload_matches_its_schema() {
     let mut failures = Vec::new();
     {
         let mut ctx = Ctx::new(&mut state, &request, "admin", "tool");
-        issues::opened(&mut ctx, &issue);
+        issues::opened(&mut ctx, &issue).unwrap();
         for item in issues::issue_labels(&issue) {
-            issues::labeled(&mut ctx, &issue, &item);
-            issues::unlabeled(&mut ctx, &issue, &item);
+            issues::labeled(&mut ctx, &issue, &item).unwrap();
+            issues::unlabeled(&mut ctx, &issue, &item).unwrap();
         }
-        issues::edited(&mut ctx, &issue, Some("Earlier"), Some(""));
+        issues::edited(&mut ctx, &issue, Some("Earlier"), Some("")).unwrap();
         let mut closed = issue.clone();
         closed.state = "closed".to_owned();
         closed.closed_at = Some(crate::time::now_utc());
-        issues::closed(&mut ctx, &closed);
-        issues::reopened(&mut ctx, &issue);
-        issues::assigned(&mut ctx, &issue, &user);
-        issues::unassigned(&mut ctx, &issue, &user);
+        issues::closed(&mut ctx, &closed).unwrap();
+        issues::reopened(&mut ctx, &issue).unwrap();
+        issues::assigned(&mut ctx, &issue, &user).unwrap();
+        issues::unassigned(&mut ctx, &issue, &user).unwrap();
         let mut locked = issue.clone();
         locked.locked = true;
-        issues::locked(&mut ctx, &locked);
-        issues::unlocked(&mut ctx, &issue);
+        issues::locked(&mut ctx, &locked).unwrap();
+        issues::unlocked(&mut ctx, &issue).unwrap();
 
-        pull_request::opened(&mut ctx, &pull);
+        pull_request::opened(&mut ctx, &pull).unwrap();
         let mut changes = Map::new();
         changes.insert("title".to_owned(), json!({ "from": "Draft" }));
         changes.insert("body".to_owned(), json!({ "from": "" }));
@@ -125,30 +126,30 @@ fn every_event_payload_matches_its_schema() {
             "base".to_owned(),
             json!({ "ref": { "from": "main" }, "sha": { "from": pull.base.sha } }),
         );
-        pull_request::edited(&mut ctx, &pull, changes);
+        pull_request::edited(&mut ctx, &pull, changes).unwrap();
         let mut closed_pull = pull.clone();
         closed_pull.state = types::PullRequestState::Closed;
         closed_pull.closed_at = Some(crate::time::now_utc());
-        pull_request::closed(&mut ctx, &closed_pull);
-        pull_request::reopened(&mut ctx, &pull);
-        pull_request::synchronize(&mut ctx, &pull, &pull.base.sha, &pull.head.sha, &user);
+        pull_request::closed(&mut ctx, &closed_pull).unwrap();
+        pull_request::reopened(&mut ctx, &pull).unwrap();
+        pull_request::synchronize(&mut ctx, &pull, &pull.base.sha, &pull.head.sha, &user).unwrap();
         for item in pull_request::pull_labels(&pull) {
-            pull_request::labeled(&mut ctx, &pull, &item);
+            pull_request::labeled(&mut ctx, &pull, &item).unwrap();
         }
-        pull_request::review_requested_user(&mut ctx, &pull, &user);
+        pull_request::review_requested_user(&mut ctx, &pull, &user).unwrap();
         let team = fixtures::requested_team(ctx.state, &request, "acme", "reviewers").unwrap();
-        pull_request::review_requested_team(&mut ctx, &pull, &team);
+        pull_request::review_requested_team(&mut ctx, &pull, &team).unwrap();
 
         let review = review(&request, &user, &pull);
-        pull_request_review::submitted(&mut ctx, &pull, &review);
+        pull_request_review::submitted(&mut ctx, &pull, &review).unwrap();
         let comment = review_comment(&request, &user, pull.number);
-        pull_request_review_comment::created(&mut ctx, &pull, &comment);
+        pull_request_review_comment::created(&mut ctx, &pull, &comment).unwrap();
         let issue_note = issue_comment(&request, &user, 1);
-        issue_comment::created(&mut ctx, 1, &issue_note);
-        issue_comment::edited(&mut ctx, 1, &issue_note, "old");
-        issue_comment::deleted(&mut ctx, 1, &issue_note);
+        issue_comment::created(&mut ctx, 1, &issue_note).unwrap();
+        issue_comment::edited(&mut ctx, 1, &issue_note, "old").unwrap();
+        issue_comment::deleted(&mut ctx, 1, &issue_note).unwrap();
         ctx.state.add_pull_request("admin", "tool", 2, pull.clone());
-        issue_comment::created(&mut ctx, 2, &issue_note);
+        issue_comment::created(&mut ctx, 2, &issue_note).unwrap();
 
         let check = fixtures::seeded_check_run(
             ctx.state,
@@ -159,9 +160,9 @@ fn every_event_payload_matches_its_schema() {
         )
         .unwrap();
         let check = render_run(ctx.state, &request, &check);
-        check_suite::requested(&mut ctx, &check);
-        check_run::created(&mut ctx, &check);
-        check_run::completed(&mut ctx, &check);
+        check_suite::requested(&mut ctx, &check).unwrap();
+        check_run::created(&mut ctx, &check).unwrap();
+        check_run::completed(&mut ctx, &check).unwrap();
         // A rerequest follows a finished run, so its suite carries a conclusion.
         let finished = fixtures::seeded_check_run(
             ctx.state,
@@ -176,7 +177,7 @@ fn every_event_payload_matches_its_schema() {
         )
         .unwrap();
         let finished = render_run(ctx.state, &request, &finished);
-        check_run::rerequested(&mut ctx, &finished);
+        check_run::rerequested(&mut ctx, &finished).unwrap();
 
         let run = {
             let account = ctx.state.account("admin").unwrap();
@@ -200,6 +201,17 @@ fn every_event_payload_matches_its_schema() {
         workflow_job::deliver(&mut ctx, &run, &job);
         workflow_run::deliver(&mut ctx, &queued_run);
         workflow_job::deliver(&mut ctx, &queued_run, &queued_job);
+        let mut running_run = run.clone();
+        running_run.status = Some("in_progress".to_owned());
+        running_run.conclusion = None;
+        let mut running_job = job.clone();
+        running_job.status = types::JobStatus::InProgress;
+        running_job.conclusion = None;
+        workflow_run::deliver(&mut ctx, &running_run);
+        workflow_job::deliver(&mut ctx, &running_run, &running_job);
+        let mut waiting_job = queued_job.clone();
+        waiting_job.status = types::JobStatus::Waiting;
+        workflow_job::deliver(&mut ctx, &queued_run, &waiting_job);
 
         let status_model = {
             let account = ctx.state.account("admin").unwrap();
@@ -216,20 +228,20 @@ fn every_event_payload_matches_its_schema() {
                 &record,
             )
         };
-        status::commit_status(&mut ctx, sha, &status_model);
+        status::commit_status(&mut ctx, sha, &status_model).unwrap();
 
         let published = sample_release(user);
-        release::deliver(&mut ctx, "created", &published, None);
-        release::deliver(&mut ctx, "published", &published, None);
+        release::deliver(&mut ctx, "created", &published, None).unwrap();
+        release::deliver(&mut ctx, "published", &published, None).unwrap();
         let mut prerelease = published.clone();
         prerelease.prerelease = true;
-        release::deliver(&mut ctx, "prereleased", &prerelease, None);
-        release::deliver(&mut ctx, "unpublished", &published, None);
-        release::deliver(&mut ctx, "deleted", &published, None);
+        release::deliver(&mut ctx, "prereleased", &prerelease, None).unwrap();
+        release::deliver(&mut ctx, "unpublished", &published, None).unwrap();
+        release::deliver(&mut ctx, "deleted", &published, None).unwrap();
         let mut edited = Map::new();
         edited.insert("name".to_owned(), json!({ "from": "Draft" }));
         edited.insert("body".to_owned(), json!({ "from": "" }));
-        release::deliver(&mut ctx, "edited", &published, Some(edited));
+        release::deliver(&mut ctx, "edited", &published, Some(edited)).unwrap();
 
         create::reference(&mut ctx, "topic", "branch");
         create::reference(&mut ctx, "v1", "tag");
@@ -287,6 +299,9 @@ fn every_event_payload_matches_its_schema() {
         ("workflow_run", "requested"),
         ("workflow_job", "completed"),
         ("workflow_job", "queued"),
+        ("workflow_job", "in_progress"),
+        ("workflow_job", "waiting"),
+        ("workflow_run", "in_progress"),
         ("release", "created"),
         ("release", "published"),
         ("release", "prereleased"),
@@ -472,4 +487,300 @@ fn render_run(
 ) -> types::CheckRun {
     let account = state.account("admin").unwrap();
     crate::handlers::checks_model::render_run(request, account, "tool", run)
+}
+
+/// A repository `admin/tool` with a hook for every event, and payload validation on.
+fn hooked_state() -> (State, ApiRequest) {
+    let mut state = State::default();
+    state.validate_payloads = true;
+    state.add_user("admin");
+    state.create_repo("admin", "tool", false, None).unwrap();
+    state
+        .account_mut("admin")
+        .unwrap()
+        .repo_mut("tool")
+        .unwrap()
+        .hooks
+        .push(hook());
+    (state, ApiRequest::for_urls("http://127.0.0.1:9", None))
+}
+
+/// The only delivery of `state`, which must match its schema.
+fn sole_payload(state: &State) -> Value {
+    let [delivery] = &state.deliveries[..] else {
+        panic!("{} deliveries", state.deliveries.len());
+    };
+    assert_eq!(delivery.error, None, "{}", delivery.payload());
+    delivery.payload()
+}
+
+#[test]
+fn a_check_without_an_app_names_the_stand_in_app_with_its_events() {
+    let (mut state, request) = hooked_state();
+    let check = fixtures::seeded_check_run(
+        &mut state,
+        &request,
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        fixtures::CheckRunSeed::default(),
+        0,
+    )
+    .unwrap();
+    let check = render_run(&state, &request, &check);
+    check_run::created(&mut Ctx::new(&mut state, &request, "admin", "tool"), &check).unwrap();
+    let payload = sole_payload(&state);
+    assert_eq!(payload["check_run"]["app"]["name"], "ninot-github");
+    assert_eq!(payload["check_run"]["app"]["events"], json!([]));
+}
+
+#[test]
+fn a_pending_check_run_is_created_queued() {
+    let (mut state, request) = hooked_state();
+    let check = fixtures::seeded_check_run(
+        &mut state,
+        &request,
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        fixtures::CheckRunSeed {
+            status: SeedField::Present("pending".to_owned()),
+            ..fixtures::CheckRunSeed::default()
+        },
+        0,
+    )
+    .unwrap();
+    let check = render_run(&state, &request, &check);
+    check_run::created(&mut Ctx::new(&mut state, &request, "admin", "tool"), &check).unwrap();
+    assert_eq!(sole_payload(&state)["check_run"]["status"], "queued");
+}
+
+#[test]
+fn a_rerequested_skipped_run_has_a_neutral_suite() {
+    let (mut state, request) = hooked_state();
+    let check = fixtures::seeded_check_run(
+        &mut state,
+        &request,
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        fixtures::CheckRunSeed {
+            status: SeedField::Present("completed".to_owned()),
+            conclusion: SeedField::Present(Some("skipped".to_owned())),
+            ..fixtures::CheckRunSeed::default()
+        },
+        0,
+    )
+    .unwrap();
+    let check = render_run(&state, &request, &check);
+    check_run::rerequested(&mut Ctx::new(&mut state, &request, "admin", "tool"), &check).unwrap();
+    let payload = sole_payload(&state);
+    assert_eq!(payload["check_run"]["conclusion"], "skipped");
+    assert_eq!(payload["check_run"]["check_suite"]["conclusion"], "neutral");
+}
+
+#[test]
+fn an_open_release_asset_is_delivered_uploaded() {
+    let (mut state, request) = hooked_state();
+    let author = render::simple_user(&request, state.account("admin").unwrap());
+    let mut published = sample_release(author);
+    let now = crate::time::now_utc();
+    published.assets.push(types::ReleaseAsset {
+        browser_download_url: "https://github.com/admin/tool/releases/download/v1/a.zip".to_owned(),
+        content_type: "application/zip".to_owned(),
+        created_at: now,
+        digest: None,
+        download_count: 0,
+        id: 1,
+        label: None,
+        name: "a.zip".to_owned(),
+        node_id: "RA_1".to_owned(),
+        size: 1,
+        state: types::ReleaseAssetState::Open,
+        updated_at: now,
+        uploader: None,
+        url: "https://api.github.com/repos/admin/tool/releases/assets/1".to_owned(),
+    });
+    release::deliver(
+        &mut Ctx::new(&mut state, &request, "admin", "tool"),
+        "published",
+        &published,
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        sole_payload(&state)["release"]["assets"][0]["state"],
+        "uploaded"
+    );
+}
+
+#[test]
+fn an_issue_label_given_by_name_is_delivered_as_a_label() {
+    let (mut state, request) = hooked_state();
+    let user = render::simple_user(&request, state.account("admin").unwrap());
+    let mut issue = fixtures::seeded_issue(
+        &mut state,
+        &request,
+        "admin",
+        "tool",
+        user,
+        1,
+        IssueSeed::default(),
+    )
+    .unwrap();
+    issue.labels = vec![types::IssueLabelsItem::String("bug".to_owned())];
+    issues::opened(&mut Ctx::new(&mut state, &request, "admin", "tool"), &issue).unwrap();
+    let label = &sole_payload(&state)["issue"]["labels"][0];
+    assert_eq!(label["name"], "bug");
+    assert_eq!(label["color"], "ededed");
+}
+
+/// An issue #1 in the repository of `hooked_state`.
+fn seeded_issue(state: &mut State, request: &ApiRequest) -> types::Issue {
+    let user = render::simple_user(request, state.account("admin").unwrap());
+    fixtures::seeded_issue(
+        state,
+        request,
+        "admin",
+        "tool",
+        user,
+        1,
+        IssueSeed::default(),
+    )
+    .unwrap()
+}
+
+/// The only delivery of `state` records `error` and carries no payload.
+fn assert_unbuilt(state: &State, error: &PayloadError) {
+    let [delivery] = &state.deliveries[..] else {
+        panic!("{} deliveries", state.deliveries.len());
+    };
+    assert_eq!(
+        delivery.error.as_deref(),
+        Some(format!("ninot-github could not build the payload: {error}").as_str())
+    );
+    assert_eq!(delivery.payload(), Value::Null);
+}
+
+#[test]
+fn an_issue_state_outside_the_webhook_vocabulary_fails_its_delivery() {
+    let (mut state, request) = hooked_state();
+    let mut issue = seeded_issue(&mut state, &request);
+    issue.state = "merged".to_owned();
+    let error =
+        issues::opened(&mut Ctx::new(&mut state, &request, "admin", "tool"), &issue).unwrap_err();
+    assert_eq!(
+        error,
+        PayloadError::Unknown {
+            field: "issue.state",
+            value: "merged".to_owned(),
+        }
+    );
+    assert_unbuilt(&state, &error);
+}
+
+#[test]
+fn an_issue_without_its_author_fails_its_delivery() {
+    let (mut state, request) = hooked_state();
+    let mut issue = seeded_issue(&mut state, &request);
+    issue.user = None;
+    let error =
+        issues::opened(&mut Ctx::new(&mut state, &request, "admin", "tool"), &issue).unwrap_err();
+    assert_eq!(
+        error,
+        PayloadError::Missing {
+            field: "issue.user"
+        }
+    );
+    assert_unbuilt(&state, &error);
+}
+
+#[test]
+fn a_milestone_without_its_creator_fails_its_delivery() {
+    let (mut state, request) = hooked_state();
+    let issue = seeded_issue(&mut state, &request);
+    let now = crate::time::now_utc();
+    let milestone = types::NullableMilestone {
+        closed_at: None,
+        closed_issues: 0,
+        created_at: now,
+        creator: None,
+        description: None,
+        due_on: None,
+        html_url: "http://127.0.0.1:9/admin/tool/milestone/1".to_owned(),
+        id: 1,
+        labels_url: "http://127.0.0.1:9/repos/admin/tool/milestones/1/labels".to_owned(),
+        node_id: "MI_1".to_owned(),
+        number: 1,
+        open_issues: 1,
+        state: types::NullableMilestoneState::Open,
+        title: "v1".to_owned(),
+        updated_at: now,
+        url: "http://127.0.0.1:9/repos/admin/tool/milestones/1".to_owned(),
+    };
+    let error = issues::milestoned(
+        &mut Ctx::new(&mut state, &request, "admin", "tool"),
+        &issue,
+        &milestone,
+    )
+    .unwrap_err();
+    assert_eq!(
+        error,
+        PayloadError::Missing {
+            field: "milestone.creator"
+        }
+    );
+    assert_unbuilt(&state, &error);
+}
+
+#[test]
+fn a_team_without_its_privacy_fails_its_delivery() {
+    let (mut state, request) = hooked_state();
+    let user = render::simple_user(&request, state.account("admin").unwrap());
+    let repository = {
+        let account = state.account("admin").unwrap();
+        render::repository_for_pull(
+            &request,
+            account,
+            account.repo("tool").unwrap(),
+            Permission::default(),
+        )
+    };
+    let pull = fixtures::seeded_pull_request(
+        &mut state,
+        &request,
+        ("admin", "tool"),
+        user,
+        repository,
+        2,
+        PullRequestSeed::default(),
+    )
+    .unwrap()
+    .data;
+    let mut team = fixtures::requested_team(&mut state, &request, "acme", "reviewers").unwrap();
+    team.privacy = None;
+    let error = pull_request::review_requested_team(
+        &mut Ctx::new(&mut state, &request, "admin", "tool"),
+        &pull,
+        &team,
+    )
+    .unwrap_err();
+    assert_eq!(
+        error,
+        PayloadError::Missing {
+            field: "team.privacy"
+        }
+    );
+    assert_unbuilt(&state, &error);
+}
+
+#[test]
+fn a_payload_that_cannot_be_built_answers_500_naming_the_field_and_value() {
+    let response = crate::api::ApiResponse::from(PayloadError::Unknown {
+        field: "issue.state",
+        value: "merged".to_owned(),
+    });
+    assert_eq!(response.status, 500);
+    let crate::api::Body::Json(body) = &response.body else {
+        panic!("a JSON error body");
+    };
+    assert_eq!(
+        body["message"],
+        "ninot-github could not build the webhook payload: issue.state is \"merged\", which the \
+         webhook schema does not allow"
+    );
 }

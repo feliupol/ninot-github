@@ -1,85 +1,160 @@
 //! The `check_suite` event.
 
-use serde_json::{Value, json};
-
-use super::{Ctx, check_run, commit_simple, json_of};
+use super::check_run::{RunSuite, suite_from_run};
+use super::{Ctx, PayloadError, model};
 use crate::types;
+use crate::webhook_types as wt;
 
 /// Queues `check_suite` `requested` for the first check run on a commit.
-pub(crate) fn requested(ctx: &mut Ctx, check: &types::CheckRun) {
-    deliver_from_run(ctx, "requested", check);
+pub(crate) fn requested(ctx: &mut Ctx, check: &types::CheckRun) -> Result<(), PayloadError> {
+    if !ctx.wants("check_suite") {
+        return Ok(());
+    }
+    let (Some(repository), Some(sender)) = (ctx.repository(), ctx.sender(None)) else {
+        return Ok(());
+    };
+    let now = model::now();
+    let RunSuite {
+        id,
+        status,
+        conclusion,
+        head_sha,
+        url,
+        pull_requests,
+    } = suite_from_run(check, &ctx.urls());
+    let status = match model::parse("check_suite.status", status) {
+        Ok(status) => status,
+        Err(error) => return ctx.enqueue_built("check_suite", Err::<(), _>(error)),
+    };
+    let check_suite = wt::CheckSuiteRequestedCheckSuite {
+        after: None,
+        app: model::app(check.app.as_ref(), &sender, now),
+        before: None,
+        check_runs_url: ctx.urls().check_suite(id).check_runs(),
+        conclusion: conclusion.as_deref().and_then(|text| text.parse().ok()),
+        created_at: now,
+        head_branch: None,
+        head_commit: model::commit_simple(ctx, &head_sha),
+        head_sha,
+        id,
+        latest_check_runs_count: 1,
+        node_id: format!("CS_{id}"),
+        pull_requests,
+        rerequestable: None,
+        runs_rerequestable: None,
+        status: Some(status),
+        updated_at: now,
+        url,
+    };
+    let payload = wt::CheckSuiteRequested {
+        action: wt::CheckSuiteRequestedAction::Requested,
+        check_suite,
+        installation: None,
+        organization: None,
+        repository,
+        sender,
+    };
+    ctx.enqueue_built("check_suite", Ok(payload))
 }
 
 /// Queues `check_suite` `requested` for a suite created through the Checks API.
-pub(crate) fn requested_suite(ctx: &mut Ctx, suite: &types::CheckSuite) {
-    deliver_from_suite(ctx, "requested", suite);
+pub(crate) fn requested_suite(
+    ctx: &mut Ctx,
+    suite: &types::CheckSuite,
+) -> Result<(), PayloadError> {
+    deliver(ctx, suite, |check_suite, repository, sender| {
+        let rerequestable = check_suite.0.rerequestable;
+        let runs_rerequestable = check_suite.0.runs_rerequestable;
+        wt::CheckSuiteRequested {
+            action: wt::CheckSuiteRequestedAction::Requested,
+            check_suite: suite_object!(CheckSuiteRequestedCheckSuite, check_suite, {
+                rerequestable,
+                runs_rerequestable,
+            }),
+            installation: None,
+            organization: None,
+            repository,
+            sender,
+        }
+    })
 }
 
 /// Queues `check_suite` `rerequested`.
-pub(crate) fn rerequested(ctx: &mut Ctx, suite: &types::CheckSuite) {
-    deliver_from_suite(ctx, "rerequested", suite);
+pub(crate) fn rerequested(ctx: &mut Ctx, suite: &types::CheckSuite) -> Result<(), PayloadError> {
+    deliver(ctx, suite, |check_suite, repository, sender| {
+        wt::CheckSuiteRerequested {
+            action: wt::CheckSuiteRerequestedAction::Rerequested,
+            check_suite: suite_object!(CheckSuiteRerequestedCheckSuite, check_suite, {}),
+            installation: None,
+            organization: None,
+            repository,
+            sender,
+        }
+    })
 }
 
-fn deliver_from_run(ctx: &mut Ctx, action: &str, check: &types::CheckRun) {
+/// The REST suite with the parts of it the webhook builds from state.
+pub(crate) struct SuiteParts<'a>(&'a types::CheckSuite, wt::App, wt::CommitSimple, String);
+
+/// Builds the check suite struct `$type` from `$parts` and the per-action `$extra` fields.
+macro_rules! suite_object {
+    ($type:ident, $parts:expr, { $($extra:tt)* }) => {{
+        let SuiteParts(suite, app, head_commit, url) = $parts;
+        let now = model::now();
+        wt::$type {
+            after: suite.after.clone(),
+            app,
+            before: suite.before.clone(),
+            check_runs_url: suite.check_runs_url.clone(),
+            conclusion: suite
+                .conclusion
+                .as_ref()
+                .and_then(|conclusion| conclusion.to_string().parse().ok()),
+            created_at: suite.created_at.unwrap_or(now),
+            head_branch: suite.head_branch.clone(),
+            head_commit,
+            head_sha: suite.head_sha.clone(),
+            id: suite.id,
+            latest_check_runs_count: suite.latest_check_runs_count,
+            node_id: suite.node_id.clone(),
+            pull_requests: suite
+                .pull_requests
+                .iter()
+                .flatten()
+                .map(model::minimal_pull)
+                .collect(),
+            status: suite
+                .status
+                .as_ref()
+                .and_then(|status| status.to_string().parse().ok()),
+            updated_at: suite.updated_at.unwrap_or(now),
+            url,
+            $($extra)*
+        }
+    }};
+}
+use suite_object;
+
+/// Builds the payload from the suite parts, repository and sender, and queues it.
+fn deliver<P: serde::Serialize>(
+    ctx: &mut Ctx,
+    suite: &types::CheckSuite,
+    payload: impl FnOnce(SuiteParts, wt::Repository, wt::User) -> P,
+) -> Result<(), PayloadError> {
     if !ctx.wants("check_suite") {
-        return;
+        return Ok(());
     }
-    let Some(repository) = ctx.repository_value() else {
-        return;
+    let (Some(repository), Some(sender)) = (ctx.repository(), ctx.sender(None)) else {
+        return Ok(());
     };
-    let Some(sender) = ctx.sender_value(None) else {
-        return;
-    };
-    let now = crate::time::now();
-    let mut suite = check_run::suite_payload(check, &ctx.urls(), &sender, &now);
-    let id = suite.get("id").and_then(Value::as_i64).unwrap_or(1);
-    let sha = suite
-        .get("head_sha")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_owned();
-    let urls = ctx.urls().check_suite(id);
-    if let Some(object) = suite.as_object_mut() {
-        object.insert("node_id".to_owned(), Value::from(format!("CS_{id}")));
-        object.insert("latest_check_runs_count".to_owned(), Value::from(1));
-        object.insert("check_runs_url".to_owned(), Value::from(urls.check_runs()));
-        object.insert("head_commit".to_owned(), commit_simple(ctx, &sha));
-    }
-    enqueue(ctx, action, suite, repository, sender);
-}
-
-fn deliver_from_suite(ctx: &mut Ctx, action: &str, suite: &types::CheckSuite) {
-    if !ctx.wants("check_suite") {
-        return;
-    }
-    let Some(repository) = ctx.repository_value() else {
-        return;
-    };
-    let Some(sender) = ctx.sender_value(None) else {
-        return;
-    };
-    let mut value = json_of(suite);
-    let sha = value
-        .get("head_sha")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_owned();
-    if let Some(object) = value.as_object_mut() {
-        object.insert("head_commit".to_owned(), commit_simple(ctx, &sha));
-        object.remove("repository");
-    }
-    enqueue(ctx, action, value, repository, sender);
-}
-
-fn enqueue(ctx: &mut Ctx, action: &str, suite: Value, repository: Value, sender: Value) {
-    ctx.enqueue(
-        "check_suite",
-        &format!("check_suite-{action}"),
-        json!({
-            "action": action,
-            "check_suite": suite,
-            "repository": repository,
-            "sender": sender,
-        }),
+    let parts = SuiteParts(
+        suite,
+        model::app(suite.app.as_ref(), &sender, model::now()),
+        model::commit_simple(ctx, &suite.head_sha),
+        suite
+            .url
+            .clone()
+            .unwrap_or_else(|| ctx.urls().check_suite(suite.id).api),
     );
+    ctx.enqueue_built("check_suite", Ok(payload(parts, repository, sender)))
 }

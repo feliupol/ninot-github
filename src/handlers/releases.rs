@@ -210,7 +210,7 @@ impl Handler for ops::ReposCreateRelease {
         if created_tag {
             crate::webhooks::events::create::reference(&mut ctx, &rendered.tag_name, "tag");
         }
-        crate::webhooks::events::release::deliver(&mut ctx, action, &rendered, None);
+        crate::webhooks::events::release::deliver(&mut ctx, action, &rendered, None)?;
         Ok(ApiResponse::typed(201, &rendered))
     }
 }
@@ -351,9 +351,9 @@ impl Handler for ops::ReposUpdateRelease {
             } else {
                 "published"
             };
-            crate::webhooks::events::release::deliver(&mut ctx, action, &rendered, None);
+            crate::webhooks::events::release::deliver(&mut ctx, action, &rendered, None)?;
         } else if !was_draft && rendered.draft {
-            crate::webhooks::events::release::deliver(&mut ctx, "unpublished", &rendered, None);
+            crate::webhooks::events::release::deliver(&mut ctx, "unpublished", &rendered, None)?;
         } else {
             let new_name = rendered.name.clone().unwrap_or_default();
             let new_body = rendered.body.clone().unwrap_or_default();
@@ -370,7 +370,7 @@ impl Handler for ops::ReposUpdateRelease {
                     "edited",
                     &rendered,
                     Some(changes),
-                );
+                )?;
             }
         }
         Ok(ApiResponse::typed(200, &rendered))
@@ -398,7 +398,7 @@ impl Handler for ops::ReposDeleteRelease {
             .retain(|release| release.id != id);
         let mut ctx =
             crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
-        crate::webhooks::events::release::deliver(&mut ctx, "deleted", &rendered, None);
+        crate::webhooks::events::release::deliver(&mut ctx, "deleted", &rendered, None)?;
         Ok(ApiResponse::no_content())
     }
 }
