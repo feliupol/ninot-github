@@ -229,6 +229,14 @@ cargo xtask completion check
 `gh-coverage report|check|update`). The Python package is tested with
 `maturin develop -m python/Cargo.toml` and `pytest -q python/tests`.
 
+`cargo xtask gh-coverage check` reads what the last `cargo test --test gh_cli` run exercised.
+It fails when that differs from `tests/gh_coverage.txt` (`update` rewrites the file). It also
+fails when an operation in `IMPLEMENTED` is neither answered successfully in a `gh_cli` test nor
+listed in `tests/gh_coverage_exemptions.txt` as `operationId: reason`. An exemption for an
+operation that is exercised, or no longer implemented, fails the check too, so the list only
+shrinks. A new handler therefore needs a `gh_cli` test, or an exemption that says why, for
+example that gh never calls the endpoint.
+
 ## Behaviour references
 
 The OpenAPI description fixes paths, parameters and response shapes. Anything it leaves open
