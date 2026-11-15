@@ -5,33 +5,23 @@ use std::sync::Mutex;
 use chrono::{DateTime, Utc};
 
 use super::checks_model::{
-    cap_same_name, checks_forbidden, integration, open_suite, require_checks_app, touch_suite,
+    cap_same_name, checks_forbidden, find_run, open_suite, render_annotations, render_run,
+    require_checks_app, touch_suite,
 };
 use super::repos::find_repo;
 use super::{Handler, checks_model};
 use crate::api::{ApiRequest, ApiResponse, ApiResult, paginate};
 use crate::operation::ops;
 use crate::render;
-use crate::state::{Repo, State, lock};
+use crate::state::{
+    CheckAnnotationRecord, CheckRunApp, CheckRunRecord, SeededCheckRun, State, lock,
+};
 use crate::types;
-use crate::urls::RepoUrls;
 
 struct Phase {
     status: types::CheckRunStatus,
     conclusion: Option<types::CheckRunConclusion>,
     completed_at: Option<DateTime<Utc>>,
-}
-
-struct AnnotationInput {
-    path: String,
-    start_line: i64,
-    end_line: i64,
-    start_column: Option<i64>,
-    end_column: Option<i64>,
-    level: String,
-    message: String,
-    title: Option<String>,
-    raw_details: Option<String>,
 }
 
 impl Handler for ops::ChecksCreate {
@@ -51,62 +41,43 @@ impl Handler for ops::ChecksCreate {
         let found = find_repo(&state, request)?;
         let app_id = require_checks_app(request)?;
         let (suite_id, _) = open_suite(&mut state, &found, app_id, &body.head_sha);
+        let head_sha = checks_model::commit_key(found.repo(&state), &body.head_sha);
+        let id = render::id(state.next_id());
+        let (output_title, output_summary, output_text) = output_fields(body.output.as_ref());
+        let record = CheckRunRecord {
+            id,
+            name: body.name.clone(),
+            head_sha,
+            suite_id: Some(suite_id),
+            app: Some(CheckRunApp::Id(app_id)),
+            status: phase.status,
+            conclusion: phase.conclusion,
+            created_at: now,
+            started_at: Some(body.started_at.unwrap_or(now)),
+            completed_at: phase.completed_at,
+            details_url: body.details_url.clone(),
+            external_id: body.external_id.clone(),
+            output_title,
+            output_summary,
+            output_text,
+            annotations,
+            pull_requests: Vec::new(),
+            seeded: SeededCheckRun::default(),
+        };
         let account = state
             .account(&found.owner)
             .expect("repository owner exists");
-        let app = integration(request, account, app_id, now);
-        let head_sha = {
-            let repo = found.repo(&state);
-            checks_model::commit_key(repo, &body.head_sha)
-        };
-        let raw = state.next_id();
-        let id = render::id(raw);
-        let repo_urls = request.urls().repo(&found.owner, &found.name);
-        let urls = repo_urls.check_run(id);
-        let stored = annotations
-            .iter()
-            .map(|item| annotation(item, &repo_urls, &head_sha))
-            .collect::<Vec<_>>();
-        let (title, summary, text) = output_fields(body.output.as_ref());
-        let run = types::CheckRun {
-            app: Some(app.clone()),
-            check_suite: Some(types::CheckRunCheckSuite { id: suite_id }),
-            completed_at: phase.completed_at,
-            conclusion: phase.conclusion,
-            deployment: None,
-            details_url: Some(body.details_url.clone().unwrap_or(app.html_url)),
-            external_id: body.external_id.clone(),
-            head_sha: head_sha.clone(),
-            html_url: Some(urls.html.clone()),
-            id,
-            name: body.name.clone(),
-            node_id: render::node_id("CheckRun", raw),
-            output: types::CheckRunOutput {
-                annotations_count: i64::try_from(stored.len()).unwrap_or(i64::MAX),
-                annotations_url: urls.annotations(),
-                summary,
-                text,
-                title,
-            },
-            pull_requests: Vec::new(),
-            started_at: Some(body.started_at.unwrap_or(now)),
-            status: phase.status,
-            url: urls.api,
-        };
+        let run = render_run(request, account, &found.name, &record);
         {
             let repo = found.repo_mut(&mut state);
-            cap_same_name(repo, suite_id, &run.name);
-            repo.check_annotations.insert(id, stored);
-            repo.check_runs
-                .entry(head_sha)
-                .or_default()
-                .push(run.clone());
+            cap_same_name(repo, suite_id, &record.name);
+            repo.check_runs.push(record);
             touch_suite(repo, suite_id);
         }
         let mut ctx =
             crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
         crate::webhooks::events::check_run::created(&mut ctx, &run);
-        if run.status.to_string() == "completed" {
+        if run.status == types::CheckRunStatus::Completed {
             crate::webhooks::events::check_run::completed(&mut ctx, &run);
         }
         Ok(ApiResponse::typed(201, &types::ChecksCreateResponse(run)))
@@ -122,26 +93,21 @@ impl Handler for ops::ChecksUpdate {
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         let app_id = require_checks_app(request)?;
-        let current = find_run(found.repo(&state), id).ok_or_else(ApiResponse::not_found)?;
-        if current.app.as_ref().map(|app| app.id) != Some(app_id) {
+        let current = find_run(found.repo(&state), id)
+            .cloned()
+            .ok_or_else(ApiResponse::not_found)?;
+        if current.app.as_ref().map(CheckRunApp::id) != Some(app_id) {
             return Err(checks_forbidden(request));
         }
         let phase = update_phase(&body, &current, now)?;
-        let repo_urls = request.urls().repo(&found.owner, &found.name);
-        let appended = extra
-            .iter()
-            .map(|item| annotation(item, &repo_urls, &current.head_sha))
-            .collect::<Vec<_>>();
-        let was_completed = current.status.to_string() == "completed";
+        let was_completed = current.status == types::CheckRunStatus::Completed;
         let updated = {
             let repo = found.repo_mut(&mut state);
-            let count = {
-                let stored = repo.check_annotations.entry(id).or_default();
-                // Source: <https://docs.github.com/en/rest/checks/runs#update-a-check-run>
-                stored.extend(appended);
-                i64::try_from(stored.len()).unwrap_or(i64::MAX)
-            };
-            let run = find_run_mut(repo, id).expect("check run exists");
+            let run = repo
+                .check_runs
+                .iter_mut()
+                .find(|run| run.id == id && run.head_sha == current.head_sha)
+                .expect("check run exists");
             if let Some(name) = body.name.clone() {
                 run.name = name;
             }
@@ -159,22 +125,26 @@ impl Handler for ops::ChecksUpdate {
             run.completed_at = phase.completed_at;
             if let Some(output) = body.output.as_ref() {
                 if let Some(title) = output.title.clone() {
-                    run.output.title = Some(title);
+                    run.output_title = Some(title);
                 }
-                run.output.summary = Some(String::from(output.summary.clone()));
+                run.output_summary = Some(String::from(output.summary.clone()));
                 if let Some(text) = output.text.clone() {
-                    run.output.text = Some(String::from(text));
+                    run.output_text = Some(String::from(text));
                 }
-                run.output.annotations_count = count;
+                // Source: <https://docs.github.com/en/rest/checks/runs#update-a-check-run>
+                run.annotations.extend(extra);
             }
-            let suite_id = run.check_suite.as_ref().map(|suite| suite.id);
             let updated = run.clone();
-            if let Some(suite_id) = suite_id {
+            if let Some(suite_id) = updated.suite_id {
                 touch_suite(repo, suite_id);
             }
             updated
         };
-        if !was_completed && updated.status.to_string() == "completed" {
+        let account = state
+            .account(&found.owner)
+            .expect("repository owner exists");
+        let updated = render_run(request, account, &found.name, &updated);
+        if !was_completed && updated.status == types::CheckRunStatus::Completed {
             let mut ctx =
                 crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
             crate::webhooks::events::check_run::completed(&mut ctx, &updated);
@@ -191,11 +161,8 @@ impl Handler for ops::ChecksListAnnotations {
         let state = lock(state);
         let found = find_repo(&state, request)?;
         let id = parse_id(request.param("check_run_id"))?;
-        let repo = found.repo(&state);
-        if find_run(repo, id).is_none() {
-            return Err(ApiResponse::not_found());
-        }
-        let annotations = repo.check_annotations.get(&id).cloned().unwrap_or_default();
+        let run = find_run(found.repo(&state), id).ok_or_else(ApiResponse::not_found)?;
+        let annotations = render_annotations(request, &found.owner, &found.name, run);
         Ok(paginate(request, &request.path, annotations))
     }
 }
@@ -206,14 +173,18 @@ impl Handler for ops::ChecksRerequestRun {
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         let app_id = require_checks_app(request)?;
-        let run = find_run(found.repo(&state), id).ok_or_else(ApiResponse::not_found)?;
+        let record = find_run(found.repo(&state), id).ok_or_else(ApiResponse::not_found)?;
         // Source: OpenAPI checks/rerequest-run 403
-        if run.app.as_ref().map(|app| app.id) != Some(app_id) {
+        if record.app.as_ref().map(CheckRunApp::id) != Some(app_id) {
             return Err(checks_forbidden(request));
         }
-        let Some(suite_id) = run.check_suite.as_ref().map(|suite| suite.id) else {
+        let Some(suite_id) = record.suite_id else {
             return Err(not_rerequestable());
         };
+        let account = state
+            .account(&found.owner)
+            .expect("repository owner exists");
+        let run = render_run(request, account, &found.name, record);
         {
             let repo = found.repo_mut(&mut state);
             // Source: <https://docs.github.com/en/rest/checks/runs#rerequest-a-check-run>
@@ -238,21 +209,6 @@ fn not_rerequestable() -> ApiResponse {
 
 fn parse_id(value: &str) -> Result<i64, ApiResponse> {
     value.parse().map_err(|_| ApiResponse::not_found())
-}
-
-fn find_run(repo: &Repo, id: i64) -> Option<types::CheckRun> {
-    repo.check_runs
-        .values()
-        .flatten()
-        .find(|run| run.id == id)
-        .cloned()
-}
-
-fn find_run_mut(repo: &mut Repo, id: i64) -> Option<&mut types::CheckRun> {
-    repo.check_runs
-        .values_mut()
-        .flatten()
-        .find(|run| run.id == id)
 }
 
 // Source: <https://docs.github.com/en/rest/checks/runs#create-a-check-run>
@@ -286,7 +242,7 @@ fn create_phase(
 // Source: <https://docs.github.com/en/rest/checks/runs#update-a-check-run>
 fn update_phase(
     body: &types::ChecksUpdateRequest,
-    current: &types::CheckRun,
+    current: &CheckRunRecord,
     now: DateTime<Utc>,
 ) -> Result<Phase, ApiResponse> {
     let conclusion = body.conclusion.map(conclusion_of).transpose()?;
@@ -370,7 +326,7 @@ struct AnnotationDraft<'a> {
 
 fn create_annotations(
     body: &types::ChecksCreateRequest,
-) -> Result<Vec<AnnotationInput>, ApiResponse> {
+) -> Result<Vec<CheckAnnotationRecord>, ApiResponse> {
     let Some(output) = body.output.as_ref() else {
         return Ok(Vec::new());
     };
@@ -395,7 +351,7 @@ fn create_annotations(
 
 fn update_annotations(
     body: &types::ChecksUpdateRequest,
-) -> Result<Vec<AnnotationInput>, ApiResponse> {
+) -> Result<Vec<CheckAnnotationRecord>, ApiResponse> {
     let Some(output) = body.output.as_ref() else {
         return Ok(Vec::new());
     };
@@ -419,7 +375,7 @@ fn update_annotations(
 }
 
 // Source: <https://docs.github.com/en/rest/checks/runs#update-a-check-run>
-fn annotation_input(draft: AnnotationDraft<'_>) -> Result<AnnotationInput, ApiResponse> {
+fn annotation_input(draft: AnnotationDraft<'_>) -> Result<CheckAnnotationRecord, ApiResponse> {
     if draft.start_line < 1 || draft.end_line < draft.start_line {
         return Err(ApiResponse::validation_failed(
             "CheckAnnotation",
@@ -436,7 +392,7 @@ fn annotation_input(draft: AnnotationDraft<'_>) -> Result<AnnotationInput, ApiRe
             "invalid",
         ));
     }
-    Ok(AnnotationInput {
+    Ok(CheckAnnotationRecord {
         path: draft.path.to_owned(),
         start_line: draft.start_line,
         end_line: draft.end_line,
@@ -447,19 +403,4 @@ fn annotation_input(draft: AnnotationDraft<'_>) -> Result<AnnotationInput, ApiRe
         title: draft.title.map(str::to_owned),
         raw_details: draft.raw_details.map(str::to_owned),
     })
-}
-
-fn annotation(item: &AnnotationInput, repo: &RepoUrls, sha: &str) -> types::CheckAnnotation {
-    types::CheckAnnotation {
-        annotation_level: Some(item.level.clone()),
-        blob_href: repo.blob_html(sha, &item.path),
-        end_column: item.end_column,
-        end_line: item.end_line,
-        message: Some(item.message.clone()),
-        path: item.path.clone(),
-        raw_details: item.raw_details.clone(),
-        start_column: item.start_column,
-        start_line: item.start_line,
-        title: item.title.clone(),
-    }
 }

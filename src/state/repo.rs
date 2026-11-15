@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use super::{Hook, IssueEvent, Release, State};
+use super::{CheckRunRecord, CommitStatusRecord, Hook, IssueEvent, Release, State};
 use crate::api::{ApiResponse, Caller};
 use crate::time::now;
 use crate::types::{
@@ -55,16 +55,14 @@ pub struct Repo {
     pub actions_public_key: Option<crate::types::ActionsPublicKey>,
     /// Encrypted Actions secret payloads, keyed by their case-sensitive name.
     pub actions_secrets: BTreeMap<String, StoredActionsSecret>,
-    /// Check runs keyed by commit SHA.
-    pub check_runs: BTreeMap<String, Vec<crate::types::CheckRun>>,
+    /// Check runs, oldest first. Fixture-seeded runs on different commits may share an id.
+    pub check_runs: Vec<CheckRunRecord>,
     /// Check suites by id.
     pub check_suites: BTreeMap<i64, CheckSuiteRecord>,
-    /// Annotations of a check run, in the order they were submitted.
-    pub check_annotations: BTreeMap<i64, Vec<crate::types::CheckAnnotation>>,
     /// Whether a GitHub App creates a check suite on push. Absent means enabled.
     pub check_suite_preferences: BTreeMap<i64, bool>,
-    /// Commit statuses keyed by commit SHA.
-    pub commit_statuses: BTreeMap<String, Vec<crate::types::Status>>,
+    /// Commit statuses, oldest first, keyed by the commit they were set on.
+    pub commit_statuses: BTreeMap<String, Vec<CommitStatusRecord>>,
     pub hooks: Vec<Hook>,
     pub settings: Settings,
 }
@@ -555,9 +553,8 @@ impl State {
                 workflow_job_logs: BTreeMap::new(),
                 actions_public_key: None,
                 actions_secrets: BTreeMap::new(),
-                check_runs: BTreeMap::new(),
+                check_runs: Vec::new(),
                 check_suites: BTreeMap::new(),
-                check_annotations: BTreeMap::new(),
                 check_suite_preferences: BTreeMap::new(),
                 commit_statuses: BTreeMap::new(),
                 hooks: Vec::new(),

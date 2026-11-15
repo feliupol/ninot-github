@@ -534,6 +534,63 @@ fn combined_commit_status_uses_latest_status_per_context() {
 }
 
 #[test]
+fn combined_status_of_a_commit_without_statuses_is_pending() {
+    let server = Server::start().unwrap();
+    server
+        .create_repository("admin", "status", false, None, None, "main")
+        .unwrap();
+    let api = common::Api::admin(&server);
+    let sha = "0123456789012345678901234567890123456789";
+
+    let combined = api.get(&format!("/repos/admin/status/commits/{sha}/status"));
+
+    assert_eq!(combined.status, 200, "{:?}", combined.body);
+    assert_eq!(combined.body["state"], "pending");
+    assert_eq!(combined.body["total_count"], 0);
+}
+
+#[test]
+fn seeded_status_states_and_timestamps_are_checked_when_seeded() {
+    let server = Server::start().unwrap();
+    let repository = server
+        .create_repository("admin", "status", false, None, None, "main")
+        .unwrap();
+    let api = common::Api::admin(&server);
+    let sha = "0123456789012345678901234567890123456789";
+    let commit = repository.commit(sha).unwrap();
+
+    let bad_state = commit.create_status(CommitStatusSeed {
+        state: SeedField::present("SUCCESS".to_owned()),
+        ..Default::default()
+    });
+    let bad_time = commit.create_status(CommitStatusSeed {
+        created_at: SeedField::present("yesterday".to_owned()),
+        ..Default::default()
+    });
+    commit
+        .create_status(CommitStatusSeed {
+            created_at: SeedField::present("2026-01-02T03:04:05+01:00".to_owned()),
+            ..Default::default()
+        })
+        .unwrap();
+
+    assert_eq!(
+        bad_state.unwrap_err().kind(),
+        std::io::ErrorKind::InvalidInput
+    );
+    assert_eq!(
+        bad_time.unwrap_err().kind(),
+        std::io::ErrorKind::InvalidInput
+    );
+    let listed = api.get(&format!("/repos/admin/status/commits/{sha}/statuses"));
+    assert_eq!(listed.status, 200, "{:?}", listed.body);
+    assert_eq!(listed.body.as_array().unwrap().len(), 1);
+    assert_eq!(listed.body[0]["created_at"], "2026-01-02T02:04:05Z");
+    let combined = api.get(&format!("/repos/admin/status/commits/{sha}/status"));
+    assert_eq!(combined.status, 200, "{:?}", combined.body);
+}
+
+#[test]
 fn pull_request_updates_edit_metadata_and_close_then_reopen() {
     use std::path::Path;
 

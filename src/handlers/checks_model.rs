@@ -8,7 +8,7 @@ use ninot_common::git;
 use super::repos::Found;
 use crate::api::{ApiRequest, ApiResponse};
 use crate::render;
-use crate::state::{Account, CheckSuiteRecord, Repo, State};
+use crate::state::{Account, CheckRunApp, CheckRunRecord, CheckSuiteRecord, Repo, State};
 use crate::types;
 
 const ZERO_SHA: &str = "0000000000000000000000000000000000000000";
@@ -172,53 +172,53 @@ pub(crate) fn mark_rerequested(repo: &mut Repo, suite_id: i64) -> bool {
 /// Drops the oldest runs once one suite holds 1000 runs of `name`, making room for one more.
 // Source: <https://docs.github.com/en/rest/checks/runs#create-a-check-run>
 pub(crate) fn cap_same_name(repo: &mut Repo, suite_id: i64, name: &str) {
-    let mut ids = Vec::new();
-    for run in repo.check_runs.values().flatten() {
-        if run.name == name
-            && run
-                .check_suite
-                .as_ref()
-                .is_some_and(|suite| suite.id == suite_id)
-        {
-            ids.push(run.id);
-        }
-    }
+    let mut ids: Vec<i64> = repo
+        .check_runs
+        .iter()
+        .filter(|run| run.name == name && run.suite_id == Some(suite_id))
+        .map(|run| run.id)
+        .collect();
     if ids.len() < MAX_SAME_NAME {
         return;
     }
     ids.sort_unstable();
-    let drop_count = ids.len() + 1 - MAX_SAME_NAME;
-    let drop = ids[..drop_count].to_vec();
-    for runs in repo.check_runs.values_mut() {
-        runs.retain(|run| !drop.contains(&run.id));
-    }
-    for id in drop {
-        repo.check_annotations.remove(&id);
-    }
+    let drop = &ids[..ids.len() + 1 - MAX_SAME_NAME];
+    repo.check_runs
+        .retain(|run| run.suite_id != Some(suite_id) || !drop.contains(&run.id));
 }
 
 /// Check runs that belong to `suite_id`, oldest id first.
-pub(crate) fn suite_runs(repo: &Repo, suite_id: i64) -> Vec<types::CheckRun> {
-    let mut runs = repo
+pub(crate) fn suite_runs(repo: &Repo, suite_id: i64) -> Vec<&CheckRunRecord> {
+    let mut runs: Vec<_> = repo
         .check_runs
-        .values()
-        .flatten()
-        .filter(|run| {
-            run.check_suite
-                .as_ref()
-                .is_some_and(|suite| suite.id == suite_id)
-        })
-        .cloned()
-        .collect::<Vec<_>>();
+        .iter()
+        .filter(|run| run.suite_id == Some(suite_id))
+        .collect();
     runs.sort_by_key(|run| run.id);
     runs
 }
 
+/// Check runs created for the commit `sha`, in the order they were added.
+pub(crate) fn commit_runs<'a>(repo: &'a Repo, sha: &str) -> Vec<&'a CheckRunRecord> {
+    repo.check_runs
+        .iter()
+        .filter(|run| run.head_sha == sha)
+        .collect()
+}
+
+/// The check run with `id`. Fixtures may seed one id on several commits; the lowest commit wins.
+pub(crate) fn find_run(repo: &Repo, id: i64) -> Option<&CheckRunRecord> {
+    repo.check_runs
+        .iter()
+        .filter(|run| run.id == id)
+        .min_by(|a, b| a.head_sha.cmp(&b.head_sha))
+}
+
 /// Applies `filter`, `check_name`, `status`, and `app_id`, then orders by id.
-pub(crate) fn select_runs(
-    mut runs: Vec<types::CheckRun>,
+pub(crate) fn select_runs<'a>(
+    mut runs: Vec<&'a CheckRunRecord>,
     request: &ApiRequest,
-) -> Vec<types::CheckRun> {
+) -> Vec<&'a CheckRunRecord> {
     // Source: <https://docs.github.com/en/rest/checks/runs#list-check-runs-for-a-git-reference>
     if request.query("filter") != Some("all") {
         runs = latest_of(runs);
@@ -233,10 +233,93 @@ pub(crate) fn select_runs(
         let Ok(app_id) = app.parse::<i64>() else {
             return Vec::new();
         };
-        runs.retain(|run| run.app.as_ref().is_some_and(|app| app.id == app_id));
+        runs.retain(|run| run.app.as_ref().is_some_and(|app| app.id() == app_id));
     }
     runs.sort_by_key(|run| run.id);
     runs
+}
+
+/// The REST model of a check run in `owner`'s repository `repo`.
+pub(crate) fn render_run(
+    request: &ApiRequest,
+    owner: &Account,
+    repo: &str,
+    run: &CheckRunRecord,
+) -> types::CheckRun {
+    let urls = request.urls().repo(&owner.login, repo).check_run(run.id);
+    let seeded = &run.seeded;
+    let app = run.app.as_ref().map(|app| match app {
+        CheckRunApp::Id(id) => integration(request, owner, *id, run.created_at),
+        CheckRunApp::Seeded(app) => (**app).clone(),
+    });
+    let details_url = run.details_url.clone().or_else(|| match &run.app {
+        Some(CheckRunApp::Id(_)) => app.as_ref().map(|app| app.html_url.clone()),
+        _ => None,
+    });
+    types::CheckRun {
+        app,
+        check_suite: run.suite_id.map(|id| types::CheckRunCheckSuite { id }),
+        completed_at: run.completed_at,
+        conclusion: run.conclusion,
+        deployment: None,
+        details_url,
+        external_id: run.external_id.clone(),
+        head_sha: seeded
+            .head_sha
+            .clone()
+            .unwrap_or_else(|| run.head_sha.clone()),
+        html_url: seeded
+            .html_url
+            .clone()
+            .unwrap_or_else(|| Some(urls.html.clone())),
+        id: run.id,
+        name: run.name.clone(),
+        node_id: seeded
+            .node_id
+            .clone()
+            .unwrap_or_else(|| render::node_id("CheckRun", u64::try_from(run.id).unwrap_or(0))),
+        output: types::CheckRunOutput {
+            annotations_count: seeded
+                .annotations_count
+                .unwrap_or_else(|| i64::try_from(run.annotations.len()).unwrap_or(i64::MAX)),
+            annotations_url: seeded
+                .annotations_url
+                .clone()
+                .unwrap_or_else(|| urls.annotations()),
+            summary: run.output_summary.clone(),
+            text: run.output_text.clone(),
+            title: run.output_title.clone(),
+        },
+        pull_requests: run.pull_requests.clone(),
+        started_at: run.started_at,
+        status: run.status,
+        url: seeded.url.clone().unwrap_or(urls.api),
+    }
+}
+
+/// The REST models of `run`'s annotations, linking each to its file at the run's commit.
+pub(crate) fn render_annotations(
+    request: &ApiRequest,
+    owner: &str,
+    repo: &str,
+    run: &CheckRunRecord,
+) -> Vec<types::CheckAnnotation> {
+    let urls = request.urls().repo(owner, repo);
+    run.annotations
+        .iter()
+        .map(|item| types::CheckAnnotation {
+            annotation_level: Some(item.level.clone()),
+            blob_href: urls.blob_html(&run.head_sha, &item.path),
+            end_column: item.end_column,
+            end_line: item.end_line,
+            message: Some(item.message.clone()),
+            path: item.path.clone(),
+            raw_details: item.raw_details.clone(),
+            start_column: item.start_column,
+            start_line: item.start_line,
+            title: item.title.clone(),
+        })
+        .collect()
 }
 
 /// Renders one stored suite, including the status rolled up from its latest runs.
@@ -391,20 +474,20 @@ fn app_installed(state: &State, owner: &str, name: &str, app_id: i64) -> bool {
     })
 }
 
-fn latest_of(runs: Vec<types::CheckRun>) -> Vec<types::CheckRun> {
-    let mut best: BTreeMap<String, types::CheckRun> = BTreeMap::new();
+fn latest_of(runs: Vec<&CheckRunRecord>) -> Vec<&CheckRunRecord> {
+    let mut best: BTreeMap<&str, &CheckRunRecord> = BTreeMap::new();
     for run in runs {
         let replace = best
-            .get(&run.name)
-            .is_none_or(|current| recency(&run) > recency(current));
+            .get(run.name.as_str())
+            .is_none_or(|current| recency(run) > recency(current));
         if replace {
-            best.insert(run.name.clone(), run);
+            best.insert(&run.name, run);
         }
     }
     best.into_values().collect()
 }
 
-fn recency(run: &types::CheckRun) -> (DateTime<Utc>, i64) {
+fn recency(run: &CheckRunRecord) -> (DateTime<Utc>, i64) {
     (
         run.completed_at
             .or(run.started_at)
@@ -414,7 +497,7 @@ fn recency(run: &types::CheckRun) -> (DateTime<Utc>, i64) {
 }
 
 fn rollup(
-    latest: &[types::CheckRun],
+    latest: &[&CheckRunRecord],
     rerequested: bool,
 ) -> (types::CheckSuiteStatus, Option<types::CheckSuiteConclusion>) {
     if rerequested
@@ -437,7 +520,7 @@ fn rollup(
     (types::CheckSuiteStatus::InProgress, None)
 }
 
-fn rollup_conclusion(runs: &[types::CheckRun]) -> types::CheckSuiteConclusion {
+fn rollup_conclusion(runs: &[&CheckRunRecord]) -> types::CheckSuiteConclusion {
     let conclusions: Vec<_> = runs.iter().filter_map(|run| run.conclusion).collect();
     for kind in [
         types::CheckRunConclusion::ActionRequired,

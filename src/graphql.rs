@@ -995,10 +995,10 @@ fn graphql_pull_node(
         json!({"__typename":"PullRequestReviewThread","id":thread.id,"isResolved":thread.is_resolved,"path":thread.path,"line":thread.line,"comments":{"__typename":"PullRequestReviewCommentConnection","nodes":comments,"totalCount":comments.len()}})
     }).collect();
     let sha = data.head.sha.as_str();
-    let statuses = repo.commit_statuses.get(sha).cloned().unwrap_or_default();
+    let statuses = repo.commit_statuses.get(sha).map_or(&[][..], Vec::as_slice);
     let status_contexts: Vec<Json> = statuses
         .iter()
-        .map(|status| json!({"context":status.context, "state":status.state.to_string().to_ascii_uppercase()}))
+        .map(|status| json!({"context":status.context, "state":status.state.name().to_ascii_uppercase()}))
         .collect();
     let rollup = if status_contexts.is_empty() {
         Json::Null

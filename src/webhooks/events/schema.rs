@@ -153,13 +153,12 @@ fn every_event_payload_matches_its_schema() {
         let check = fixtures::seeded_check_run(
             ctx.state,
             &request,
-            "admin",
-            "tool",
             sha,
             fixtures::CheckRunSeed::default(),
             0,
         )
         .unwrap();
+        let check = render_run(ctx.state, &request, &check);
         check_suite::requested(&mut ctx, &check);
         check_run::created(&mut ctx, &check);
         check_run::completed(&mut ctx, &check);
@@ -167,8 +166,6 @@ fn every_event_payload_matches_its_schema() {
         let finished = fixtures::seeded_check_run(
             ctx.state,
             &request,
-            "admin",
-            "tool",
             sha,
             fixtures::CheckRunSeed {
                 status: fixtures::SeedField::Present("completed".to_owned()),
@@ -178,6 +175,7 @@ fn every_event_payload_matches_its_schema() {
             1,
         )
         .unwrap();
+        let finished = render_run(ctx.state, &request, &finished);
         check_run::rerequested(&mut ctx, &finished);
 
         let run = {
@@ -205,16 +203,18 @@ fn every_event_payload_matches_its_schema() {
 
         let status_model = {
             let account = ctx.state.account("admin").unwrap();
-            let repo = account.repo("tool").unwrap();
-            fixtures::seeded_commit_status(
+            let record = fixtures::seeded_commit_status(
                 &request,
                 account,
-                repo,
-                sha,
                 fixtures::CommitStatusSeed::default(),
                 0,
             )
-            .unwrap()
+            .unwrap();
+            crate::handlers::status_model::status(
+                &request.urls().repo("admin", "tool"),
+                sha,
+                &record,
+            )
         };
         status::commit_status(&mut ctx, sha, &status_model);
 
@@ -463,4 +463,13 @@ fn issue_comment(
         url: format!("{}/issues/comments/1", request.api_url),
         user: Some(user.clone().into()),
     }
+}
+
+fn render_run(
+    state: &crate::state::State,
+    request: &ApiRequest,
+    run: &crate::state::CheckRunRecord,
+) -> types::CheckRun {
+    let account = state.account("admin").unwrap();
+    crate::handlers::checks_model::render_run(request, account, "tool", run)
 }

@@ -1,15 +1,12 @@
 //! Actions runs, jobs, and commit checks read from repository state.
 
-use std::collections::BTreeMap;
 use std::sync::Mutex;
-
-use chrono::{DateTime, Utc};
 
 use super::Handler;
 use super::repos::find_repo;
 use crate::api::{ApiRequest, ApiResponse, ApiResult, paginate_with};
 use crate::operation::ops;
-use crate::state::{State, lock};
+use crate::state::{State, combined_state, latest_per_context, lock};
 use crate::types;
 
 impl Handler for ops::ReposGetCombinedStatusForRef {
@@ -30,32 +27,25 @@ impl Handler for ops::ReposGetCombinedStatusForRef {
                     .flatten()
             })
             .unwrap_or_else(|| ref_name.to_owned());
-        let mut latest = BTreeMap::new();
-        for status in repo.commit_statuses.get(&sha).into_iter().flatten() {
-            latest.insert(status.context.clone(), status.clone());
-        }
+        let urls = request.urls().repo(&found.owner, &found.name);
+        let stored = repo
+            .commit_statuses
+            .get(&sha)
+            .map_or(&[][..], Vec::as_slice);
+        let latest = latest_per_context(stored);
+        let state = combined_state(&latest);
         let statuses = latest
-            .into_values()
-            .map(simple_commit_status)
-            .collect::<Result<Vec<_>, _>>()?;
-        let state = if statuses
-            .iter()
-            .any(|status| matches!(status.state.as_str(), "failure" | "error"))
-        {
-            "failure"
-        } else if statuses.iter().any(|status| status.state != "success") {
-            "pending"
-        } else {
-            "success"
-        };
+            .into_iter()
+            .map(|status| super::status_model::simple_status(&urls, &sha, status))
+            .collect::<Vec<_>>();
         let repository =
             crate::render::minimal_repository(request, account, repo, found.permission);
-        let commit = request.urls().repo(&found.owner, &found.name).commit(&sha);
+        let commit = urls.commit(&sha);
         let response = types::ReposGetCombinedStatusForRefResponse(types::CombinedCommitStatus {
             commit_url: commit.api.clone(),
             repository,
             sha: sha.clone(),
-            state: state.to_owned(),
+            state: state.name().to_owned(),
             total_count: statuses.len() as i64,
             statuses,
             url: commit.status(),
@@ -353,11 +343,15 @@ impl Handler for ops::ChecksListForRef {
             .account(&found.owner)
             .and_then(|owner| owner.repo(&found.name))
             .expect("repository exists");
+        let account = state
+            .account(&found.owner)
+            .expect("repository owner exists");
         let sha = super::checks_model::commit_key(repo, request.param("ref"));
-        let checks = super::checks_model::select_runs(
-            repo.check_runs.get(&sha).cloned().unwrap_or_default(),
-            request,
-        );
+        let checks =
+            super::checks_model::select_runs(super::checks_model::commit_runs(repo, &sha), request)
+                .into_iter()
+                .map(|run| super::checks_model::render_run(request, account, &found.name, run))
+                .collect::<Vec<_>>();
         Ok(paginate_with(
             request,
             &request.path,
@@ -382,13 +376,11 @@ impl Handler for ops::ChecksGet {
             .param("check_run_id")
             .parse::<i64>()
             .map_err(|_| ApiResponse::not_found())?;
-        let check = repo
-            .check_runs
-            .values()
-            .flatten()
-            .find(|check| check.id == id)
-            .cloned()
-            .ok_or_else(ApiResponse::not_found)?;
+        let record = super::checks_model::find_run(repo, id).ok_or_else(ApiResponse::not_found)?;
+        let account = state
+            .account(&found.owner)
+            .expect("repository owner exists");
+        let check = super::checks_model::render_run(request, account, &found.name, record);
         let response = types::ChecksGetResponse(check);
         Ok(ApiResponse::conditional_typed(request, &response))
     }
@@ -402,11 +394,15 @@ impl Handler for ops::ReposListCommitStatusesForRef {
             .account(&found.owner)
             .and_then(|owner| owner.repo(&found.name))
             .expect("repository exists");
+        let sha = request.param("ref");
+        let urls = request.urls().repo(&found.owner, &found.name);
         let response = types::ReposListCommitStatusesForRefResponse(
             repo.commit_statuses
-                .get(request.param("ref"))
-                .cloned()
-                .unwrap_or_default(),
+                .get(sha)
+                .into_iter()
+                .flatten()
+                .map(|status| super::status_model::status(&urls, sha, status))
+                .collect(),
         );
         Ok(ApiResponse::typed(200, &response))
     }
@@ -431,29 +427,4 @@ impl Handler for ops::ReposListPullRequestsAssociatedWithCommit {
         let response = types::ReposListPullRequestsAssociatedWithCommitResponse(pulls);
         Ok(ApiResponse::typed(200, &response))
     }
-}
-
-/// Converts a status to the smaller timestamp representation used by combined commit status.
-fn simple_commit_status(status: types::Status) -> Result<types::SimpleCommitStatus, ApiResponse> {
-    let created_at = parse_timestamp(&status.created_at)?;
-    let updated_at = parse_timestamp(&status.updated_at)?;
-    Ok(types::SimpleCommitStatus {
-        avatar_url: status.avatar_url,
-        context: status.context,
-        created_at,
-        description: status.description,
-        id: status.id,
-        node_id: status.node_id,
-        required: None,
-        state: status.state,
-        target_url: status.target_url,
-        updated_at,
-        url: status.url,
-    })
-}
-
-/// Parses a timestamp already accepted by the status fixture model.
-fn parse_timestamp(value: &str) -> Result<DateTime<Utc>, ApiResponse> {
-    crate::time::parse(value)
-        .map_err(|_| ApiResponse::internal("Stored status timestamp is invalid"))
 }

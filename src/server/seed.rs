@@ -1421,31 +1421,27 @@ impl Commit {
         let request = self.repository.api_request();
         let mut state = lock(&self.repository.app.state);
         require_repository(&state, &self.repository.owner, &self.repository.name)?;
-        let first = state
-            .account(&self.repository.owner)
-            .and_then(|account| account.repo(&self.repository.name))
-            .and_then(|repo| repo.check_runs.get(&self.sha))
-            .is_none_or(Vec::is_empty);
         let fallback = state
             .account(&self.repository.owner)
             .and_then(|account| account.repo(&self.repository.name))
-            .and_then(|repo| repo.check_runs.get(&self.sha))
-            .map_or(0, Vec::len);
-        let check = crate::fixtures::seeded_check_run(
-            &mut state,
-            &request,
-            &self.repository.owner,
-            &self.repository.name,
-            &self.sha,
-            seed,
-            fallback,
-        )?;
-        state.add_check_run(
-            &self.repository.owner,
-            &self.repository.name,
-            &self.sha,
-            check.clone(),
-        );
+            .map_or(0, |repo| {
+                crate::handlers::checks_model::commit_runs(repo, &self.sha).len()
+            });
+        let first = fallback == 0;
+        let record =
+            crate::fixtures::seeded_check_run(&mut state, &request, &self.sha, seed, fallback)?;
+        let check = {
+            let account = state.account(&self.repository.owner).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::NotFound, "repository owner does not exist")
+            })?;
+            crate::handlers::checks_model::render_run(
+                &request,
+                account,
+                &self.repository.name,
+                &record,
+            )
+        };
+        state.add_check_run(&self.repository.owner, &self.repository.name, record);
         let mut ctx = crate::webhooks::events::Ctx::new(
             &mut state,
             &request,
@@ -1474,18 +1470,17 @@ impl Commit {
             let account = state.account(&self.repository.owner).ok_or_else(|| {
                 io::Error::new(io::ErrorKind::NotFound, "repository owner does not exist")
             })?;
-            let repository = account.repo(&self.repository.name).ok_or_else(|| {
-                io::Error::new(io::ErrorKind::NotFound, "repository does not exist")
-            })?;
-            crate::fixtures::seeded_commit_status(
-                &request, account, repository, &self.sha, seed, fallback,
-            )?
+            crate::fixtures::seeded_commit_status(&request, account, seed, fallback)?
         };
+        let urls = request
+            .urls()
+            .repo(&self.repository.owner, &self.repository.name);
+        let rendered = crate::handlers::status_model::status(&urls, &self.sha, &status);
         state.add_commit_status(
             &self.repository.owner,
             &self.repository.name,
             &self.sha,
-            status.clone(),
+            status,
         );
         let mut ctx = crate::webhooks::events::Ctx::new(
             &mut state,
@@ -1493,7 +1488,7 @@ impl Commit {
             &self.repository.owner,
             &self.repository.name,
         );
-        crate::webhooks::events::status::commit_status(&mut ctx, &self.sha, &status);
+        crate::webhooks::events::status::commit_status(&mut ctx, &self.sha, &rendered);
         Ok(())
     }
 }

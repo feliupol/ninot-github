@@ -4,6 +4,7 @@
 
 mod account;
 pub(crate) mod actions_service;
+mod checks;
 mod hook;
 mod issue_event;
 mod key;
@@ -17,6 +18,10 @@ use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 pub use account::{Account, AccountKind, OrgProfile, Team};
+pub use checks::{
+    CheckAnnotationRecord, CheckRunApp, CheckRunRecord, CommitStatusRecord, SeededCheckRun,
+    StatusState, combined_state, latest_per_context,
+};
 pub use hook::{Delivery, Hook};
 pub use issue_event::{IssueEvent, IssueEventKind, IssueEventLabel};
 pub use key::{InvalidSha, Name, NameMap, Sha, fold};
@@ -498,22 +503,13 @@ impl State {
         repo.workflow_jobs.insert(id, jobs);
     }
 
-    /// Adds a check run to a commit SHA.
-    pub fn add_check_run(
-        &mut self,
-        owner: &str,
-        name: &str,
-        sha: &str,
-        check: crate::types::CheckRun,
-    ) {
+    /// Adds a check run.
+    pub fn add_check_run(&mut self, owner: &str, name: &str, check: CheckRunRecord) {
         let repo = self
             .account_mut(owner)
             .and_then(|account| account.repo_mut(name))
             .unwrap_or_else(|| panic!("no repository {owner}/{name}"));
-        repo.check_runs
-            .entry(sha.to_owned())
-            .or_default()
-            .push(check);
+        repo.check_runs.push(check);
     }
 
     /// Adds a commit status to a commit SHA.
@@ -522,7 +518,7 @@ impl State {
         owner: &str,
         name: &str,
         sha: &str,
-        status: crate::types::Status,
+        status: CommitStatusRecord,
     ) {
         let repo = self
             .account_mut(owner)

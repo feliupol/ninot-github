@@ -4,8 +4,8 @@ use std::sync::Mutex;
 
 use super::Handler;
 use super::checks_model::{
-    checks_forbidden, commit_key, mark_rerequested, open_suite, render_suite, require_checks_app,
-    select_runs, suite_runs,
+    checks_forbidden, commit_key, mark_rerequested, open_suite, render_run, render_suite,
+    require_checks_app, select_runs, suite_runs,
 };
 use super::repos::find_repo;
 use crate::api::{ApiRequest, ApiResponse, ApiResult, paginate_with};
@@ -99,7 +99,13 @@ impl Handler for ops::ChecksListForSuite {
         if !repo.check_suites.contains_key(&id) {
             return Err(ApiResponse::not_found());
         }
-        let runs = select_runs(suite_runs(repo, id), request);
+        let account = state
+            .account(&found.owner)
+            .expect("repository owner exists");
+        let runs = select_runs(suite_runs(repo, id), request)
+            .into_iter()
+            .map(|run| render_run(request, account, &found.name, run))
+            .collect::<Vec<_>>();
         Ok(paginate_with(
             request,
             &request.path,

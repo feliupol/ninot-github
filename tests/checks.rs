@@ -725,3 +725,29 @@ fn checks_list_suites_for_ref_filters() {
         404
     );
 }
+
+#[test]
+fn seeded_check_runs_link_to_their_web_page() {
+    let (server, repo, _) = setup();
+    let admin = Api::admin(&server);
+    repo.commit("seeded")
+        .unwrap()
+        .create_check_run(CheckRunSeed {
+            id: SeedField::present(5),
+            ..Default::default()
+        })
+        .unwrap();
+
+    let run = admin.get("/repos/admin/checks/check-runs/5");
+
+    assert_eq!(run.status, 200, "{:?}", run.body);
+    let html_url = run.body["html_url"].as_str().unwrap();
+    assert!(html_url.ends_with("/admin/checks/runs/5"), "{html_url}");
+    assert!(!html_url.contains("/api/v3/"), "{html_url}");
+    assert!(
+        run.body["url"]
+            .as_str()
+            .unwrap()
+            .ends_with("/repos/admin/checks/check-runs/5")
+    );
+}

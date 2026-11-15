@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::api::ApiRequest;
 use crate::render;
-use crate::state::{Account, Permission, Repo, State};
+use crate::state::{
+    Account, CheckRunApp, CheckRunRecord, CommitStatusRecord, Permission, Repo, SeededCheckRun,
+    State, StatusState,
+};
 use crate::time;
 use crate::types;
 use crate::urls::RepoUrls;
@@ -944,67 +947,42 @@ pub(crate) fn job(request: &ApiRequest, run: &types::WorkflowRun, id: i64) -> ty
     }
 }
 
-/// Builds a complete default check run for a commit.
-pub(crate) fn check_run(
-    request: &ApiRequest,
-    owner: &str,
-    repo: &str,
-    sha: &str,
-    id: i64,
-) -> types::CheckRun {
-    let urls = request.urls().repo(owner, repo).check_run(id);
-    types::CheckRun {
-        app: None,
-        check_suite: None,
-        completed_at: None,
-        conclusion: None,
-        deployment: None,
-        details_url: None,
-        external_id: None,
-        head_sha: sha.to_owned(),
-        html_url: Some(urls.api.clone()),
+/// Builds a default check run for a commit: a completed run named `Check`, recorded now.
+pub(crate) fn check_run(sha: &str, id: i64) -> CheckRunRecord {
+    CheckRunRecord {
         id,
         name: "Check".to_owned(),
-        node_id: render::node_id("CheckRun", node_id(id)),
-        output: types::CheckRunOutput {
-            annotations_count: 0,
-            annotations_url: urls.annotations(),
-            summary: None,
-            text: None,
-            title: None,
-        },
-        pull_requests: Vec::new(),
-        started_at: None,
+        head_sha: sha.to_owned(),
+        suite_id: None,
+        app: None,
         status: types::CheckRunStatus::Completed,
-        url: urls.api,
+        conclusion: None,
+        created_at: time::now_utc(),
+        started_at: None,
+        completed_at: None,
+        details_url: None,
+        external_id: None,
+        output_title: None,
+        output_summary: None,
+        output_text: None,
+        annotations: Vec::new(),
+        pull_requests: Vec::new(),
+        seeded: SeededCheckRun::default(),
     }
 }
 
-/// Builds a complete default commit status for a repository commit.
-pub(crate) fn commit_status(
-    request: &ApiRequest,
-    account: &Account,
-    repo: &Repo,
-    sha: &str,
-    id: i64,
-) -> types::Status {
-    let url = request
-        .urls()
-        .repo(&account.login, &repo.name)
-        .status(sha, id);
-    let now = time::now();
-    types::Status {
-        avatar_url: None,
-        context: "default".to_owned(),
-        created_at: now.clone(),
-        creator: None,
-        description: None,
+/// Builds a default commit status: a `success` in the `default` context, set now.
+pub(crate) fn commit_status(id: i64) -> CommitStatusRecord {
+    let now = time::now_utc();
+    CommitStatusRecord {
         id,
-        node_id: render::node_id("Status", node_id(id)),
-        state: "success".to_owned(),
+        state: StatusState::Success,
+        context: "default".to_owned(),
+        description: None,
         target_url: None,
+        creator: None,
+        created_at: now,
         updated_at: now,
-        url,
     }
 }
 
@@ -1742,22 +1720,28 @@ fn seeded_job_step(seed: JobStepSeed, index: usize) -> io::Result<types::JobStep
 pub(crate) fn seeded_check_run(
     state: &mut State,
     request: &ApiRequest,
-    owner: &str,
-    repo: &str,
     sha: &str,
     seed: CheckRunSeed,
     fallback: usize,
-) -> io::Result<types::CheckRun> {
+) -> io::Result<CheckRunRecord> {
     let id = match seed.id {
         SeedField::Present(id) => model_id_or_input(id, "check run")?,
         SeedField::Missing => indexed_model_id(fallback, "check run")?,
     };
-    let mut check = check_run(request, owner, repo, sha, id);
-    apply!(check.node_id, seed.node_id);
+    let mut check = check_run(sha, id);
+    if let SeedField::Present(node_id) = seed.node_id {
+        check.seeded.node_id = Some(node_id);
+    }
     apply!(check.name, seed.name);
-    apply!(check.head_sha, seed.head_sha);
-    apply!(check.url, seed.url);
-    apply!(check.html_url, seed.html_url);
+    if let SeedField::Present(head_sha) = seed.head_sha {
+        check.seeded.head_sha = Some(head_sha);
+    }
+    if let SeedField::Present(url) = seed.url {
+        check.seeded.url = Some(url);
+    }
+    if let SeedField::Present(html_url) = seed.html_url {
+        check.seeded.html_url = Some(html_url);
+    }
     if let SeedField::Present(status) = seed.status {
         check.status = parse_enum(status, "check run status")?;
     }
@@ -1782,52 +1766,67 @@ pub(crate) fn seeded_check_run(
         check.pull_requests = pull_requests;
     }
     if let SeedField::Present(output) = seed.output {
-        apply!(check.output.title, output.title);
-        apply!(check.output.summary, output.summary);
-        apply!(check.output.text, output.text);
-        apply!(check.output.annotations_count, output.annotations_count);
-        apply!(check.output.annotations_url, output.annotations_url);
+        apply!(check.output_title, output.title);
+        apply!(check.output_summary, output.summary);
+        apply!(check.output_text, output.text);
+        if let SeedField::Present(count) = output.annotations_count {
+            check.seeded.annotations_count = Some(count);
+        }
+        if let SeedField::Present(url) = output.annotations_url {
+            check.seeded.annotations_url = Some(url);
+        }
     }
     if let SeedField::Present(suite) = seed.check_suite {
-        check.check_suite = suite
-            .map(|suite| -> io::Result<_> {
-                Ok(types::CheckRunCheckSuite {
-                    id: model_id_signed(field_or(suite.id, 1), "check suite")?,
-                })
-            })
+        check.suite_id = suite
+            .map(|suite| model_id_signed(field_or(suite.id, 1), "check suite"))
             .transpose()?;
     }
     if let SeedField::Present(app) = seed.app {
         check.app = app
-            .map(|app| integration(state, request, app))
+            .map(|app| {
+                integration(state, request, app).map(|app| CheckRunApp::Seeded(Box::new(app)))
+            })
             .transpose()?;
     }
     Ok(check)
 }
 
 /// Completes a commit status from typed sparse fixture fields.
+///
+/// # Errors
+/// Returns an input error for an id out of range, a state other than `error`, `failure`,
+/// `pending` or `success`, or a timestamp that is not RFC 3339.
 pub(crate) fn seeded_commit_status(
     request: &ApiRequest,
     account: &Account,
-    repo: &Repo,
-    sha: &str,
     seed: CommitStatusSeed,
     fallback: usize,
-) -> io::Result<types::Status> {
+) -> io::Result<CommitStatusRecord> {
     let id = match seed.id {
         SeedField::Present(id) => model_id_or_input(id, "commit status")?,
         SeedField::Missing => indexed_model_id(fallback, "commit status")?,
     };
-    let mut status = commit_status(request, account, repo, sha, id);
-    apply!(status.state, seed.state);
+    let mut status = commit_status(id);
+    if let SeedField::Present(state) = seed.state {
+        status.state = StatusState::parse(&state)
+            .ok_or_else(|| invalid_seed(format!("invalid commit status state '{state}'")))?;
+    }
     apply!(status.context, seed.context);
     apply!(status.description, seed.description);
     apply!(status.target_url, seed.target_url);
-    apply!(status.created_at, seed.created_at);
-    apply!(status.updated_at, seed.updated_at);
+    apply_time(
+        seed.created_at,
+        &mut status.created_at,
+        "commit status created_at",
+    )?;
+    apply_time(
+        seed.updated_at,
+        &mut status.updated_at,
+        "commit status updated_at",
+    )?;
     if let SeedField::Present(creator) = seed.creator {
         status.creator = creator
-            .map(|seed| simple_user_from_seed(request, account, seed).map(Into::into))
+            .map(|seed| simple_user_from_seed(request, account, seed))
             .transpose()?;
     }
     Ok(status)
