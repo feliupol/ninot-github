@@ -266,6 +266,61 @@ Put the comment on the item, or on the statement when the item has more than one
 If you cannot find a source, do not invent the behaviour. Leave it out, or ask in the pull
 request.
 
+## Vendored references
+
+The fake builds on copies of GitHub's published descriptions. Each is pinned to an upstream
+commit or content digest, recorded in a pin file next to it:
+
+| Reference | Upstream | Pin |
+| --- | --- | --- |
+| `spec/api.github.com.json` | github/rest-api-description | `spec/SOURCE` |
+| `spec/schema.docs.graphql` | docs.github.com public GraphQL schema | `spec/GRAPHQL_SOURCE` (SHA-256) |
+| `spec/webhooks/` | octokit/webhooks payload schemas | `spec/webhooks/SOURCE` |
+| `tests/fixtures/octokit/` | octokit/fixtures api.github.com recordings | `tests/fixtures/octokit/SOURCE` |
+| gh CLI version | the installed `gh` | header of `tests/gh_coverage.txt` |
+
+`cargo references update` refreshes all of them. The tool lives in `tools/references`, and does
+not depend on this crate, so it still runs when a spec bump breaks the build. Each upstream
+source is an entry in `tools/references/sources.json`. After the sources, it re-pins the gh
+version when the installed gh differs (running the `gh_cli` tests, then
+`cargo xtask gh-coverage update`), and regenerates `completion.json` and the README status with
+`cargo xtask completion update`. It prints a summary of the pins that moved and the changed
+files (`--summary FILE` also writes it). A failed regeneration, such as a spec change the
+handlers no longer compile against, is listed in the summary and makes it exit 3, with the new
+pins still written. `cargo references check` writes nothing and exits 1 if a pin would move or
+the installed gh differs from the pinned one. It also reports the latest cli/cli release.
+
+No GitHub credentials are needed: the tool uses `git ls-remote`, a tree-only `git fetch` to
+list globbed paths, and raw.githubusercontent.com. An optional `REFERENCES_GITHUB_COM_TOKEN`
+raises the anonymous rate limits and is sent to github.com hosts only. It never reads
+`GITHUB_TOKEN`, which in Forgejo Actions is the forge's token.
+
+`.forgejo/workflows/update-references.yml` runs `cargo references publish` every Tuesday at
+03:40 UTC, and on demand (`workflow_dispatch`, with a `dry_run` input that commits locally and
+prints the summary). When a pin moved, `publish` commits as `forgejo-actions[bot]` with the
+summary, force-pushes `chore/update-references` and opens or updates its pull request to `main`.
+It reads the forge from the standard Actions variables (`GITHUB_API_URL` or
+`GITHUB_SERVER_URL`, `GITHUB_REPOSITORY`, `GITHUB_REF`) and refuses any ref other than `main`.
+A failed regeneration still opens the pull request, then fails the run. It pushes with the
+`REFERENCES_BOT_TOKEN` secret, so CI runs on that pull request; events from the job's own token
+would start no workflow.
+
+To add a reference, add an entry to `tools/references/sources.json`:
+
+- a git source names `repository` (`owner/name` on github.com), `ref` (such as
+  `refs/heads/main`, or a commit to pin by hand), the `files` to copy (paths relative to
+  `from`; `*` matches within one path segment, and `to` renames, with `{1}` for what the first
+  `*` matched), and the `into` directory. `replace` clears that directory first, and
+  `follow_refs` also copies every JSON schema the files reference through `$ref`;
+- a URL source names `url` and the `to` file, and is pinned by its SHA-256;
+- `pin` is the pin file and its template: `{repository}`, `{commit}` and `{from}` for git, `{url}`
+  and `{sha256}` for URLs. A github.com `blob` or `tree` URL at a commit shortens to
+  `<owner>/<repo>@<commit>` in the summary;
+- `forbid` lists case-insensitive patterns that no written file may contain.
+
+The check, the update and the weekly job pick it up without changes. Code generated from a
+reference belongs in `build.rs` or an xtask the tool already runs.
+
 ## Untyped JSON
 
 Non-test code in `src/` works with typed data, not with `serde_json::Value`. The second clippy

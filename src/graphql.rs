@@ -74,7 +74,7 @@ pub(crate) mod types {
     include!(concat!(env!("OUT_DIR"), "/graphql_types.rs"));
 }
 
-/// GitHub's public GraphQL schema, pinned by `scripts/update-graphql-spec.sh`.
+/// GitHub's public GraphQL schema, pinned by `cargo references update`.
 const SDL: &str = include_str!("../spec/schema.docs.graphql");
 
 /// A JSON object: a parent value or a field's arguments.

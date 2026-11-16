@@ -23,7 +23,7 @@ use serde_json::{Value, json};
 
 const SPEC: &str = "spec/api.github.com.json";
 
-/// GitHub's GraphQL schema, pinned by `scripts/update-graphql-spec.sh`.
+/// GitHub's GraphQL schema, pinned by `cargo references update`.
 const GRAPHQL_SCHEMA: &str = "spec/schema.docs.graphql";
 
 /// Corrections to component schemas where the spec is looser than GitHub.
@@ -178,7 +178,7 @@ const RESPONSE_OPERATIONS: [&str; 70] = [
 ];
 
 /// Payload schemas from octokit/webhooks, `payload-schemas/api.github.com` of the commit in
-/// `spec/webhooks/SOURCE`. `scripts/update-webhook-schemas.sh` pins the aggregate and per-action
+/// `spec/webhooks/SOURCE`. `tools/references/sources.json` pins the aggregate and per-action
 /// schemas of every event this fake delivers, and the schemas they reference. Each event schema
 /// becomes a payload type, such as `PushEvent` or `PullRequestOpened`.
 const WEBHOOK_SCHEMAS: &str = "spec/webhooks";
