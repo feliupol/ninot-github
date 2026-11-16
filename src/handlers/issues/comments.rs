@@ -3,6 +3,11 @@
 //! Comments on issues and on pull requests are included. Review comments are not.
 //! The author or a repository admin may edit or delete a comment. Push access is not enough.
 
+#![expect(
+    clippy::disallowed_types,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};

@@ -4,6 +4,12 @@
 //! instead of answering 403. A user who cannot be assigned is 422 when the caller has push
 //! access, and the check endpoints answer 404.
 
+#![expect(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use std::sync::Mutex;
 
 use serde_json::Value;

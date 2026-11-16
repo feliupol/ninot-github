@@ -16,6 +16,12 @@
 //! - Custom scalars such as `DateTime` and `URI` accept and emit any value.
 //! - A failed non-null field is left out of its object instead of nulling the object.
 
+#![expect(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, OnceLock};
 

@@ -1,5 +1,10 @@
 //! Repository webhooks and the deliveries sent to them.
 
+#![expect(
+    clippy::disallowed_types,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 /// A repository webhook.
 #[derive(Clone)]
 pub struct Hook {

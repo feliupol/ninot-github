@@ -3,6 +3,11 @@
 //! Open and closed counts count issues and pull requests. Updating or deleting a milestone
 //! rewrites every embedded copy.
 
+#![expect(
+    clippy::disallowed_types,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::sync::Mutex;

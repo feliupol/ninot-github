@@ -5,6 +5,11 @@
 //! only `submitted`; the dismissal message is validated but not stored, because
 //! the review model has no field for it.
 
+#![expect(
+    clippy::disallowed_types,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use std::sync::Mutex;
 
 use serde_json::{Map, Value};

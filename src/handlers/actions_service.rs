@@ -8,6 +8,13 @@
 //! The assertion's signature is not checked: the client id names the runner. Steps and logs
 //! are not uploaded to a results service; the step outcomes in `completejob` are recorded.
 
+#![expect(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use std::sync::Mutex;
 use std::time::Duration;
 

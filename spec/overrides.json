@@ -5,5 +5,17 @@
     "properties": { "status": { "type": "string" } },
     "required": ["status"],
     "reason": "GitHub 422 bodies carry the status as a string, as basic-error's status does: GET https://api.github.com/search/repositories?q= answered {\"message\": \"Validation Failed\", ..., \"status\": \"422\"} on 2026-09-30"
+  },
+  {
+    "schema": "pull-request",
+    "path": "/properties/labels/items",
+    "properties": { "archived_at": { "type": "string", "format": "date-time", "nullable": true } },
+    "reason": "The spec lists archived_at as required on pull request labels without defining it; label defines it as a nullable date-time"
+  },
+  {
+    "schema": "pull-request-simple",
+    "path": "/properties/labels/items",
+    "properties": { "archived_at": { "type": "string", "format": "date-time", "nullable": true } },
+    "reason": "The spec lists archived_at as required on pull request labels without defining it; label defines it as a nullable date-time"
   }
 ]

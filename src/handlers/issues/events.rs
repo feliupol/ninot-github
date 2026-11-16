@@ -4,6 +4,13 @@
 //! assignee, lock, milestone and state events issue mutations record, rendered as the spec's
 //! `issue-event` object. Repository and single-event reads embed the current issue.
 
+#![expect(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use std::sync::Mutex;
 
 use serde_json::{Value, json};

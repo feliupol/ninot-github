@@ -4,6 +4,11 @@
 //! Updating an issue edits stored issues only; pull-request edits stay on the pull-request
 //! handler, which already serves `pulls/update`.
 
+#![expect(
+    clippy::disallowed_types,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 mod assignees;
 mod comments;
 mod events;

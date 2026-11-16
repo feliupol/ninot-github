@@ -4,6 +4,11 @@
 //! Updating it stores the label on the repository and rewrites every copy. Deleting it removes
 //! the stored label and those copies.
 
+#![expect(
+    clippy::disallowed_types,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use std::sync::Mutex;
 
 use serde_json::{Map, Value};

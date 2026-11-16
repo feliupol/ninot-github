@@ -4,6 +4,13 @@
 //! an organization registration or removal token, and they are outside the REST spec. Three of
 //! their paths are also REST operations, so requests are told apart by that scheme.
 
+#![expect(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use std::sync::Mutex;
 
 use http::{HeaderMap, Method};

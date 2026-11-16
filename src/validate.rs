@@ -1,6 +1,13 @@
 //! Checks requests and responses against the pinned spec, and webhook payloads against the
 //! pinned octokit/webhooks schemas, so the fake cannot silently drift from GitHub.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods,
+    reason = "schema validation works on raw JSON by design"
+)]
+
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex, OnceLock};
 

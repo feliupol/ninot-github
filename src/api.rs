@@ -1,5 +1,11 @@
 //! Request and response types shared by all handlers.
 
+#![expect(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use std::collections::HashMap;
 
 use headers::{ETag, HeaderMapExt, IfNoneMatch};

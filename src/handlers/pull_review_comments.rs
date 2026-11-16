@@ -4,6 +4,12 @@
 //! another user's pending review are invisible, as they are on GitHub. Only `created` fires a
 //! webhook: the pinned webhook schemas carry no other `pull_request_review_comment` action.
 
+#![expect(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use std::sync::Mutex;
 
 use serde_json::{Map, Value};

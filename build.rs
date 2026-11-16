@@ -3,6 +3,13 @@
 //! objects from the pinned GraphQL schema. The operation table comes from
 //! [`ninot_common::spec`].
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods,
+    reason = "the untyped-JSON ban covers src/ only; codegen walks the raw spec"
+)]
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;

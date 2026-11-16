@@ -1,5 +1,12 @@
 //! Authorization and JSON models shared by the organization and team handlers.
 
+#![expect(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use serde_json::{Value, json};
 
 use crate::api::{ApiRequest, ApiResponse, Caller};

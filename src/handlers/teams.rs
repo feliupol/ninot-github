@@ -3,6 +3,12 @@
 //! Owners see every team; members see closed teams and the secret teams they belong to; an
 //! outsider sees none. Owners and team maintainers manage a team. Child teams must be closed.
 
+#![expect(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use std::sync::Mutex;
 
 use serde_json::{Map, Value};

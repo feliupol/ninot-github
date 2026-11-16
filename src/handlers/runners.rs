@@ -3,6 +3,13 @@
 //! A token needs the `admin:org` scope. Membership of the organization is not required, which is
 //! how a registration token is issued for the Actions runner and the `gh` CLI.
 
+#![expect(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use std::sync::Mutex;
 
 use base64::Engine as _;

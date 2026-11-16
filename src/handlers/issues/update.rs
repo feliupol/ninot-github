@@ -3,6 +3,12 @@
 //! Pull requests are not updated here. Label, milestone and assignee keys are ignored for
 //! callers who can edit the issue but do not have push access.
 
+#![expect(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use std::sync::Mutex;
 
 use serde_json::{Map, Value};

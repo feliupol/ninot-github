@@ -219,7 +219,10 @@ Python bindings: 67 / 77 public methods.
 
 ```sh
 cargo fmt --all -- --check
-cargo clippy --all-targets --workspace -- -D warnings
+cargo clippy --all-targets --workspace -- -D warnings -A unfulfilled_lint_expectations
+CLIPPY_CONF_DIR=tools/untyped-json cargo clippy -p ninot-github --lib --bins -- \
+  -D clippy::disallowed_types -D clippy::disallowed_macros -D clippy::disallowed_methods \
+  -D unfulfilled_lint_expectations
 cargo test --all-targets --workspace --exclude ninot-github-python
 cargo build --examples
 cargo xtask completion check
@@ -262,6 +265,40 @@ these has a comment with a `Source:` line naming where the behaviour comes from:
 Put the comment on the item, or on the statement when the item has more than one such choice.
 If you cannot find a source, do not invent the behaviour. Leave it out, or ask in the pull
 request.
+
+## Untyped JSON
+
+Non-test code in `src/` works with typed data, not with `serde_json::Value`. The second clippy
+command above bans, through `tools/untyped-json/clippy.toml`:
+
+- `disallowed_types`: `serde_json::Value` and `serde_json::Map`
+- `disallowed_macros`: `json!`
+- `disallowed_methods`: `serde_json::from_value`, `serde_json::to_value`, and the `Value`
+  accessors (`get`, `get_mut`, `pointer`, `pointer_mut`, `take`, `as_*`, `is_*`)
+
+It checks only the library and binary, so tests, `xtask/`, `build.rs` and `#[cfg(test)]` code are
+not covered. Clippy does not flag `Value` variants such as `serde_json::Value::Null` or indexing
+like `x["key"]`, so a test in `xtask/src/untyped_json.rs` (part of `cargo test`) fails on those
+in `src/` files that carry no untyped-JSON `#![expect]` or `#![allow]`. It reads source text: it
+skips modules declared under `#[cfg(test)]` and everything after a file's first `#[cfg(test)]`.
+
+`src/validate.rs` is exempt with a single `#![allow]`: it validates arbitrary JSON against the
+OpenAPI and webhook schemas.
+
+Each module that still uses untyped JSON starts with an `#![expect(..., reason = "untyped JSON;
+remove when this module is typed")]` listing the lints that fire there. To clean a module, remove
+its untyped JSON, then delete the attribute, or the lints it no longer needs; an expectation that
+no longer fires fails the check. An `#![expect]` also covers child modules, so a clean child of an
+expecting parent is not checked until the parent is clean.
+
+Use instead:
+
+- request bodies: a generated request model, through `ApiRequest::json_as`. Add the operation to
+  `REQUEST_OPERATIONS` in `build.rs` to get one.
+- responses: a generated response type (`RESPONSE_OPERATIONS` and `RESPONSE_SCHEMAS` in
+  `build.rs`), sent with `ApiResponse::typed`.
+- webhook payloads: the generated `webhook_types` (`WEBHOOK_TYPED_EVENTS` in `build.rs`).
+- state: the domain records in `src/state/`.
 
 ## License
 

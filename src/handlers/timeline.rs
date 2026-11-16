@@ -4,6 +4,12 @@
 //! its issue comments and the commits git has between its base and head, so it always agrees
 //! with the endpoints that list each of those.
 
+#![expect(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use std::io;
 use std::path::Path;
 use std::sync::Mutex;

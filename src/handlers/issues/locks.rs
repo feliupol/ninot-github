@@ -3,6 +3,11 @@
 //! Push access is required. Locking a conversation that is already locked is rejected.
 //! Unlocking one that is already unlocked succeeds and leaves it unchanged.
 
+#![expect(
+    clippy::disallowed_types,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use std::sync::Mutex;
 
 use serde_json::Value;

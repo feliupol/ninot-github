@@ -1,5 +1,11 @@
 //! The `pull_request` event.
 
+#![expect(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use serde::Serialize;
 use serde_json::{Map, Value};
 

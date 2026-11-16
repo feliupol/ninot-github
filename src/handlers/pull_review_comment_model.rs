@@ -1,5 +1,11 @@
 //! The review comment model: where it attaches and how it renders.
 
+#![expect(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use serde_json::{Map, Value};
 
 use super::repos::Found;

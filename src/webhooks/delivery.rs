@@ -1,5 +1,11 @@
 //! Recording, signing and sending webhook deliveries.
 
+#![expect(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::sync::mpsc;
 use std::sync::{Mutex, Weak};

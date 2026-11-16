@@ -1,5 +1,10 @@
 //! Builds the spec's response types from state objects.
 
+#![expect(
+    clippy::disallowed_types,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use chrono::{DateTime, Utc};
@@ -1285,10 +1290,7 @@ pub fn label_on_issue(label: &types::Label) -> types::IssueLabelsItem {
 /// The label object embedded on a pull request, copied from a repository label.
 pub fn label_on_pull(label: &types::Label) -> types::PullRequestLabelsItem {
     types::PullRequestLabelsItem {
-        archived_at: match label.archived_at {
-            Some(time) => serde_json::Value::String(crate::time::format(&time)),
-            None => serde_json::Value::Null,
-        },
+        archived_at: label.archived_at,
         archived_by: label.archived_by.clone(),
         color: label.color.clone(),
         default: label.default,

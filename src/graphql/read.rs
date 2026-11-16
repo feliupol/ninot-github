@@ -1,6 +1,12 @@
 //! The reads of stored state that the resolvers share, converted to the schema's types in one
 //! place.
 
+#![expect(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use async_graphql::Error;
 
 use super::objects::{Actor, Comment, Label, Milestone, StatusContext};

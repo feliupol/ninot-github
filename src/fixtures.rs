@@ -1432,7 +1432,7 @@ fn pull_label(
 ) -> io::Result<types::PullRequestLabelsItem> {
     let label = label_model(request, owner, repo, seed, number, index)?;
     Ok(types::PullRequestLabelsItem {
-        archived_at: serde_json::Value::Null,
+        archived_at: label.archived_at,
         archived_by: label.archived_by,
         color: label.color,
         default: label.default,

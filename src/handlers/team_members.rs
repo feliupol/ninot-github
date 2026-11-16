@@ -3,6 +3,13 @@
 //! Adding someone who is not yet an organization member invites them to the organization and
 //! leaves their team membership `pending`.
 
+#![expect(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use std::sync::Mutex;
 
 use serde_json::{Value, json};

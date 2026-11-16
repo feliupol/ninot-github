@@ -1,5 +1,12 @@
 //! Whether a pull request is merged, and bringing its head branch up to date with the base.
 
+#![expect(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use std::process::Command;
 use std::sync::Mutex;
 

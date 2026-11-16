@@ -3,6 +3,12 @@
 //! Names are matched without regard to case. Archived labels stay on issues that already have
 //! them and cannot be added to another issue.
 
+#![expect(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use std::sync::Mutex;
 
 use serde_json::{Map, Value};

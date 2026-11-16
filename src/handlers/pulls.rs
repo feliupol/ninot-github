@@ -1,5 +1,12 @@
 //! Pull requests and their review/comment read models.
 
+#![expect(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use std::sync::Mutex;
 
 use super::Handler;
@@ -768,7 +775,7 @@ impl Handler for ops::IssuesAddLabels {
                             .saturating_mul(100)
                             .saturating_add(pull.labels.len() as u64 + 1);
                         let item = types::PullRequestLabelsItem {
-                            archived_at: serde_json::Value::Null,
+                            archived_at: None,
                             archived_by: None,
                             color: "ededed".to_owned(),
                             default: false,

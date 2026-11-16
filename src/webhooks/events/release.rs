@@ -1,5 +1,11 @@
 //! The `release` event.
 
+#![expect(
+    clippy::disallowed_types,
+    clippy::disallowed_methods,
+    reason = "untyped JSON; remove when this module is typed"
+)]
+
 use serde_json::{Map, Value};
 
 use super::{Ctx, PayloadError, model};
