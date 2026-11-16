@@ -209,14 +209,27 @@ impl Handler for ops::ReposCreateWebhook {
         let hook = hooks(&state, &found).last().unwrap();
         let rendered = render(request, &found, hook, &state);
         let payload = webhooks::ping_payload(request, &state, &found.owner, &found.name, &rendered);
-        webhooks::enqueue(
-            &mut state,
-            &found.owner,
-            &found.name,
-            "ping",
-            &payload,
-            Some(id),
-        );
+        match payload {
+            Ok(payload) => webhooks::enqueue(
+                &mut state,
+                &found.owner,
+                &found.name,
+                "ping",
+                &payload,
+                Some(id),
+            ),
+            Err(error) => {
+                webhooks::record_unbuilt(
+                    &mut state,
+                    &found.owner,
+                    &found.name,
+                    "ping",
+                    &error,
+                    Some(id),
+                );
+                return Err(error.into());
+            }
+        }
         Ok(ApiResponse::typed(201, &rendered))
     }
 }
@@ -329,14 +342,27 @@ impl Handler for ops::ReposPingWebhook {
             .ok_or_else(ApiResponse::not_found)?;
         let rendered = render(request, &found, hook, &state);
         let payload = webhooks::ping_payload(request, &state, &found.owner, &found.name, &rendered);
-        webhooks::enqueue(
-            &mut state,
-            &found.owner,
-            &found.name,
-            "ping",
-            &payload,
-            Some(id),
-        );
+        match payload {
+            Ok(payload) => webhooks::enqueue(
+                &mut state,
+                &found.owner,
+                &found.name,
+                "ping",
+                &payload,
+                Some(id),
+            ),
+            Err(error) => {
+                webhooks::record_unbuilt(
+                    &mut state,
+                    &found.owner,
+                    &found.name,
+                    "ping",
+                    &error,
+                    Some(id),
+                );
+                return Err(error.into());
+            }
+        }
         Ok(ApiResponse::no_content())
     }
 }

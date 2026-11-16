@@ -494,7 +494,8 @@ impl Repository {
             .map_err(io::Error::other)?;
         }
         if branch_created {
-            crate::webhooks::events::create::reference(&mut ctx, branch, "branch");
+            crate::webhooks::events::create::reference(&mut ctx, branch, "branch")
+                .map_err(io::Error::other)?;
         }
         Ok(Commit {
             repository: self.clone(),
@@ -800,9 +801,11 @@ impl Repository {
         if let Some(run) = run {
             let mut ctx =
                 crate::webhooks::events::Ctx::new(&mut state, &request, &self.owner, &self.name);
-            crate::webhooks::events::workflow_run::deliver(&mut ctx, &run);
+            crate::webhooks::events::workflow_run::deliver(&mut ctx, &run)
+                .map_err(io::Error::other)?;
             for job in &jobs {
-                crate::webhooks::events::workflow_job::deliver(&mut ctx, &run, job);
+                crate::webhooks::events::workflow_job::deliver(&mut ctx, &run, job)
+                    .map_err(io::Error::other)?;
             }
         }
         Ok(WorkflowJob { run_id, id })
@@ -845,9 +848,11 @@ impl Repository {
         state.add_workflow_run(&self.owner, &self.name, run, jobs);
         let mut ctx =
             crate::webhooks::events::Ctx::new(&mut state, &request, &self.owner, &self.name);
-        crate::webhooks::events::workflow_run::deliver(&mut ctx, &stored_run);
+        crate::webhooks::events::workflow_run::deliver(&mut ctx, &stored_run)
+            .map_err(io::Error::other)?;
         for job in &stored_jobs {
-            crate::webhooks::events::workflow_job::deliver(&mut ctx, &stored_run, job);
+            crate::webhooks::events::workflow_job::deliver(&mut ctx, &stored_run, job)
+                .map_err(io::Error::other)?;
         }
         Ok(WorkflowRun {
             repository: self.clone(),
@@ -1333,7 +1338,8 @@ impl PullRequest {
             .map_err(io::Error::other)?;
         }
         if !branch_existed {
-            crate::webhooks::events::create::reference(&mut ctx, &branch, "branch");
+            crate::webhooks::events::create::reference(&mut ctx, &branch, "branch")
+                .map_err(io::Error::other)?;
         }
         Ok(())
     }

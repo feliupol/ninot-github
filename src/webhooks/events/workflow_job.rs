@@ -2,19 +2,23 @@
 
 use chrono::{DateTime, Utc};
 
-use super::{Ctx, model};
+use super::{Ctx, PayloadError, model};
 use crate::types;
 use crate::webhook_types as wt;
 
 /// Queues `workflow_job` for `job`.
 ///
 /// The action is the job status: `completed`, `in_progress`, `waiting`, or `queued`.
-pub(crate) fn deliver(ctx: &mut Ctx, run: &types::WorkflowRun, job: &types::Job) {
+pub(crate) fn deliver(
+    ctx: &mut Ctx,
+    run: &types::WorkflowRun,
+    job: &types::Job,
+) -> Result<(), PayloadError> {
     if !ctx.wants("workflow_job") {
-        return;
+        return Ok(());
     }
-    let (Some(repository), Some(sender)) = (ctx.repository(), ctx.sender(None)) else {
-        return;
+    let Some((repository, sender)) = ctx.parties("workflow_job", None)? else {
+        return Ok(());
     };
     let workflow_job = workflow_job(run, job);
     macro_rules! payload {
@@ -50,6 +54,7 @@ pub(crate) fn deliver(ctx: &mut Ctx, run: &types::WorkflowRun, job: &types::Job)
             payload!(WorkflowJobQueued, WorkflowJobQueuedAction::Queued)
         }
     }
+    Ok(())
 }
 
 /// The webhook job for `job` of `run`. A job the schema has no status for is queued, and a

@@ -118,14 +118,16 @@ pub(crate) fn assigned(
     issue: &types::Issue,
     assignee: &types::SimpleUser,
 ) -> Result<(), PayloadError> {
-    deliver(ctx, issue, |issue, repository, sender| wt::IssuesAssigned {
-        action: wt::IssuesAssignedAction::Assigned,
-        assignee: Some(model::user(assignee)),
-        installation: None,
-        issue,
-        organization: None,
-        repository,
-        sender,
+    try_deliver(ctx, issue, |issue, repository, sender| {
+        Ok(wt::IssuesAssigned {
+            action: wt::IssuesAssignedAction::Assigned,
+            assignee: Some(model::user(assignee)?),
+            installation: None,
+            issue,
+            organization: None,
+            repository,
+            sender,
+        })
     })
 }
 
@@ -135,16 +137,16 @@ pub(crate) fn unassigned(
     issue: &types::Issue,
     assignee: &types::SimpleUser,
 ) -> Result<(), PayloadError> {
-    deliver(ctx, issue, |issue, repository, sender| {
-        wt::IssuesUnassigned {
+    try_deliver(ctx, issue, |issue, repository, sender| {
+        Ok(wt::IssuesUnassigned {
             action: wt::IssuesUnassignedAction::Unassigned,
-            assignee: Some(model::user(assignee)),
+            assignee: Some(model::user(assignee)?),
             installation: None,
             issue,
             organization: None,
             repository,
             sender,
-        }
+        })
     })
 }
 
@@ -239,7 +241,7 @@ fn try_deliver<P: Serialize>(
     if !ctx.wants("issues") {
         return Ok(());
     }
-    let (Some(repository), Some(sender)) = (ctx.repository(), ctx.sender(None)) else {
+    let Some((repository, sender)) = ctx.parties("issues", None)? else {
         return Ok(());
     };
     let payload = model::issue(issue).and_then(|issue| payload(issue, repository, sender));

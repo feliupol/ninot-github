@@ -17,6 +17,7 @@ use crate::state::{
 };
 use crate::types;
 use crate::webhook_types;
+use crate::webhooks::events::model::{PayloadError, parse, required};
 
 /// GitHub's opaque global node id.
 pub fn node_id(kind: &str, id: u64) -> String {
@@ -1042,22 +1043,25 @@ pub fn pull_request_simple(pull: &types::PullRequest) -> types::PullRequestSimpl
 }
 
 /// Projects a REST resource into its webhook representation.
-impl From<types::FullRepository> for webhook_types::Repository {
-    fn from(value: types::FullRepository) -> Self {
-        Self {
-            allow_auto_merge: value
-                .allow_auto_merge
-                .expect("the rendered resource supplies this required field"),
+impl TryFrom<types::FullRepository> for webhook_types::Repository {
+    type Error = PayloadError;
+
+    fn try_from(value: types::FullRepository) -> Result<Self, PayloadError> {
+        Ok(Self {
+            allow_auto_merge: required("repository.allow_auto_merge", value.allow_auto_merge)?,
             allow_forking: value.allow_forking,
-            allow_merge_commit: value
-                .allow_merge_commit
-                .expect("the rendered resource supplies this required field"),
-            allow_rebase_merge: value
-                .allow_rebase_merge
-                .expect("the rendered resource supplies this required field"),
-            allow_squash_merge: value
-                .allow_squash_merge
-                .expect("the rendered resource supplies this required field"),
+            allow_merge_commit: required(
+                "repository.allow_merge_commit",
+                value.allow_merge_commit,
+            )?,
+            allow_rebase_merge: required(
+                "repository.allow_rebase_merge",
+                value.allow_rebase_merge,
+            )?,
+            allow_squash_merge: required(
+                "repository.allow_squash_merge",
+                value.allow_squash_merge,
+            )?,
             allow_update_branch: value.allow_update_branch,
             archive_url: value.archive_url,
             archived: value.archived,
@@ -1078,9 +1082,10 @@ impl From<types::FullRepository> for webhook_types::Repository {
                 .map(|(name, value)| (name, webhook_custom_property(value)))
                 .collect(),
             default_branch: value.default_branch,
-            delete_branch_on_merge: value
-                .delete_branch_on_merge
-                .expect("the rendered resource supplies this required field"),
+            delete_branch_on_merge: required(
+                "repository.delete_branch_on_merge",
+                value.delete_branch_on_merge,
+            )?,
             deployments_url: value.deployments_url,
             description: value.description,
             disabled: Some(value.disabled),
@@ -1096,9 +1101,7 @@ impl From<types::FullRepository> for webhook_types::Repository {
             git_tags_url: value.git_tags_url,
             git_url: value.git_url,
             has_discussions: value.has_discussions,
-            has_downloads: value
-                .has_downloads
-                .expect("the rendered resource supplies this required field"),
+            has_downloads: required("repository.has_downloads", value.has_downloads)?,
             has_issues: value.has_issues,
             has_pages: value.has_pages,
             has_projects: value.has_projects,
@@ -1107,9 +1110,7 @@ impl From<types::FullRepository> for webhook_types::Repository {
             hooks_url: value.hooks_url,
             html_url: value.html_url,
             id: value.id,
-            is_template: value
-                .is_template
-                .expect("the rendered resource supplies this required field"),
+            is_template: required("repository.is_template", value.is_template)?,
             issue_comment_url: value.issue_comment_url,
             issue_events_url: value.issue_events_url,
             issues_url: value.issues_url,
@@ -1117,7 +1118,7 @@ impl From<types::FullRepository> for webhook_types::Repository {
             labels_url: value.labels_url,
             language: value.language,
             languages_url: value.languages_url,
-            license: value.license.map(|value| value.into()),
+            license: value.license.map(TryInto::try_into).transpose()?,
             master_branch: value.master_branch,
             merge_commit_message: value.merge_commit_message.map(|value| value.to_string()),
             merge_commit_title: value.merge_commit_title.map(|value| value.to_string()),
@@ -1130,7 +1131,7 @@ impl From<types::FullRepository> for webhook_types::Repository {
             open_issues: value.open_issues,
             open_issues_count: value.open_issues_count,
             organization: value.organization.map(|value| value.login),
-            owner: value.owner.into(),
+            owner: value.owner.try_into()?,
             permissions: value.permissions.map(|value| value.into()),
             private: value.private,
             public: None,
@@ -1159,48 +1160,48 @@ impl From<types::FullRepository> for webhook_types::Repository {
             updated_at: value.updated_at,
             url: value.url,
             use_squash_pr_title_as_default: value.use_squash_pr_title_as_default,
-            visibility: value
-                .visibility
-                .expect("the rendered resource supplies this required field")
-                .parse()
-                .expect("rendered resource values match the webhook schema"),
+            visibility: parse(
+                "repository.visibility",
+                &required("repository.visibility", value.visibility)?,
+            )?,
             watchers: value.watchers,
             watchers_count: value.watchers_count,
-            web_commit_signoff_required: value
-                .web_commit_signoff_required
-                .expect("the rendered resource supplies this required field"),
-        }
+            web_commit_signoff_required: required(
+                "repository.web_commit_signoff_required",
+                value.web_commit_signoff_required,
+            )?,
+        })
     }
 }
 
 /// Projects a REST resource into its webhook representation.
-impl From<types::NullableLicenseSimple> for webhook_types::License {
-    fn from(value: types::NullableLicenseSimple) -> Self {
-        Self {
+impl TryFrom<types::NullableLicenseSimple> for webhook_types::License {
+    type Error = PayloadError;
+
+    fn try_from(value: types::NullableLicenseSimple) -> Result<Self, PayloadError> {
+        Ok(Self {
             key: value.key,
             name: value.name,
             node_id: value.node_id,
-            spdx_id: value
-                .spdx_id
-                .expect("the rendered resource supplies this required field"),
+            spdx_id: required("license.spdx_id", value.spdx_id)?,
             url: value.url,
-        }
+        })
     }
 }
 
 /// Projects a REST resource into its webhook representation.
-impl From<types::SimpleUser> for webhook_types::User {
-    fn from(value: types::SimpleUser) -> Self {
-        Self {
+impl TryFrom<types::SimpleUser> for webhook_types::User {
+    type Error = PayloadError;
+
+    fn try_from(value: types::SimpleUser) -> Result<Self, PayloadError> {
+        Ok(Self {
             avatar_url: value.avatar_url,
             email: value.email,
             events_url: value.events_url,
             followers_url: value.followers_url,
             following_url: value.following_url,
             gists_url: value.gists_url,
-            gravatar_id: value
-                .gravatar_id
-                .expect("the rendered resource supplies this required field"),
+            gravatar_id: required("user.gravatar_id", value.gravatar_id)?,
             html_url: value.html_url,
             id: value.id,
             login: value.login,
@@ -1212,12 +1213,9 @@ impl From<types::SimpleUser> for webhook_types::User {
             site_admin: value.site_admin,
             starred_url: value.starred_url,
             subscriptions_url: value.subscriptions_url,
-            type_: value
-                .type_
-                .parse()
-                .expect("rendered resource values match the webhook schema"),
+            type_: parse("user.type", &value.type_)?,
             url: value.url,
-        }
+        })
     }
 }
 

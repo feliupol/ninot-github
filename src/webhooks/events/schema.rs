@@ -206,21 +206,21 @@ fn every_event_payload_matches_its_schema() {
         let mut queued_job = job.clone();
         queued_job.status = types::JobStatus::Queued;
         queued_job.conclusion = None;
-        workflow_run::deliver(&mut ctx, &run);
-        workflow_job::deliver(&mut ctx, &run, &job);
-        workflow_run::deliver(&mut ctx, &queued_run);
-        workflow_job::deliver(&mut ctx, &queued_run, &queued_job);
+        workflow_run::deliver(&mut ctx, &run).unwrap();
+        workflow_job::deliver(&mut ctx, &run, &job).unwrap();
+        workflow_run::deliver(&mut ctx, &queued_run).unwrap();
+        workflow_job::deliver(&mut ctx, &queued_run, &queued_job).unwrap();
         let mut running_run = run.clone();
         running_run.status = Some("in_progress".to_owned());
         running_run.conclusion = None;
         let mut running_job = job.clone();
         running_job.status = types::JobStatus::InProgress;
         running_job.conclusion = None;
-        workflow_run::deliver(&mut ctx, &running_run);
-        workflow_job::deliver(&mut ctx, &running_run, &running_job);
+        workflow_run::deliver(&mut ctx, &running_run).unwrap();
+        workflow_job::deliver(&mut ctx, &running_run, &running_job).unwrap();
         let mut waiting_job = queued_job.clone();
         waiting_job.status = types::JobStatus::Waiting;
-        workflow_job::deliver(&mut ctx, &queued_run, &waiting_job);
+        workflow_job::deliver(&mut ctx, &queued_run, &waiting_job).unwrap();
 
         let status_model = {
             let account = ctx.state.account("admin").unwrap();
@@ -252,10 +252,10 @@ fn every_event_payload_matches_its_schema() {
         edited.insert("body".to_owned(), json!({ "from": "" }));
         release::deliver(&mut ctx, "edited", &published, Some(edited)).unwrap();
 
-        create::reference(&mut ctx, "topic", "branch");
-        create::reference(&mut ctx, "v1", "tag");
-        delete::reference(&mut ctx, "topic", "branch");
-        delete::reference(&mut ctx, "v1", "tag");
+        create::reference(&mut ctx, "topic", "branch").unwrap();
+        create::reference(&mut ctx, "v1", "tag").unwrap();
+        delete::reference(&mut ctx, "topic", "branch").unwrap();
+        delete::reference(&mut ctx, "v1", "tag").unwrap();
     }
     let shared = std::sync::Mutex::new(state);
     create::from_push(&shared, &request, "admin", "tool", &before, &after);
@@ -790,4 +790,47 @@ fn a_payload_that_cannot_be_built_answers_500_naming_the_field_and_value() {
         "ninot-github could not build the webhook payload: issue.state is \"merged\", which the \
          webhook schema does not allow"
     );
+}
+
+#[test]
+fn a_user_without_a_gravatar_id_fails_its_delivery() {
+    let (mut state, request) = hooked_state();
+    let issue = seeded_issue(&mut state, &request);
+    let mut assignee = render::simple_user(&request, state.account("admin").unwrap());
+    assignee.gravatar_id = None;
+    let error = issues::assigned(
+        &mut Ctx::new(&mut state, &request, "admin", "tool"),
+        &issue,
+        &assignee,
+    )
+    .unwrap_err();
+    assert_eq!(
+        error,
+        PayloadError::Missing {
+            field: "user.gravatar_id"
+        }
+    );
+    assert_unbuilt(&state, &error);
+}
+
+#[test]
+fn a_user_type_outside_the_webhook_vocabulary_fails_its_delivery() {
+    let (mut state, request) = hooked_state();
+    let issue = seeded_issue(&mut state, &request);
+    let mut assignee = render::simple_user(&request, state.account("admin").unwrap());
+    assignee.type_ = "Robot".to_owned();
+    let error = issues::assigned(
+        &mut Ctx::new(&mut state, &request, "admin", "tool"),
+        &issue,
+        &assignee,
+    )
+    .unwrap_err();
+    assert_eq!(
+        error,
+        PayloadError::Unknown {
+            field: "user.type",
+            value: "Robot".to_owned(),
+        }
+    );
+    assert_unbuilt(&state, &error);
 }

@@ -249,6 +249,33 @@ fn form_hooks_and_failed_deliveries_are_recorded() {
 }
 
 #[test]
+fn a_ping_for_an_event_outside_the_webhook_vocabulary_answers_500_and_fails_its_delivery() {
+    let server = Server::start().unwrap();
+    let admin = Api::admin(&server);
+    admin.post("/user/repos", json!({ "name": "tool" }));
+    let receiver = Receiver::start(200);
+    let created = admin.post(
+        "/repos/admin/tool/hooks",
+        json!({
+            "config": { "url": receiver.url, "content_type": "json" },
+            "events": ["push", "no_such_event"],
+        }),
+    );
+    let problem = "hook.events is \"no_such_event\", which the webhook schema does not allow";
+    assert_eq!(created.status, 500, "{}", created.body);
+    assert_eq!(
+        created.body["message"],
+        format!("ninot-github could not build the webhook payload: {problem}")
+    );
+    let deliveries = server.wait_for_deliveries(1, Duration::from_secs(5));
+    assert_eq!(deliveries[0].event, "ping");
+    assert_eq!(
+        deliveries[0].error.as_deref(),
+        Some(format!("ninot-github could not build the payload: {problem}").as_str())
+    );
+}
+
+#[test]
 fn hooks_need_admin() {
     let server = Server::start().unwrap();
     server.add_user("bob");

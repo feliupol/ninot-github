@@ -38,8 +38,10 @@ use crate::webhooks::enqueue;
 pub(crate) use model::PayloadError;
 
 /// Projects the REST repository into the webhook contract.
-fn repository(repository: &types::FullRepository) -> webhook_types::Repository {
-    repository.clone().into()
+fn repository(
+    repository: &types::FullRepository,
+) -> Result<webhook_types::Repository, PayloadError> {
+    repository.clone().try_into()
 }
 
 /// The repository, request and caller a delivery is built from.
@@ -79,7 +81,7 @@ impl<'a> Ctx<'a> {
     }
 
     /// The webhook repository object, when the repository still exists.
-    pub(crate) fn repository(&self) -> Option<webhook_types::Repository> {
+    pub(crate) fn repository(&self) -> Option<Result<webhook_types::Repository, PayloadError>> {
         let account = self.state.account(self.owner)?;
         let repo = account.repo(self.name)?;
         let full = render::full_repository(self.request, account, repo, Permission::default());
@@ -100,7 +102,7 @@ impl<'a> Ctx<'a> {
     pub(crate) fn sender(
         &self,
         explicit: Option<&types::SimpleUser>,
-    ) -> Option<webhook_types::User> {
+    ) -> Option<Result<webhook_types::User, PayloadError>> {
         if let Some(user) = explicit {
             return Some(model::user(user));
         }
@@ -111,6 +113,25 @@ impl<'a> Ctx<'a> {
             .map_or(self.owner, |caller| caller.login.as_str());
         let account = self.state.account(login)?;
         Some(model::user(&render::simple_user(self.request, account)))
+    }
+
+    /// The webhook repository and sender (see [`Self::sender`]) of an `event` payload, or
+    /// `None` when the repository or the sender has no account. A failure to build either is
+    /// recorded on the delivery and returned.
+    pub(crate) fn parties(
+        &mut self,
+        event: &str,
+        explicit: Option<&types::SimpleUser>,
+    ) -> Result<Option<(webhook_types::Repository, webhook_types::User)>, PayloadError> {
+        let (Some(repository), Some(sender)) = (self.repository(), self.sender(explicit)) else {
+            return Ok(None);
+        };
+        match repository.and_then(|repository| sender.map(|sender| (repository, sender))) {
+            Ok(parties) => Ok(Some(parties)),
+            Err(error) => self
+                .enqueue_built(event, Err::<(), _>(error))
+                .map(|()| None),
+        }
     }
 
     /// The default branch and description stored for the repository.
@@ -150,7 +171,7 @@ impl<'a> Ctx<'a> {
                 Ok(())
             }
             Err(error) => {
-                record_unbuilt(self.state, self.owner, self.name, event, &error);
+                record_unbuilt(self.state, self.owner, self.name, event, &error, None);
                 Err(error)
             }
         }

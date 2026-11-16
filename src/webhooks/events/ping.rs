@@ -1,5 +1,6 @@
 //! The `ping` event, sent when a hook is created or pinged.
 
+use super::model::{PayloadError, parse, required};
 use crate::api::ApiRequest;
 use crate::render;
 use crate::state::{Permission, State};
@@ -13,31 +14,32 @@ pub(crate) fn ping_payload(
     owner: &str,
     name: &str,
     hook: &types::Hook,
-) -> webhook_types::PingEvent {
-    let account = state.account(owner).unwrap();
+) -> Result<webhook_types::PingEvent, PayloadError> {
+    let account = required("repository.owner", state.account(owner))?;
     let repository = render::full_repository(
         request,
         account,
-        account.repo(name).unwrap(),
+        required("repository", account.repo(name))?,
         Permission::default(),
     );
-    webhook_types::PingEvent {
-        hook: ping_hook(hook),
+    Ok(webhook_types::PingEvent {
+        hook: ping_hook(hook)?,
         hook_id: hook.id,
         organization: None,
-        repository: Some(super::repository(&repository)),
+        repository: Some(super::repository(&repository)?),
         sender: request
             .caller
             .as_ref()
             .and_then(|caller| state.account(&caller.login))
-            .map(|sender| render::simple_user(request, sender).into()),
+            .map(|sender| render::simple_user(request, sender).try_into())
+            .transpose()?,
         zen: "Keep it logically awesome.".to_owned(),
-    }
+    })
 }
 
 /// The `hook` of a `ping` payload. octokit/webhooks describes only the `last_response` of a
 /// hook without responses, whose `code` and `message` are null, so other hooks omit it.
-fn ping_hook(hook: &types::Hook) -> webhook_types::PingEventHook {
+fn ping_hook(hook: &types::Hook) -> Result<webhook_types::PingEventHook, PayloadError> {
     let config = &hook.config;
     let insecure_ssl = match config.insecure_ssl.as_ref() {
         Some(types::WebhookConfigInsecureSsl::String(value)) => value.as_str(),
@@ -49,15 +51,11 @@ fn ping_hook(hook: &types::Hook) -> webhook_types::PingEventHook {
         webhook_types::WebhookEvents::Variant0(
             hook.events
                 .iter()
-                .map(|event| {
-                    event
-                        .parse()
-                        .expect("configured hook events match the webhook schema")
-                })
-                .collect(),
+                .map(|event| parse("hook.events", event))
+                .collect::<Result<_, _>>()?,
         )
     };
-    webhook_types::PingEventHook {
+    Ok(webhook_types::PingEventHook {
         active: hook.active,
         app_id: None,
         config: webhook_types::PingEventHookConfig {
@@ -105,5 +103,5 @@ fn ping_hook(hook: &types::Hook) -> webhook_types::PingEventHook {
         },
         updated_at: hook.updated_at,
         url: hook.url.clone(),
-    }
+    })
 }

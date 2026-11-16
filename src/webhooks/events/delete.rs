@@ -3,18 +3,18 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use super::{Ctx, create::ref_kind, push};
+use super::{Ctx, PayloadError, create::ref_kind, push};
 use crate::api::ApiRequest;
 use crate::state::{State, lock};
 use crate::webhook_types as wt;
 
 /// Queues `delete` for a removed branch or tag named `name`.
-pub(crate) fn reference(ctx: &mut Ctx, name: &str, ref_type: &str) {
+pub(crate) fn reference(ctx: &mut Ctx, name: &str, ref_type: &str) -> Result<(), PayloadError> {
     if name.is_empty() || !ctx.wants("delete") {
-        return;
+        return Ok(());
     }
-    let (Some(repository), Some(sender)) = (ctx.repository(), ctx.sender(None)) else {
-        return;
+    let Some((repository, sender)) = ctx.parties("delete", None)? else {
+        return Ok(());
     };
     let payload = wt::DeleteEvent {
         installation: None,
@@ -29,6 +29,7 @@ pub(crate) fn reference(ctx: &mut Ctx, name: &str, ref_type: &str) {
         sender,
     };
     ctx.enqueue("delete", &payload);
+    Ok(())
 }
 
 /// Queues `delete` for each branch or tag a push removed.
@@ -55,6 +56,10 @@ pub(crate) fn from_push(
     let mut state = lock(state);
     let mut ctx = Ctx::new(&mut state, request, owner, name);
     for (short, kind) in deleted {
-        reference(&mut ctx, &short, kind);
+        // The push has landed, so a payload that cannot be built only fails its delivery,
+        // which records the error.
+        if let Err(error) = reference(&mut ctx, &short, kind) {
+            eprintln!("ninot-github: no delete payload for {short}: {error}");
+        }
     }
 }

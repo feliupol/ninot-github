@@ -18,7 +18,7 @@ pub(crate) fn submitted(
     if !ctx.wants("pull_request_review") {
         return Ok(());
     }
-    let (Some(repository), Some(sender)) = (ctx.repository(), ctx.sender(None)) else {
+    let Some((repository, sender)) = ctx.parties("pull_request_review", None)? else {
         return Ok(());
     };
     let payload = submitted_payload(pull, review, repository, sender);
@@ -90,6 +90,6 @@ fn pull_review(
         user: review
             .user
             .as_ref()
-            .map_or_else(|| sender.clone(), model::nullable_user),
+            .map_or_else(|| Ok(sender.clone()), model::nullable_user)?,
     })
 }

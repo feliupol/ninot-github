@@ -169,7 +169,7 @@ impl Handler for ops::GitCreateRef {
                 &located.found.owner,
                 &located.found.name,
             );
-            crate::webhooks::events::create::reference(&mut ctx, short, kind);
+            crate::webhooks::events::create::reference(&mut ctx, short, kind)?;
         }
         Ok(ApiResponse::typed(201, &response))
     }
@@ -814,7 +814,7 @@ impl Handler for ops::ReposCreateOrUpdateFileContents {
                 )?;
             }
             if !branch_existed {
-                crate::webhooks::events::create::reference(&mut ctx, branch, "branch");
+                crate::webhooks::events::create::reference(&mut ctx, branch, "branch")?;
             }
         }
         drop(state);
@@ -946,7 +946,7 @@ impl Handler for ops::GitDeleteRef {
                 &located.found.owner,
                 &located.found.name,
             );
-            crate::webhooks::events::delete::reference(&mut ctx, short, kind);
+            crate::webhooks::events::delete::reference(&mut ctx, short, kind)?;
         }
         Ok(ApiResponse::no_content())
     }

@@ -10,7 +10,7 @@ pub(crate) fn requested(ctx: &mut Ctx, check: &types::CheckRun) -> Result<(), Pa
     if !ctx.wants("check_suite") {
         return Ok(());
     }
-    let (Some(repository), Some(sender)) = (ctx.repository(), ctx.sender(None)) else {
+    let Some((repository, sender)) = ctx.parties("check_suite", None)? else {
         return Ok(());
     };
     let now = model::now();
@@ -26,9 +26,13 @@ pub(crate) fn requested(ctx: &mut Ctx, check: &types::CheckRun) -> Result<(), Pa
         Ok(status) => status,
         Err(error) => return ctx.enqueue_built("check_suite", Err::<(), _>(error)),
     };
+    let app = match model::app(check.app.as_ref(), &sender, now) {
+        Ok(app) => app,
+        Err(error) => return ctx.enqueue_built("check_suite", Err::<(), _>(error)),
+    };
     let check_suite = wt::CheckSuiteRequestedCheckSuite {
         after: None,
-        app: model::app(check.app.as_ref(), &sender, now),
+        app,
         before: None,
         check_runs_url: ctx.urls().check_suite(id).check_runs(),
         conclusion: conclusion.as_deref().and_then(|text| text.parse().ok()),
@@ -144,12 +148,16 @@ fn deliver<P: serde::Serialize>(
     if !ctx.wants("check_suite") {
         return Ok(());
     }
-    let (Some(repository), Some(sender)) = (ctx.repository(), ctx.sender(None)) else {
+    let Some((repository, sender)) = ctx.parties("check_suite", None)? else {
         return Ok(());
+    };
+    let app = match model::app(suite.app.as_ref(), &sender, model::now()) {
+        Ok(app) => app,
+        Err(error) => return ctx.enqueue_built("check_suite", Err::<(), _>(error)),
     };
     let parts = SuiteParts(
         suite,
-        model::app(suite.app.as_ref(), &sender, model::now()),
+        app,
         model::commit_simple(ctx, &suite.head_sha),
         suite
             .url

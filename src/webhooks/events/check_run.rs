@@ -70,8 +70,8 @@ macro_rules! check_run {
         let (sender, now): (&wt::User, DateTime<Utc>) = ($sender, $now);
         let suite = suite_from_run(check, urls);
         paste_check_run!($payload, {
-            app: model::app(check.app.as_ref(), sender, now),
-            check_suite: suite!($payload, suite, model::app(check.app.as_ref(), sender, now), now),
+            app: model::app(check.app.as_ref(), sender, now)?,
+            check_suite: suite!($payload, suite, model::app(check.app.as_ref(), sender, now)?, now),
             conclusion: check
                 .conclusion
                 .as_ref()
@@ -244,7 +244,7 @@ fn deliver<P: serde::Serialize>(
     if !ctx.wants("check_run") {
         return Ok(());
     }
-    let (Some(repository), Some(sender)) = (ctx.repository(), ctx.sender(None)) else {
+    let Some((repository, sender)) = ctx.parties("check_run", None)? else {
         return Ok(());
     };
     let payload = payload(check, (ctx.urls(), repository), &sender, model::now());

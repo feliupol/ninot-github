@@ -13,7 +13,7 @@ pub(crate) fn created(
     if !ctx.wants("pull_request_review_comment") {
         return Ok(());
     }
-    let (Some(repository), Some(sender)) = (ctx.repository(), ctx.sender(None)) else {
+    let Some((repository, sender)) = ctx.parties("pull_request_review_comment", None)? else {
         return Ok(());
     };
     let payload = created_payload(pull, comment, repository, sender);
@@ -101,6 +101,6 @@ fn review_comment(
         user: comment
             .user
             .as_ref()
-            .map_or_else(|| sender.clone(), model::nullable_user),
+            .map_or_else(|| Ok(sender.clone()), model::nullable_user)?,
     })
 }

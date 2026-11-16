@@ -215,7 +215,7 @@ impl Handler for ops::ReposCreateRelease {
         let mut ctx =
             crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
         if created_tag {
-            crate::webhooks::events::create::reference(&mut ctx, &rendered.tag_name, "tag");
+            crate::webhooks::events::create::reference(&mut ctx, &rendered.tag_name, "tag")?;
         }
         crate::webhooks::events::release::deliver(&mut ctx, action, &rendered, None)?;
         Ok(ApiResponse::typed(201, &rendered))
@@ -350,7 +350,7 @@ impl Handler for ops::ReposUpdateRelease {
         let mut ctx =
             crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
         if created_tag {
-            crate::webhooks::events::create::reference(&mut ctx, &rendered.tag_name, "tag");
+            crate::webhooks::events::create::reference(&mut ctx, &rendered.tag_name, "tag")?;
         }
         if was_draft && !rendered.draft {
             let action = if rendered.prerelease {

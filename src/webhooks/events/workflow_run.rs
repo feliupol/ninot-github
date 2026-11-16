@@ -1,6 +1,6 @@
 //! The `workflow_run` event.
 
-use super::{Ctx, model};
+use super::{Ctx, PayloadError, model};
 use crate::types;
 use crate::urls::RepoUrls;
 use crate::webhook_types as wt;
@@ -9,12 +9,12 @@ use crate::webhook_types as wt;
 ///
 /// The action follows the run's status: `completed` and `in_progress` keep that name, and every
 /// other status, including `queued`, is delivered as `requested`.
-pub(crate) fn deliver(ctx: &mut Ctx, run: &types::WorkflowRun) {
+pub(crate) fn deliver(ctx: &mut Ctx, run: &types::WorkflowRun) -> Result<(), PayloadError> {
     if !ctx.wants("workflow_run") {
-        return;
+        return Ok(());
     }
-    let (Some(repository), Some(sender)) = (ctx.repository(), ctx.sender(None)) else {
-        return;
+    let Some((repository, sender)) = ctx.parties("workflow_run", None)? else {
+        return Ok(());
     };
     let workflow_run = workflow_run(ctx, run, &repository, &sender);
     let workflow = workflow(run, &ctx.urls());
@@ -46,6 +46,7 @@ pub(crate) fn deliver(ctx: &mut Ctx, run: &types::WorkflowRun) {
         }
         _ => payload!(WorkflowRunRequested, WorkflowRunRequestedAction::Requested),
     }
+    Ok(())
 }
 
 /// The webhook run for `run`, acted on by `sender` in `repository`. A status the schema does not

@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use super::{Ctx, push};
+use super::{Ctx, PayloadError, push};
 use crate::api::ApiRequest;
 use crate::state::{State, lock};
 use crate::webhook_types as wt;
@@ -20,15 +20,15 @@ pub(crate) fn ref_kind(reference: &str) -> Option<(&str, &'static str)> {
 }
 
 /// Queues `create` for a new branch or tag named `name`.
-pub(crate) fn reference(ctx: &mut Ctx, name: &str, ref_type: &str) {
+pub(crate) fn reference(ctx: &mut Ctx, name: &str, ref_type: &str) -> Result<(), PayloadError> {
     if name.is_empty() || !ctx.wants("create") {
-        return;
+        return Ok(());
     }
-    let (Some(repository), Some(sender)) = (ctx.repository(), ctx.sender(None)) else {
-        return;
+    let Some((repository, sender)) = ctx.parties("create", None)? else {
+        return Ok(());
     };
     let Some((master_branch, description)) = ctx.branch_and_description() else {
-        return;
+        return Ok(());
     };
     let payload = wt::CreateEvent {
         description,
@@ -45,6 +45,7 @@ pub(crate) fn reference(ctx: &mut Ctx, name: &str, ref_type: &str) {
         sender,
     };
     ctx.enqueue("create", &payload);
+    Ok(())
 }
 
 /// Queues `create` for each branch or tag a push added.
@@ -72,6 +73,10 @@ pub(crate) fn from_push(
     let mut state = lock(state);
     let mut ctx = Ctx::new(&mut state, request, owner, name);
     for (short, kind) in created {
-        reference(&mut ctx, &short, kind);
+        // The push has landed, so a payload that cannot be built only fails its delivery,
+        // which records the error.
+        if let Err(error) = reference(&mut ctx, &short, kind) {
+            eprintln!("ninot-github: no create payload for {short}: {error}");
+        }
     }
 }

@@ -121,7 +121,7 @@ impl Handler for ops::GitCreateTag {
                 &located.found.owner,
                 &located.found.name,
             );
-            crate::webhooks::events::create::reference(&mut ctx, &body.tag, "tag");
+            crate::webhooks::events::create::reference(&mut ctx, &body.tag, "tag")?;
         }
         Ok(ApiResponse::typed(
             201,

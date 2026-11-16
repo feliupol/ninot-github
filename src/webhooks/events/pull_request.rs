@@ -169,19 +169,21 @@ pub(crate) fn review_requested_user(
     pull: &types::PullRequest,
     reviewer: &types::SimpleUser,
 ) -> Result<(), PayloadError> {
-    deliver(
+    try_deliver(
         ctx,
         pull,
         None,
-        |number, pull_request, repository, sender| wt::PullRequestReviewRequested::Variant0 {
-            action: wt::PullRequestReviewRequestedVariant0Action::ReviewRequested,
-            installation: None,
-            number,
-            organization: None,
-            pull_request,
-            repository,
-            requested_reviewer: model::user(reviewer),
-            sender,
+        |number, pull_request, repository, sender| {
+            Ok(wt::PullRequestReviewRequested::Variant0 {
+                action: wt::PullRequestReviewRequestedVariant0Action::ReviewRequested,
+                installation: None,
+                number,
+                organization: None,
+                pull_request,
+                repository,
+                requested_reviewer: model::user(reviewer)?,
+                sender,
+            })
         },
     )
 }
@@ -257,7 +259,7 @@ fn try_deliver<P: Serialize>(
     if !ctx.wants("pull_request") {
         return Ok(());
     }
-    let (Some(repository), Some(sender)) = (ctx.repository(), ctx.sender(sender)) else {
+    let Some((repository, sender)) = ctx.parties("pull_request", sender)? else {
         return Ok(());
     };
     let payload = model::pull_request(pull, &repository)

@@ -89,7 +89,7 @@ fn deliver<P: Serialize>(
     if !ctx.wants("issue_comment") {
         return Ok(());
     }
-    let (Some(repository), Some(sender)) = (ctx.repository(), ctx.sender(None)) else {
+    let Some((repository, sender)) = ctx.parties("issue_comment", None)? else {
         return Ok(());
     };
     let Some(issue) = issue(ctx, number) else {
@@ -128,8 +128,16 @@ fn issue_from_pull(pull: &types::PullRequest, repo: &RepoUrls) -> Result<wt::Iss
             .as_deref()
             .map(|reason| model::parse("pull_request.active_lock_reason", reason))
             .transpose()?,
-        assignee: pull.assignee.as_ref().map(model::nullable_user),
-        assignees: pull.assignees.iter().map(model::user).collect(),
+        assignee: pull
+            .assignee
+            .as_ref()
+            .map(model::nullable_user)
+            .transpose()?,
+        assignees: pull
+            .assignees
+            .iter()
+            .map(model::user)
+            .collect::<Result<_, _>>()?,
         author_association: model::author_association(&pull.author_association)?,
         body: pull.body.clone(),
         closed_at: pull.closed_at,
@@ -174,7 +182,7 @@ fn issue_from_pull(pull: &types::PullRequest, repo: &RepoUrls) -> Result<wt::Iss
         title: pull.title.clone(),
         updated_at: pull.updated_at,
         url: pull.issue_url.clone(),
-        user: model::user(&pull.user),
+        user: model::user(&pull.user)?,
     })
 }
 
@@ -201,6 +209,6 @@ fn issue_comment(
         user: comment
             .user
             .as_ref()
-            .map_or_else(|| sender.clone(), model::nullable_user),
+            .map_or_else(|| Ok(sender.clone()), model::nullable_user)?,
     })
 }

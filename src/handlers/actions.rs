@@ -212,9 +212,9 @@ fn rerun_workflow(state: &Mutex<State>, request: &ApiRequest, failed_only: bool)
         )
     };
     let mut ctx = crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
-    crate::webhooks::events::workflow_run::deliver(&mut ctx, &run);
+    crate::webhooks::events::workflow_run::deliver(&mut ctx, &run)?;
     for job in &jobs {
-        crate::webhooks::events::workflow_job::deliver(&mut ctx, &run, job);
+        crate::webhooks::events::workflow_job::deliver(&mut ctx, &run, job)?;
     }
     if failed_only {
         Ok(ApiResponse::typed(

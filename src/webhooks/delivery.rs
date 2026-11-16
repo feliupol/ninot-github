@@ -103,16 +103,25 @@ pub fn enqueue(
 }
 
 /// Records a `null` delivery of `event`, with `error`, to every hook of `owner/name` that wants
-/// it, for a payload that could not be built. Nothing is queued.
+/// it (or to `only_hook`), for a payload that could not be built. Nothing is queued.
 pub(crate) fn record_unbuilt(
     state: &mut State,
     owner: &str,
     name: &str,
     event: &str,
     error: &impl std::fmt::Display,
+    only_hook: Option<u64>,
 ) {
     let error = format!("ninot-github could not build the payload: {error}");
-    record(state, owner, name, event, &Value::Null, Some(error), None);
+    record(
+        state,
+        owner,
+        name,
+        event,
+        &Value::Null,
+        Some(error),
+        only_hook,
+    );
 }
 
 /// Records a delivery of `payload` to every hook of `owner/name` that wants `event`, and queues

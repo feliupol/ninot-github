@@ -14,7 +14,7 @@ pub(crate) fn commit_status(
     if !ctx.wants("status") {
         return Ok(());
     }
-    let (Some(repository), Some(sender)) = (ctx.repository(), ctx.sender(None)) else {
+    let Some((repository, sender)) = ctx.parties("status", None)? else {
         return Ok(());
     };
     let urls = ctx.urls();

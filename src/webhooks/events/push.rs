@@ -5,11 +5,12 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Mutex;
 
+use super::model::PayloadError;
 use crate::api::{ApiRequest, Caller};
 use crate::render;
 use crate::state::{Permission, State, lock};
 use crate::webhook_types;
-use crate::webhooks::enqueue;
+use crate::webhooks::{enqueue, record_unbuilt};
 use ninot_common::git;
 
 /// Sha GitHub reports for a ref that does not exist before or after a push.
@@ -61,9 +62,15 @@ pub fn enqueue_push(
     let Some(pusher) = request.caller.as_ref() else {
         return;
     };
-    let Some((repository, sender)) = push_context(&lock(state), request, owner, name, pusher)
-    else {
-        return;
+    let parties = push_context(&lock(state), request, owner, name, pusher);
+    let (repository, sender) = match parties {
+        Some(Ok(parties)) => parties,
+        Some(Err(error)) => {
+            // The push has landed, so a payload that cannot be built only fails its delivery.
+            record_unbuilt(&mut lock(state), owner, name, "push", &error, None);
+            return;
+        }
+        None => return,
     };
     let urls = request.urls().repo(owner, name);
     let changed = changed_refs(before, after);
@@ -107,27 +114,28 @@ pub fn enqueue_push(
 }
 
 /// The repository and sender of `owner/name`'s push payloads, or `None` when no active hook of
-/// the repository wants `push` or the pusher has no account.
+/// the repository wants `push` or the pusher has no account, or the error when either cannot be
+/// built.
 fn push_context(
     state: &State,
     request: &ApiRequest,
     owner: &str,
     name: &str,
     pusher: &Caller,
-) -> Option<(webhook_types::Repository, webhook_types::User)> {
+) -> Option<Result<(webhook_types::Repository, webhook_types::User), PayloadError>> {
     let account = state.account(owner)?;
     let repo = account.repo(name)?;
     if !repo.hooks.iter().any(|hook| hook.wants("push")) {
         return None;
     }
-    let sender = render::simple_user(request, state.account(&pusher.login)?).into();
+    let sender = render::simple_user(request, state.account(&pusher.login)?).try_into();
     let repository = super::repository(&render::full_repository(
         request,
         account,
         repo,
         Permission::default(),
     ));
-    Some((repository, sender))
+    Some(repository.and_then(|repository| sender.map(|sender| (repository, sender))))
 }
 
 /// The refs a push changed, as `(ref, before, after)`, without those GitHub sends no event

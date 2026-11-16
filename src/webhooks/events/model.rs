@@ -11,7 +11,7 @@ use super::Ctx;
 
 /// Why a webhook payload cannot be built from a rendered REST model.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum PayloadError {
+pub enum PayloadError {
     /// `field` holds `value`, which the webhook schema does not allow.
     Unknown { field: &'static str, value: String },
     /// `field`, which the webhook schema requires, is missing.
@@ -74,13 +74,13 @@ pub(crate) fn required<T>(field: &'static str, value: Option<T>) -> Result<T, Pa
 }
 
 /// The webhook user for `user`.
-pub(crate) fn user(user: &types::SimpleUser) -> wt::User {
-    user.clone().into()
+pub(crate) fn user(user: &types::SimpleUser) -> Result<wt::User, PayloadError> {
+    user.clone().try_into()
 }
 
 /// The webhook user for a nullable REST user.
-pub(crate) fn nullable_user(user: &types::NullableSimpleUser) -> wt::User {
-    types::SimpleUser::from(user.clone()).into()
+pub(crate) fn nullable_user(user: &types::NullableSimpleUser) -> Result<wt::User, PayloadError> {
+    types::SimpleUser::from(user.clone()).try_into()
 }
 
 /// The webhook author association of `association`.
@@ -149,7 +149,7 @@ pub(crate) fn milestone(
         closed_at: milestone.closed_at,
         closed_issues: milestone.closed_issues,
         created_at: milestone.created_at,
-        creator: nullable_user(required("milestone.creator", milestone.creator.as_ref())?),
+        creator: nullable_user(required("milestone.creator", milestone.creator.as_ref())?)?,
         description: milestone.description.clone(),
         due_on: milestone.due_on,
         html_url: milestone.html_url.clone(),
@@ -240,8 +240,8 @@ pub(crate) fn issue(issue: &types::Issue) -> Result<wt::Issue, PayloadError> {
             .as_deref()
             .map(|reason| parse("issue.active_lock_reason", reason))
             .transpose()?,
-        assignee: issue.assignee.as_ref().map(nullable_user),
-        assignees: issue.assignees.iter().map(user).collect(),
+        assignee: issue.assignee.as_ref().map(nullable_user).transpose()?,
+        assignees: issue.assignees.iter().map(user).collect::<Result<_, _>>()?,
         author_association: issue
             .author_association
             .as_ref()
@@ -280,7 +280,7 @@ pub(crate) fn issue(issue: &types::Issue) -> Result<wt::Issue, PayloadError> {
         title: issue.title.clone(),
         updated_at: issue.updated_at,
         url: issue.url.clone(),
-        user: nullable_user(required("issue.user", issue.user.as_ref())?),
+        user: nullable_user(required("issue.user", issue.user.as_ref())?)?,
     })
 }
 
@@ -321,8 +321,9 @@ macro_rules! pull_request_object {
                 .as_deref()
                 .map(|reason| model::parse("pull_request.active_lock_reason", reason))
                 .transpose()?,
-            assignee: pull.assignee.as_ref().map(model::nullable_user),
-            assignees: pull.assignees.iter().map(model::user).collect(),
+            assignee: pull.assignee.as_ref().map(model::nullable_user).transpose()?,
+            assignees: pull.assignees.iter().map(model::user)
+            .collect::<Result<_, _>>()?,
             author_association: model::author_association(&pull.author_association)?,
             auto_merge: pull.auto_merge.as_ref().map(model::auto_merge).transpose()?,
             base: wt::$base {
@@ -330,7 +331,7 @@ macro_rules! pull_request_object {
                 ref_: pull.base.ref_.clone(),
                 repo: repository.clone(),
                 sha: pull.base.sha.clone(),
-                user: model::user(&pull.base.user),
+                user: model::user(&pull.base.user)?,
             },
             body: pull.body.clone(),
             closed_at: pull.closed_at,
@@ -343,7 +344,7 @@ macro_rules! pull_request_object {
                 ref_: pull.head.ref_.clone(),
                 repo: repository.clone().into(),
                 sha: pull.head.sha.clone(),
-                user: model::user(&pull.head.user),
+                user: model::user(&pull.head.user)?,
             },
             html_url: pull.html_url.clone(),
             id: pull.id,
@@ -369,8 +370,8 @@ macro_rules! pull_request_object {
             requested_reviewers: pull
                 .requested_reviewers
                 .iter()
-                .map(|reviewer| model::user(reviewer).into())
-                .collect(),
+                .map(|reviewer| model::user(reviewer).map(Into::into))
+                .collect::<Result<_, _>>()?,
             requested_teams: pull
                 .requested_teams
                 .iter()
@@ -383,7 +384,7 @@ macro_rules! pull_request_object {
             title: pull.title.clone(),
             updated_at: pull.updated_at,
             url: pull.url.clone(),
-            user: model::user(&pull.user),
+            user: model::user(&pull.user)?,
             $($extra)*
         }
     }};
@@ -395,7 +396,7 @@ pub(crate) fn auto_merge(auto_merge: &types::AutoMerge) -> Result<wt::AutoMerge,
     Ok(wt::AutoMerge {
         commit_message: Some(auto_merge.commit_message.clone()),
         commit_title: Some(auto_merge.commit_title.clone()),
-        enabled_by: Some(user(&auto_merge.enabled_by)),
+        enabled_by: Some(user(&auto_merge.enabled_by)?),
         merge_method: parse(
             "auto_merge.merge_method",
             &auto_merge.merge_method.to_string(),
@@ -421,7 +422,7 @@ pub(crate) fn pull_request(
             mergeable: pull.mergeable,
             mergeable_state: pull.mergeable_state.clone(),
             merged: Some(pull.merged),
-            merged_by: pull.merged_by.as_ref().map(model::nullable_user),
+            merged_by: pull.merged_by.as_ref().map(model::nullable_user).transpose()?,
             rebaseable: pull.rebaseable,
             review_comments: pull.review_comments,
         }),
@@ -452,14 +453,14 @@ pub(crate) fn app(
     app: Option<&types::NullableIntegration>,
     sender: &wt::User,
     now: chrono::DateTime<chrono::Utc>,
-) -> wt::App {
+) -> Result<wt::App, PayloadError> {
     let Some(app) = app.filter(|app| !app.html_url.is_empty()) else {
-        return stub_app(sender, now);
+        return Ok(stub_app(sender, now));
     };
     let types::NullableIntegrationOwner::SimpleUser(owner) = &app.owner else {
-        return stub_app(sender, now);
+        return Ok(stub_app(sender, now));
     };
-    wt::App {
+    Ok(wt::App {
         created_at: app.created_at,
         description: app.description.clone(),
         events: app
@@ -472,11 +473,11 @@ pub(crate) fn app(
         id: app.id,
         name: app.name.clone(),
         node_id: app.node_id.clone(),
-        owner: user(owner),
+        owner: user(owner)?,
         permissions: Some(app_permissions(&app.permissions)),
         slug: app.slug.clone(),
         updated_at: app.updated_at,
-    }
+    })
 }
 
 /// The permissions an app was granted, keeping those the webhook schema names.

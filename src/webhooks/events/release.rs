@@ -24,10 +24,13 @@ pub(crate) fn deliver(
     if !ctx.wants("release") {
         return Ok(());
     }
-    let (Some(repository), Some(sender)) = (ctx.repository(), ctx.sender(None)) else {
+    let Some((repository, sender)) = ctx.parties("release", None)? else {
         return Ok(());
     };
-    let mut release = webhook_release(release);
+    let mut release = match webhook_release(release) {
+        Ok(release) => release,
+        Err(error) => return ctx.enqueue_built("release", Err::<(), _>(error)),
+    };
     if action == "unpublished" {
         // An unpublished release is a draft again.
         release.published_at = None;
@@ -83,11 +86,11 @@ pub(crate) fn deliver(
 }
 
 /// The webhook release for `release`, with an empty name and body when it has none.
-fn webhook_release(release: &types::Release) -> wt::Release {
-    wt::Release {
-        assets: release.assets.iter().map(asset).collect(),
+fn webhook_release(release: &types::Release) -> Result<wt::Release, PayloadError> {
+    Ok(wt::Release {
+        assets: release.assets.iter().map(asset).collect::<Result<_, _>>()?,
         assets_url: release.assets_url.clone(),
-        author: model::user(&release.author),
+        author: model::user(&release.author)?,
         body: release.body.clone().unwrap_or_default(),
         created_at: Some(release.created_at),
         discussion_url: release.discussion_url.clone(),
@@ -109,12 +112,12 @@ fn webhook_release(release: &types::Release) -> wt::Release {
         upload_url: release.upload_url.clone(),
         url: release.url.clone(),
         zipball_url: release.zipball_url.clone(),
-    }
+    })
 }
 
 /// The webhook release asset for `asset`. The webhook schema only knows uploaded assets.
-fn asset(asset: &types::ReleaseAsset) -> wt::ReleaseAsset {
-    wt::ReleaseAsset {
+fn asset(asset: &types::ReleaseAsset) -> Result<wt::ReleaseAsset, PayloadError> {
+    Ok(wt::ReleaseAsset {
         browser_download_url: asset.browser_download_url.clone(),
         content_type: asset.content_type.clone(),
         created_at: asset.created_at,
@@ -126,7 +129,11 @@ fn asset(asset: &types::ReleaseAsset) -> wt::ReleaseAsset {
         size: asset.size,
         state: wt::ReleaseAssetState::Uploaded,
         updated_at: asset.updated_at,
-        uploader: asset.uploader.as_ref().map(model::nullable_user),
+        uploader: asset
+            .uploader
+            .as_ref()
+            .map(model::nullable_user)
+            .transpose()?,
         url: asset.url.clone(),
-    }
+    })
 }
