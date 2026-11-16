@@ -133,6 +133,14 @@ const RESOLVERS: &[(&str, Resolver)] = &[
     ("Repository.autoMergeAllowed", auto_merge_allowed),
     ("Repository.pullRequest", pull_request),
     (
+        "PullRequest.latestOpinionatedReviews",
+        latest_opinionated_reviews,
+    ),
+    (
+        "PullRequestReview.authorCanPushToRepository",
+        author_can_push_to_repository,
+    ),
+    (
         "Mutation.enablePullRequestAutoMerge",
         enable_pull_request_auto_merge,
     ),
@@ -1210,31 +1218,25 @@ fn search_tokens(query: &str) -> Vec<String> {
     tokens
 }
 
-/// A pull request's `reviewDecision` from its reviews when none is seeded. Each review is
-/// `(author login, author can push, state)`, in submission order.
+/// A review as the review rules see it: author login, whether the author can push, state.
+type Opinion = (Option<String>, bool, PullRequestReviewState);
+
+/// The indices, in submission order, of each pusher's latest approving, changes-requesting or
+/// dismissed review: `PullRequest.latestOpinionatedReviews`.
 ///
-/// Only reviewers with push access count, and only each one's latest approving,
-/// changes-requesting or dismissed review; a dismissed one is no opinion. Any changes request
-/// outweighs approvals; with neither the decision is null.
+/// Only reviewers with push access count, whatever `writersOnly` says: reviews from
+/// non-pushers are absent with the default `writersOnly: false`. Logins compare
+/// case-insensitively.
 ///
-/// Known gap: GitHub answers `REVIEW_REQUIRED` when branch protection requires more approving
-/// reviews than were given. The fake models no required review count, so this never derives it.
-///
-/// Source: `PullRequest.reviewDecision`, `PullRequest.latestOpinionatedReviews` ("A list of
-/// latest reviews per user associated with the pull request") and
-/// `PullRequestReview.authorCanPushToRepository` in `spec/schema.docs.graphql`.
+/// Source: `PullRequest.latestOpinionatedReviews` ("A list of latest reviews per user
+/// associated with the pull request") and `PullRequestReview.authorCanPushToRepository` in
+/// `spec/schema.docs.graphql`.
 /// Source: observed on github.com 2026-11-15:
 /// <https://github.com/octocat/Spoon-Knife/pull/4008> has approvals and a changes request, all
-/// from reviewers who cannot push, and a null decision;
-/// <https://github.com/cli/cli/pull/15009> reads `APPROVED` after one reviewer went from
-/// changes requested to approved;
-/// <https://github.com/cli/cli/pull/8361> reads `REVIEW_REQUIRED` after the same sequence,
-/// because protection required more approvals.
-fn review_decision(
-    reviews: &[(Option<String>, bool, PullRequestReviewState)],
-) -> Option<PullRequestReviewDecision> {
-    let mut latest: HashMap<String, PullRequestReviewState> = HashMap::new();
-    for (author, can_push, state) in reviews {
+/// from reviewers who cannot push, an empty `latestOpinionatedReviews` and a null decision.
+fn latest_opinions(reviews: &[Opinion]) -> Vec<usize> {
+    let mut latest: HashMap<String, usize> = HashMap::new();
+    for (index, (author, can_push, state)) in reviews.iter().enumerate() {
         if let Some(author) = author
             && *can_push
             && matches!(
@@ -1244,35 +1246,51 @@ fn review_decision(
                     | PullRequestReviewState::Dismissed
             )
         {
-            latest.insert(author.to_lowercase(), *state);
+            latest.insert(author.to_lowercase(), index);
         }
     }
-    if latest
-        .values()
-        .any(|state| *state == PullRequestReviewState::ChangesRequested)
-    {
+    let mut indices: Vec<usize> = latest.into_values().collect();
+    indices.sort_unstable();
+    indices
+}
+
+/// A pull request's `reviewDecision` from its reviews when none is seeded: any changes request
+/// among the latest opinionated reviews wins, then any approval, else null. A dismissed review
+/// is no opinion.
+///
+/// Known gap: GitHub answers `REVIEW_REQUIRED` when branch protection requires more approving
+/// reviews than were given. The fake models no required review count, so this never derives it.
+///
+/// Source: `PullRequest.reviewDecision` in `spec/schema.docs.graphql`.
+/// Source: observed on github.com 2026-11-15:
+/// <https://github.com/octocat/Spoon-Knife/pull/4008> reads null with only non-pusher reviews;
+/// <https://github.com/cli/cli/pull/15009> reads `APPROVED` after one reviewer went from
+/// changes requested to approved;
+/// <https://github.com/cli/cli/pull/8361> reads `REVIEW_REQUIRED` after the same sequence,
+/// because protection required more approvals.
+fn review_decision(reviews: &[Opinion]) -> Option<PullRequestReviewDecision> {
+    let latest: Vec<PullRequestReviewState> = latest_opinions(reviews)
+        .into_iter()
+        .map(|index| reviews[index].2)
+        .collect();
+    if latest.contains(&PullRequestReviewState::ChangesRequested) {
         Some(PullRequestReviewDecision::ChangesRequested)
-    } else if latest
-        .values()
-        .any(|state| *state == PullRequestReviewState::Approved)
-    {
+    } else if latest.contains(&PullRequestReviewState::Approved) {
         Some(PullRequestReviewDecision::Approved)
     } else {
         None
     }
 }
 
-/// The `PullRequest` object of a pull request with a REST model; `None` without one.
-fn pull_object(
+/// A pull request's reviews, in submission order, with how the review rules see each.
+fn review_objects(
     env: &Env,
     account: &Account,
     repo: &Repo,
     number: u64,
     pull: &crate::state::PullRequest,
-) -> Result<Option<objects::PullRequest>, Error> {
-    let Some(data) = pull.data.as_ref() else {
-        return Ok(None);
-    };
+    head_sha: &str,
+) -> Result<(Vec<Review>, Vec<Opinion>), Error> {
     let mut opinions = Vec::new();
     let mut reviews = Vec::new();
     for (index, review) in pull.reviews.iter().enumerate() {
@@ -1294,14 +1312,85 @@ fn pull_object(
                 oid: review
                     .commit_id
                     .clone()
-                    .unwrap_or_else(|| data.head.sha.clone()),
+                    .unwrap_or_else(|| head_sha.to_owned()),
             },
             author: review
                 .user
                 .as_ref()
                 .map(|user| Actor::of_login(&user.login, &user.type_)),
+            repository: repository_object(env, account, repo),
         });
     }
+    Ok((reviews, opinions))
+}
+
+/// The parent `PullRequest` of a pull request field.
+#[derive(Deserialize)]
+struct PullRequestKey {
+    number: u64,
+    repository: RepositoryKey,
+}
+
+/// `PullRequest.latestOpinionatedReviews`: see [`latest_opinions`]. The connection is complete.
+fn latest_opinionated_reviews(env: &Env, parent: &Map, _: &Map) -> Result<Output, Error> {
+    let PullRequestKey { number, repository } = read(parent)?;
+    let state = lock(&env.state);
+    let account = state
+        .account(&repository.owner.login)
+        .ok_or_else(|| Error::new("repository does not exist"))?;
+    let repo = account
+        .repo(&repository.name)
+        .ok_or_else(|| Error::new("repository does not exist"))?;
+    let pull = repo
+        .pull_requests
+        .get(&number)
+        .ok_or_else(|| Error::new("pull request does not exist"))?;
+    let data = pull
+        .data
+        .as_ref()
+        .ok_or_else(|| Error::new("pull request REST model does not exist"))?;
+    let (reviews, opinions) = review_objects(env, account, repo, number, pull, &data.head.sha)?;
+    let latest = latest_opinions(&opinions);
+    let mut reviews: Vec<Option<Review>> = reviews.into_iter().map(Some).collect();
+    let nodes = latest
+        .into_iter()
+        .filter_map(|index| reviews[index].take())
+        .collect();
+    Output::of(Connection::complete(nodes))
+}
+
+/// The parent `PullRequestReview` of `authorCanPushToRepository`.
+#[derive(Deserialize)]
+struct ReviewKey {
+    author: Option<AccountKey>,
+    repository: RepositoryKey,
+}
+
+/// `PullRequestReview.authorCanPushToRepository`; false for a review without an author.
+fn author_can_push_to_repository(env: &Env, parent: &Map, _: &Map) -> Result<Output, Error> {
+    let ReviewKey { author, repository } = read(parent)?;
+    let state = lock(&env.state);
+    let account = state
+        .account(&repository.owner.login)
+        .ok_or_else(|| Error::new("repository does not exist"))?;
+    let repo = account
+        .repo(&repository.name)
+        .ok_or_else(|| Error::new("repository does not exist"))?;
+    Output::of(author.is_some_and(|author| read::can_push(account, repo, &author.login)))
+}
+
+/// The `PullRequest` object of a pull request with a REST model; `None` without one.
+fn pull_object(
+    env: &Env,
+    account: &Account,
+    repo: &Repo,
+    number: u64,
+    pull: &crate::state::PullRequest,
+) -> Result<Option<objects::PullRequest>, Error> {
+    let Some(data) = pull.data.as_ref() else {
+        return Ok(None);
+    };
+    let (reviews, opinions) = review_objects(env, account, repo, number, pull, &data.head.sha)?;
     let labels = data
         .labels
         .iter()
@@ -2129,6 +2218,34 @@ mod tests {
         assert_eq!(
             review_decision(&[pusher("alice", Dismiss), pusher("alice", Approve)]),
             Some(Approved)
+        );
+    }
+
+    #[test]
+    fn latest_opinions_keep_each_pushers_latest_opinionated_review() {
+        use PullRequestReviewState::{
+            Approved as Approve, ChangesRequested as Request, Commented as Comment,
+            Dismissed as Dismiss,
+        };
+
+        let pusher = |login: &str, state| (Some(login.to_owned()), true, state);
+        let reader = |login: &str, state| (Some(login.to_owned()), false, state);
+
+        assert_eq!(latest_opinions(&[]), Vec::<usize>::new());
+        assert_eq!(
+            latest_opinions(&[reader("carol", Approve), (None, false, Request)]),
+            Vec::<usize>::new()
+        );
+        assert_eq!(
+            latest_opinions(&[
+                pusher("alice", Request),
+                pusher("bob", Approve),
+                pusher("Alice", Approve),
+                pusher("alice", Comment),
+                reader("carol", Request),
+                pusher("bob", Dismiss),
+            ]),
+            vec![2, 5]
         );
     }
 

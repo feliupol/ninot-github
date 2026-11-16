@@ -220,6 +220,7 @@ pub(super) struct Review {
     pub submitted_at: Option<chrono::DateTime<chrono::Utc>>,
     pub commit: Commit,
     pub author: Option<Actor>,
+    pub repository: Repository,
 }
 
 /// A `ReviewRequest`.

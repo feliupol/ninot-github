@@ -348,6 +348,53 @@ fn review_decision_ignores_reviewers_who_cannot_push() {
 }
 
 #[test]
+fn latest_opinionated_reviews_list_each_pushers_latest_opinion() {
+    let server = Server::start().unwrap();
+    reviewed_pull(
+        &server,
+        &[
+            ("alice", "CHANGES_REQUESTED"),
+            ("carol", "APPROVED"),
+            ("bob", "COMMENTED"),
+            ("alice", "APPROVED"),
+            ("bob", "DISMISSED"),
+        ],
+    );
+    let reply = query(
+        &Api::admin(&server),
+        "{repository(owner: \"acme\", name: \"project\"){pullRequest(number: 9){latestOpinionatedReviews(first: 10, writersOnly: false){totalCount nodes{state author{login} authorCanPushToRepository}}}}}",
+        json!({}),
+    );
+    assert!(reply.get("errors").is_none(), "{reply}");
+    assert_eq!(
+        reply["data"]["repository"]["pullRequest"]["latestOpinionatedReviews"],
+        json!({"totalCount": 2, "nodes": [
+            {"state": "APPROVED", "author": {"login": "alice"}, "authorCanPushToRepository": true},
+            {"state": "DISMISSED", "author": {"login": "bob"}, "authorCanPushToRepository": true},
+        ]})
+    );
+}
+
+#[test]
+fn reviews_report_whether_their_author_can_push() {
+    let server = Server::start().unwrap();
+    reviewed_pull(&server, &[("alice", "APPROVED"), ("carol", "APPROVED")]);
+    let reply = query(
+        &Api::admin(&server),
+        "{repository(owner: \"acme\", name: \"project\"){pullRequest(number: 9){reviews(first: 10){nodes{author{login} authorCanPushToRepository}}}}}",
+        json!({}),
+    );
+    assert!(reply.get("errors").is_none(), "{reply}");
+    assert_eq!(
+        reply["data"]["repository"]["pullRequest"]["reviews"]["nodes"],
+        json!([
+            {"author": {"login": "alice"}, "authorCanPushToRepository": true},
+            {"author": {"login": "carol"}, "authorCanPushToRepository": false},
+        ])
+    );
+}
+
+#[test]
 fn review_decision_ignores_comments_after_an_approval() {
     let server = Server::start().unwrap();
     reviewed_pull(&server, &[("alice", "APPROVED"), ("alice", "COMMENTED")]);
