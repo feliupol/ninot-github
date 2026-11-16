@@ -148,8 +148,8 @@ impl ActionsSecretsPermission {
     /// Scopes granted to an installation token for this permission.
     pub fn token_scopes(self) -> &'static [&'static str] {
         match self {
-            Self::Read => &["actions:secrets:read"],
-            Self::Write => &["actions:secrets:read", "actions:secrets:write"],
+            Self::Read => &["permission:secrets:read"],
+            Self::Write => &["permission:secrets:write"],
         }
     }
 }

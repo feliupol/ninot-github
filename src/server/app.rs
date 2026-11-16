@@ -423,6 +423,11 @@ impl App {
         if let Err(refusal) = validate::check_request(found.info, &body) {
             return served(into_response(refusal, caller.as_ref()));
         }
+        if let Err(refusal) =
+            crate::permissions::authorize(found.info, &found.params, caller.as_ref())
+        {
+            return served(into_response(refusal, caller.as_ref()));
+        }
         let request = ApiRequest {
             path: path.to_owned(),
             params: found.params,

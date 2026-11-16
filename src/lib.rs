@@ -23,6 +23,7 @@ pub mod fixtures;
 pub(crate) mod graphql;
 pub(crate) mod handlers;
 pub(crate) mod operation;
+pub(crate) mod permissions;
 pub mod rate_limit;
 pub(crate) mod render;
 pub(crate) mod router;

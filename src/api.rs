@@ -14,6 +14,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+use crate::permissions::Access;
 use crate::types;
 
 /// Documentation link GitHub attaches to error bodies.
@@ -26,9 +27,37 @@ pub struct Caller {
     pub scopes: Vec<String>,
 }
 
+/// Scope prefix naming the repository, as `owner/repo`, of an installation token.
+pub const INSTALLATION_SCOPE: &str = "installation:";
+
+/// Scope prefix of one permission an installation token grants, as `permission:<name>:<access>`.
+pub const PERMISSION_SCOPE: &str = "permission:";
+
 impl Caller {
     pub fn has_scope(&self, scope: &str) -> bool {
         self.scopes.iter().any(|granted| granted == scope)
+    }
+
+    /// The `owner/repo` of an installation token.
+    pub fn installation(&self) -> Option<&str> {
+        self.scopes
+            .iter()
+            .find_map(|scope| scope.strip_prefix(INSTALLATION_SCOPE))
+    }
+
+    /// The access an installation token grants to `permission`.
+    pub fn permission(&self, permission: &str) -> Option<Access> {
+        self.scopes
+            .iter()
+            .filter_map(|scope| scope.strip_prefix(PERMISSION_SCOPE)?.split_once(':'))
+            .filter(|(name, _)| *name == permission)
+            .filter_map(|(_, access)| match access {
+                "read" => Some(Access::Read),
+                "write" => Some(Access::Write),
+                "admin" => Some(Access::Admin),
+                _ => None,
+            })
+            .max()
     }
 }
 
@@ -115,67 +144,26 @@ impl ApiRequest {
     }
 
     /// The caller, or a 401; with a token lacking every scope in `any_of`, a 403.
+    ///
+    /// `any_of` lists the classic token scopes of the operation. An installation token passes on
+    /// its own repository: [`crate::permissions::authorize`] has checked its permissions.
+    // Source: <https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps#available-scopes>
     pub fn require_scope(&self, any_of: &[&str]) -> Result<&Caller, ApiResponse> {
         let caller = self.require_caller()?;
-        let installation_scope = self
-            .params
-            .get("owner")
-            .zip(self.params.get("repo"))
-            .is_some_and(|(owner, repo)| {
-                let scope = format!("installation:{owner}/{repo}");
-                caller
-                    .scopes
-                    .iter()
-                    .any(|granted| granted.eq_ignore_ascii_case(&scope))
-            });
-        if any_of.iter().any(|scope| caller.has_scope(scope))
-            || (installation_scope
-                && any_of
-                    .iter()
-                    .any(|scope| matches!(*scope, "repo" | "public_repo")))
-        {
+        let own_repository = caller.installation().is_some_and(|installation| {
+            self.params
+                .get("owner")
+                .zip(self.params.get("repo"))
+                .is_some_and(|(owner, repo)| {
+                    installation.eq_ignore_ascii_case(&format!("{owner}/{repo}"))
+                })
+        });
+        if own_repository || any_of.iter().any(|scope| caller.has_scope(scope)) {
             Ok(caller)
         } else {
             Err(ApiResponse::error(
                 403,
                 "Resource not accessible by personal access token",
-            ))
-        }
-    }
-
-    /// Requires a repository token with the requested Actions secrets permission.
-    ///
-    /// Installation tokens must carry the explicit permission scope minted from their
-    /// installation metadata; the generic installation repository scope is insufficient.
-    pub fn require_actions_secrets_permission(
-        &self,
-        permission: &str,
-    ) -> Result<&Caller, ApiResponse> {
-        let caller = self.require_caller()?;
-        let installation_scope = caller
-            .scopes
-            .iter()
-            .find(|granted| granted.starts_with("installation:"));
-        let allowed = if let Some(installation_scope) = installation_scope {
-            let requested_scope = self
-                .params
-                .get("owner")
-                .zip(self.params.get("repo"))
-                .map(|(owner, repo)| format!("installation:{owner}/{repo}"));
-            requested_scope
-                .as_deref()
-                .is_some_and(|scope| scope.eq_ignore_ascii_case(installation_scope))
-                && caller.has_scope(permission)
-        } else {
-            caller.has_scope("repo") || caller.has_scope(permission)
-        };
-        if allowed {
-            Ok(caller)
-        } else {
-            Err(ApiResponse::error(
-                403,
-                // Source: <https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api#resource-not-accessible>
-                "Resource not accessible by integration",
             ))
         }
     }

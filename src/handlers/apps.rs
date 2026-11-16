@@ -3,8 +3,11 @@
 use std::sync::Mutex;
 
 use super::Handler;
-use crate::api::{ApiRequest, ApiResponse, ApiResult, Caller};
+use crate::api::{
+    ApiRequest, ApiResponse, ApiResult, Caller, INSTALLATION_SCOPE, PERMISSION_SCOPE,
+};
 use crate::operation::ops;
+use crate::permissions::Access;
 use crate::state::{ActionsSecretsPermission, State, lock};
 use crate::types;
 
@@ -16,13 +19,23 @@ fn app_slug(app_id: u64) -> String {
     }
 }
 
+/// Repository permissions of every seeded installation besides Actions secrets, as
+/// [`app_permissions`] shows them.
+const GRANTED: [(&str, Access); 5] = [
+    ("checks", Access::Write),
+    ("contents", Access::Write),
+    ("issues", Access::Write),
+    ("metadata", Access::Read),
+    ("pull_requests", Access::Write),
+];
+
 fn app_permissions(secrets: Option<ActionsSecretsPermission>) -> types::AppPermissions {
     types::AppPermissions {
         actions: None,
         administration: None,
         artifact_metadata: None,
         attestations: None,
-        checks: None,
+        checks: Some(types::AppPermissionsChecks::Write),
         code_quality: None,
         codespaces: None,
         contents: Some(types::AppPermissionsContents::Write),
@@ -40,7 +53,7 @@ fn app_permissions(secrets: Option<ActionsSecretsPermission>) -> types::AppPermi
         issues: Some(types::AppPermissionsIssues::Write),
         members: None,
         merge_queues: None,
-        metadata: None,
+        metadata: Some(types::AppPermissionsMetadata::Read),
         organization_administration: None,
         organization_announcement_banners: None,
         organization_copilot_agent_settings: None,
@@ -211,21 +224,25 @@ impl Handler for ops::AppsCreateInstallationAccessToken {
         let token_id = state.next_id();
         let token = format!("ghs_ninot_installation_{id}_{token_id}");
         let installation_scope = format!(
-            "installation:{}/{}",
+            "{INSTALLATION_SCOPE}{}/{}",
             installation.owner, installation.repository
         );
         let app_scope = format!("github-app:{}", installation.app_id);
-        let secrets_scopes = effective_secrets
-            .map_or(&[][..], ActionsSecretsPermission::token_scopes)
-            .iter()
-            .map(|scope| (*scope).to_owned());
+        let secrets = effective_secrets.map(|secrets| match secrets {
+            ActionsSecretsPermission::Read => ("secrets", Access::Read),
+            ActionsSecretsPermission::Write => ("secrets", Access::Write),
+        });
+        let permission_scopes = GRANTED
+            .into_iter()
+            .chain(secrets)
+            .map(|(name, access)| format!("{PERMISSION_SCOPE}{name}:{}", access.as_str()));
         state.tokens.insert(
             token.clone(),
             Caller {
                 login: installation.owner.clone(),
                 scopes: std::iter::once(installation_scope)
                     .chain(std::iter::once(app_scope))
-                    .chain(secrets_scopes)
+                    .chain(permission_scopes)
                     .collect(),
             },
         );

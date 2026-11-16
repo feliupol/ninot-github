@@ -12,7 +12,6 @@ actions/get-workflow-run 200 always-omitted $.previous_attempt_url
 actions/get-workflow-run 200 always-omitted $.referenced_workflows
 actions/get-workflow-run 200 always-omitted $.triggering_actor
 actions/list-jobs-for-workflow-run 200 always-omitted $.jobs[].steps
-actions/list-repo-secrets 200 uncovered
 actions/list-self-hosted-runners-for-org 200 always-omitted $.runners[].version
 actions/list-workflow-runs-for-repo 200 always-omitted $.workflow_runs[].actor
 actions/list-workflow-runs-for-repo 200 always-omitted $.workflow_runs[].check_suite_id
@@ -27,8 +26,6 @@ apps/create-installation-access-token 201 always-omitted $.repositories[].temp_c
 apps/create-installation-access-token 201 always-omitted $.repositories[].template_repository
 apps/create-installation-access-token 201 always-omitted $.repositories[].topics
 apps/get-repo-installation 200 always-omitted $.client_id
-apps/get-repo-installation 200 always-omitted $.permissions.checks
-apps/get-repo-installation 200 always-omitted $.permissions.metadata
 apps/get-repo-installation 200 always-omitted $.single_file_paths
 checks/create 201 always-omitted $.app.permissions.contents
 checks/create 201 always-omitted $.app.permissions.issues
@@ -194,7 +191,6 @@ orgs/get 200 always-omitted $.two_factor_requirement_enabled
 orgs/get 200 always-omitted $.web_commit_signoff_required
 orgs/get-membership-for-user 200 always-omitted $.enterprise_teams_providing_indirect_membership
 orgs/list-app-installations 200 always-omitted $.installations[].permissions.deployments
-orgs/list-app-installations 200 always-omitted $.installations[].permissions.metadata
 orgs/list-app-installations 200 always-omitted $.installations[].permissions.statuses
 orgs/list-app-installations 200 always-omitted $.installations[].single_file_paths
 orgs/set-membership-for-user 200 always-omitted $.enterprise_teams_providing_indirect_membership

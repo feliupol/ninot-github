@@ -217,6 +217,71 @@ const WEBHOOK_ALWAYS_SENT: [(&str, &str, &str); 6] = [
     ),
 ];
 
+/// GitHub Apps data from github/docs, `src/github-apps/data/fpt-2022-11-28` of the commit in
+/// `spec/permissions/SOURCE`, pinned by `scripts/update-permissions.sh`.
+const PERMISSIONS: &str = "spec/permissions";
+
+/// One operation as the GitHub Apps data lists it.
+#[derive(Deserialize)]
+struct DataOperation {
+    verb: String,
+    #[serde(rename = "requestPath")]
+    request_path: String,
+}
+
+/// One operation under one permission, with the access it needs.
+#[derive(Deserialize)]
+struct PermissionOperation {
+    #[serde(flatten)]
+    operation: DataOperation,
+    access: String,
+    /// Whether an installation token can use the permission for this operation. The
+    /// fine-grained PAT file omits it.
+    #[serde(rename = "server-to-server", default)]
+    server_to_server: bool,
+    #[serde(rename = "user-to-server", default)]
+    user_to_server: bool,
+}
+
+/// The operations of one permission.
+#[derive(Deserialize)]
+struct Permission {
+    permissions: Vec<PermissionOperation>,
+}
+
+/// One token kind of the GitHub Apps data.
+struct TokenKindData {
+    /// Variant of the generated `TokenKind`.
+    variant: &'static str,
+    /// File listing the operations the kind can call.
+    enabled: &'static str,
+    /// File listing the permissions of those operations.
+    permissions: &'static str,
+    /// Whether a row of `permissions` applies to the kind.
+    applies: fn(&PermissionOperation) -> bool,
+}
+
+const TOKEN_KINDS: [TokenKindData; 3] = [
+    TokenKindData {
+        variant: "Installation",
+        enabled: "server-to-server-rest.json",
+        permissions: "server-to-server-permissions.json",
+        applies: |row| row.server_to_server,
+    },
+    TokenKindData {
+        variant: "UserToServer",
+        enabled: "user-to-server-rest.json",
+        permissions: "server-to-server-permissions.json",
+        applies: |row| row.user_to_server,
+    },
+    TokenKindData {
+        variant: "FineGrainedPat",
+        enabled: "fine-grained-pat.json",
+        permissions: "fine-grained-pat-permissions.json",
+        applies: |_| true,
+    },
+];
+
 /// One correction to the component schema `schema` at the JSON pointer `path` inside it.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -238,6 +303,7 @@ fn main() {
     println!("cargo::rerun-if-changed={SPEC}");
     println!("cargo::rerun-if-changed={OVERRIDES}");
     println!("cargo::rerun-if-changed={WEBHOOK_SCHEMAS}");
+    println!("cargo::rerun-if-changed={PERMISSIONS}");
     println!("cargo::rerun-if-changed={GRAPHQL_SCHEMA}");
     let mut spec: Value =
         serde_json::from_slice(&fs::read(SPEC).expect("cannot read the pinned spec"))
@@ -266,6 +332,9 @@ fn main() {
     .expect("cannot write the generated operations");
     fs::write(out.join("multi_segment.rs"), multi_segment_params(&spec))
         .expect("cannot write the multi-segment parameters");
+
+    fs::write(out.join("permissions.rs"), permission_table(&spec))
+        .expect("cannot write the generated permission table");
 
     let types = api_types(&spec);
     let file = syn::parse2(types).expect("the generated types are not valid Rust");
@@ -506,6 +575,81 @@ fn graphql_input_type<E, I>(
     } else {
         base
     }
+}
+
+fn read_permission_data<T: serde::de::DeserializeOwned>(file: &str) -> T {
+    let path = Path::new(PERMISSIONS).join(file);
+    serde_json::from_slice(
+        &fs::read(&path).unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display())),
+    )
+    .unwrap_or_else(|error| panic!("{} is malformed: {error}", path.display()))
+}
+
+/// `requirements(kind, operation_id)`: for each spec operation a token kind can call, the
+/// permissions and access levels the GitHub Apps data lists for it.
+fn permission_table(spec: &Value) -> String {
+    let mut ids = BTreeMap::new();
+    for (path, item) in spec["paths"].as_object().expect("the spec has paths") {
+        for (verb, operation) in item.as_object().expect("a path item is an object") {
+            if let Some(id) = operation.get("operationId").and_then(Value::as_str) {
+                ids.insert((verb.clone(), path.clone()), id.to_owned());
+            }
+        }
+    }
+    let mut arms = String::new();
+    for TokenKindData {
+        variant: kind,
+        enabled: enabled_file,
+        permissions: permissions_file,
+        applies,
+    } in TOKEN_KINDS
+    {
+        let enabled: BTreeMap<String, Vec<DataOperation>> = read_permission_data(enabled_file);
+        let permissions: BTreeMap<String, Permission> = read_permission_data(permissions_file);
+        let mut required: BTreeMap<&str, BTreeSet<(&str, &str)>> = BTreeMap::new();
+        for operation in enabled.values().flatten() {
+            if let Some(id) = ids.get(&(operation.verb.clone(), operation.request_path.clone())) {
+                required.entry(id).or_default();
+            }
+        }
+        for (name, permission) in &permissions {
+            for row in permission.permissions.iter().filter(|row| applies(row)) {
+                let key = (
+                    row.operation.verb.clone(),
+                    row.operation.request_path.clone(),
+                );
+                if let Some(set) = ids.get(&key).and_then(|id| required.get_mut(id.as_str())) {
+                    set.insert((name, &row.access));
+                }
+            }
+        }
+        for (id, set) in required {
+            let requirements: Vec<String> = set
+                .into_iter()
+                .map(|(permission, access)| {
+                    let access = match access {
+                        "read" => "Read",
+                        "write" => "Write",
+                        "admin" => "Admin",
+                        other => panic!("{permissions_file}: unknown access {other}"),
+                    };
+                    format!(
+                        "Requirement {{ permission: {permission:?}, access: Access::{access} }}"
+                    )
+                })
+                .collect();
+            arms.push_str(&format!(
+                "(TokenKind::{kind}, {id:?}) => Some(&[{}]),\n",
+                requirements.join(", ")
+            ));
+        }
+    }
+    format!(
+        "/// The permissions an operation needs from a `kind` token, any one of which suffices, or\n\
+         /// `None` when that kind of token cannot call it.\n\
+         pub fn requirements(kind: TokenKind, operation: &str) -> Option<&'static [Requirement]> {{\n\
+         match (kind, operation) {{\n{arms}_ => None,\n}}\n}}\n"
+    )
 }
 
 /// The Rust source of `MULTI_SEGMENT`: every `(path template, parameter)` the spec marks

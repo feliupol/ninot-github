@@ -9,8 +9,9 @@ use crate::operation::ops;
 use crate::state::{State, lock};
 use crate::types;
 
-const READ: &str = "actions:secrets:read";
-const WRITE: &str = "actions:secrets:write";
+/// Classic token scope of the secrets operations.
+// Source: <https://docs.github.com/en/rest/actions/secrets#list-repository-secrets>
+const SCOPES: [&str; 1] = ["repo"];
 
 fn secret_repository<'a>(
     state: &'a State,
@@ -32,7 +33,7 @@ fn secret_repository<'a>(
 
 impl Handler for ops::ActionsGetRepoPublicKey {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
-        request.require_actions_secrets_permission(READ)?;
+        request.require_scope(&SCOPES)?;
         let state = lock(state);
         let repo = secret_repository(&state, request)?;
         let key = repo
@@ -55,7 +56,7 @@ impl Handler for ops::ActionsGetRepoPublicKey {
 
 impl Handler for ops::ActionsListRepoSecrets {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
-        request.require_actions_secrets_permission(READ)?;
+        request.require_scope(&SCOPES)?;
         let state = lock(state);
         let repo = secret_repository(&state, request)?;
         let secrets = repo
@@ -81,7 +82,7 @@ impl Handler for ops::ActionsListRepoSecrets {
 
 impl Handler for ops::ActionsGetRepoSecret {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
-        request.require_actions_secrets_permission(READ)?;
+        request.require_scope(&SCOPES)?;
         let state = lock(state);
         let repo = secret_repository(&state, request)?;
         let secret = repo
@@ -102,7 +103,7 @@ impl Handler for ops::ActionsGetRepoSecret {
 
 impl Handler for ops::ActionsCreateOrUpdateRepoSecret {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
-        request.require_actions_secrets_permission(WRITE)?;
+        request.require_scope(&SCOPES)?;
         let body: types::ActionsCreateOrUpdateRepoSecretRequest = request.json_as()?;
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
@@ -155,7 +156,7 @@ impl Handler for ops::ActionsCreateOrUpdateRepoSecret {
 
 impl Handler for ops::ActionsDeleteRepoSecret {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
-        request.require_actions_secrets_permission(WRITE)?;
+        request.require_scope(&SCOPES)?;
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         if !found.permission.admin {
