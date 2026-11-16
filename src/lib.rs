@@ -33,7 +33,7 @@ pub(crate) mod time;
 pub(crate) mod urls;
 
 /// REST request and response types generated from the pinned GitHub API spec.
-#[allow(clippy::all, dead_code, missing_docs)]
+#[allow(clippy::all, dead_code, missing_docs, non_camel_case_types)]
 pub(crate) mod types {
     use serde::Deserialize;
 

@@ -63,8 +63,6 @@ issues/add-assignees: not reached by a gh_cli test yet
 issues/add-labels: not reached by a gh_cli test yet
 issues/check-user-can-be-assigned: not reached by a gh_cli test yet
 issues/check-user-can-be-assigned-to-issue: not reached by a gh_cli test yet
-issues/create: not reached by a gh_cli test yet
-issues/create-comment: not reached by a gh_cli test yet
 issues/create-milestone: not reached by a gh_cli test yet
 issues/delete-comment: not reached by a gh_cli test yet
 issues/delete-milestone: not reached by a gh_cli test yet
@@ -119,7 +117,6 @@ pulls/list-commits: not reached by a gh_cli test yet
 pulls/list-files: not reached by a gh_cli test yet
 pulls/list-requested-reviewers: not reached by a gh_cli test yet
 pulls/list-review-comments: not reached by a gh_cli test yet
-pulls/list-review-comments-for-repo: not reached by a gh_cli test yet
 pulls/list-reviews: not reached by a gh_cli test yet
 pulls/merge: not reached by a gh_cli test yet
 pulls/remove-requested-reviewers: not reached by a gh_cli test yet

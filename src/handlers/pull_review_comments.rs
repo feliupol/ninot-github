@@ -150,7 +150,17 @@ impl Handler for ops::PullsGetReviewComment {
         let id = comment_id(request)?;
         let (number, index) =
             locate(&state, &found, request, id).ok_or_else(ApiResponse::not_found)?;
-        let comment = found.repo(&state).pull_requests[&number].review_comments[index].clone();
+        let repo = found.repo(&state);
+        let mut comment = repo.pull_requests[&number].review_comments[index].clone();
+        let subject = crate::state::ReactionSubject::ReviewComment {
+            repo: repo.id,
+            id: u64::try_from(comment.id).expect("comment ids are positive"),
+        };
+        comment.reactions = Some(crate::handlers::reactions::rollup(
+            &state,
+            subject,
+            &comment.url,
+        ));
         Ok(ApiResponse::typed(200, &comment))
     }
 }

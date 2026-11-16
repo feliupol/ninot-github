@@ -142,7 +142,7 @@ team and a runner.
 
 ## Status
 
-REST operations: 195 / 1231 (15.8%).
+REST operations: 221 / 1231 (18.0%).
 
 | Tag | Implemented | Total | % |
 | --- | ---: | ---: | ---: |
@@ -183,15 +183,15 @@ REST operations: 195 / 1231 (15.8%).
 | projects | 0 | 26 | 0.0% |
 | pulls | 27 | 34 | 79.4% |
 | rate-limit | 1 | 1 | 100.0% |
-| reactions | 0 | 15 | 0.0% |
+| reactions | 12 | 15 | 80.0% |
 | repos | 36 | 203 | 17.7% |
-| search | 2 | 7 | 28.6% |
+| search | 7 | 7 | 100.0% |
 | secret-scanning | 0 | 17 | 0.0% |
 | security-advisories | 0 | 10 | 0.0% |
 | teams | 15 | 32 | 46.9% |
-| users | 2 | 47 | 4.3% |
+| users | 11 | 47 | 23.4% |
 
-GitHub CLI leaf commands: 24 / 199 (12.1%).
+GitHub CLI leaf commands: 26 / 204 (12.7%).
 
 GraphQL resolvers: 27 / 5577 schema fields (0.5%). The published schema is served. A field without a resolver reads the same-named key of its parent object and returns the error `Not implemented by ninot-github: Type.field` when that key is absent.
 

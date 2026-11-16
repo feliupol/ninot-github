@@ -12,9 +12,11 @@ mod issue;
 mod issue_event;
 mod key;
 mod org;
+mod reaction;
 mod release;
 mod repo;
 mod runner;
+mod user;
 mod workflow;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -34,6 +36,7 @@ pub use issue_event::{IssueEvent, IssueEventKind, IssueEventLabel};
 pub use key::{InvalidSha, Name, NameMap, Sha, fold};
 pub use org::OrgRole;
 pub(crate) use org::TEAM_PERMISSIONS;
+pub use reaction::{Reaction, ReactionContent, ReactionSubject, Reactions};
 pub use release::{Asset, Release};
 pub use repo::{
     ActionsPublicKey, CheckSuiteRecord, LabelRecord, Milestone, NewTimelineEvent, Permission,
@@ -43,6 +46,7 @@ pub use repo::{
 pub(crate) use runner::RunnerTokenKind;
 pub(crate) use runner::{CreateRunnerError, RunnerSpec, valid_label_name, valid_runner_name};
 pub use runner::{Runner, RunnerGroup, RunnerLabel};
+pub use user::{SshKey, UserProfile};
 pub use workflow::{JobRecord, WorkflowRunRecord};
 
 use crate::api::Caller;
@@ -78,6 +82,8 @@ pub struct State {
     last_id: u64,
     /// Directory holding one bare git repository per repository; without it, nothing is on disk.
     pub git_root: Option<PathBuf>,
+    /// Reactions on issues, comments and releases.
+    pub reactions: Reactions,
     /// Every webhook delivery, oldest first.
     pub deliveries: Vec<Delivery>,
     /// Hands deliveries to the sender thread; without it, deliveries are recorded but not sent.
@@ -280,6 +286,9 @@ impl State {
                     runners: BTreeMap::new(),
                     runner_groups: BTreeMap::new(),
                     runner_label_ids: BTreeMap::new(),
+                    user_profile: UserProfile::default(),
+                    ssh_keys: Vec::new(),
+                    followers: BTreeSet::new(),
                 },
             );
         }

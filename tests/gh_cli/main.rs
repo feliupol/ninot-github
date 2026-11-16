@@ -14,6 +14,7 @@ mod graphql;
 mod issues;
 mod labels;
 mod pulls;
+mod reactions_search_users;
 
 use std::fs::File;
 use std::io::Write as _;

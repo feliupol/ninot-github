@@ -39,17 +39,21 @@ mod pull_review_comment_model;
 mod pull_review_comments;
 mod pull_reviews;
 mod pulls;
+pub(crate) mod reactions;
 pub mod releases;
 pub mod repos;
 pub(crate) mod runner_service;
 mod runners;
 pub(crate) mod search;
+mod search_git;
+mod search_more;
 pub(crate) mod status_model;
 mod team_members;
 mod team_repos;
 mod teams;
 pub(crate) mod timeline;
 mod users;
+mod users_profile;
 
 /// Implemented by the generated type of every operation the fake supports.
 pub trait Handler: Operation {
@@ -270,4 +274,30 @@ registry![
     ops::TeamsRemoveRepoInOrg,
     ops::TeamsListChildInOrg,
     ops::TeamsListForAuthenticatedUser,
+    ops::ReactionsListForIssue,
+    ops::ReactionsCreateForIssue,
+    ops::ReactionsDeleteForIssue,
+    ops::ReactionsListForIssueComment,
+    ops::ReactionsCreateForIssueComment,
+    ops::ReactionsDeleteForIssueComment,
+    ops::ReactionsListForPullRequestReviewComment,
+    ops::ReactionsCreateForPullRequestReviewComment,
+    ops::ReactionsDeleteForPullRequestComment,
+    ops::ReactionsListForRelease,
+    ops::ReactionsCreateForRelease,
+    ops::ReactionsDeleteForRelease,
+    ops::UsersUpdateAuthenticated,
+    ops::UsersListEmailsForAuthenticatedUser,
+    ops::UsersListPublicSshKeysForAuthenticatedUser,
+    ops::UsersCreatePublicSshKeyForAuthenticatedUser,
+    ops::UsersListPublicKeysForUser,
+    ops::UsersFollow,
+    ops::UsersListFollowersForUser,
+    ops::UsersGetById,
+    ops::UsersList,
+    ops::SearchUsers,
+    ops::SearchLabels,
+    ops::SearchTopics,
+    ops::SearchCommits,
+    ops::SearchCode,
 ];

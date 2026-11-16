@@ -94,7 +94,16 @@ fn render_release(
         node_id: node_id("Release", release.id),
         prerelease: release.prerelease,
         published_at: release.published_at.as_deref().map(render::timestamp),
-        reactions: None,
+        // GitHub omits the rollup of a release nobody reacted to.
+        reactions: Some(crate::handlers::reactions::rollup(
+            state,
+            crate::state::ReactionSubject::Release {
+                repo: found.repo(state).id,
+                id: release.id,
+            },
+            &urls.api,
+        ))
+        .filter(|rollup| rollup.total_count > 0),
         tag_name: release.tag_name.clone(),
         tarball_url: Some(repo.tarball(&release.tag_name)),
         target_commitish: release.target_commitish.clone(),

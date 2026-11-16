@@ -31,11 +31,11 @@ const OVERRIDES: &str = "spec/overrides.json";
 
 /// Component schemas the handlers return. Their Rust types, and those of every schema they
 /// reference, are generated into `types`.
-const RESPONSE_SCHEMAS: [&str; 32] = [
+const RESPONSE_SCHEMAS: [&str; 37] = [
     "actions-public-key",
     "actions-secret",
-    "basic-error",
     "base-gist",
+    "basic-error",
     "blob",
     "branch-with-protection",
     "commit",
@@ -44,6 +44,7 @@ const RESPONSE_SCHEMAS: [&str; 32] = [
     "content-file",
     "content-submodule",
     "content-symlink",
+    "email",
     "full-repository",
     "git-commit",
     "git-ref",
@@ -52,10 +53,14 @@ const RESPONSE_SCHEMAS: [&str; 32] = [
     "hook",
     "hook-delivery-item",
     "issue-search-result-item",
+    "key",
+    "key-simple",
     "minimal-repository",
     "organization-full",
+    "private-user",
     "public-user",
     "rate-limit-overview",
+    "reaction",
     "release",
     "release-asset",
     "repository",
@@ -67,7 +72,7 @@ const RESPONSE_SCHEMAS: [&str; 32] = [
 ];
 
 /// Supported operations whose JSON request models are generated alongside their responses.
-const REQUEST_OPERATIONS: [&str; 33] = [
+const REQUEST_OPERATIONS: [&str; 39] = [
     "actions/create-or-update-repo-secret",
     "actions/re-run-workflow",
     "actions/re-run-workflow-failed-jobs",
@@ -92,6 +97,10 @@ const REQUEST_OPERATIONS: [&str; 33] = [
     "pulls/remove-requested-reviewers",
     "pulls/request-reviewers",
     "pulls/update",
+    "reactions/create-for-issue",
+    "reactions/create-for-issue-comment",
+    "reactions/create-for-pull-request-review-comment",
+    "reactions/create-for-release",
     "repos/create-for-authenticated-user",
     "repos/create-in-org",
     "repos/create-or-update-file-contents",
@@ -101,10 +110,12 @@ const REQUEST_OPERATIONS: [&str; 33] = [
     "repos/update",
     "repos/update-release",
     "repos/update-webhook",
+    "users/create-public-ssh-key-for-authenticated-user",
+    "users/update-authenticated",
 ];
 
 /// Supported REST operations whose JSON response models are used by handlers.
-const RESPONSE_OPERATIONS: [&str; 70] = [
+const RESPONSE_OPERATIONS: [&str; 75] = [
     "actions/create-or-update-repo-secret",
     "actions/get-repo-public-key",
     "actions/get-repo-secret",
@@ -175,6 +186,11 @@ const RESPONSE_OPERATIONS: [&str; 70] = [
     "repos/list-pull-requests-associated-with-commit",
     "search/issues-and-pull-requests",
     "search/repos",
+    "search/code",
+    "search/commits",
+    "search/labels",
+    "search/topics",
+    "search/users",
 ];
 
 /// Payload schemas from octokit/webhooks, `payload-schemas/api.github.com` of the commit in

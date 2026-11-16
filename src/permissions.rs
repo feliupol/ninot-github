@@ -101,7 +101,7 @@ mod tests {
     use crate::handlers::IMPLEMENTED;
 
     /// Implemented operations the GitHub Apps data does not list for installation tokens.
-    const WITHOUT_INSTALLATION_ACCESS: [&str; 12] = [
+    const WITHOUT_INSTALLATION_ACCESS: [&str; 17] = [
         "apps/create-installation-access-token",
         "apps/get-repo-installation",
         "gists/create",
@@ -113,7 +113,12 @@ mod tests {
         "repos/transfer",
         "repos/upload-release-asset",
         "teams/list-for-authenticated-user",
+        "users/create-public-ssh-key-for-authenticated-user",
+        "users/follow",
         "users/get-authenticated",
+        "users/list-emails-for-authenticated-user",
+        "users/list-public-ssh-keys-for-authenticated-user",
+        "users/update-authenticated",
     ];
 
     #[test]

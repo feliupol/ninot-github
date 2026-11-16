@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{Name, NameMap, Repo, Runner, RunnerGroup};
+use super::{Name, NameMap, Repo, Runner, RunnerGroup, SshKey, UserProfile};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AccountKind {
@@ -51,6 +51,12 @@ pub struct Account {
     /// Source: <https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/using-labels-with-self-hosted-runners>
     /// ("Labels are case-insensitive.")
     pub(super) runner_label_ids: BTreeMap<Name, u64>,
+    /// A user's own profile details; unused for organizations, which keep `profile`.
+    pub user_profile: UserProfile,
+    /// A user's public SSH keys, oldest first.
+    pub ssh_keys: Vec<SshKey>,
+    /// Lowercase logins of the users following this account.
+    pub followers: BTreeSet<String>,
 }
 
 /// Settings of an organization that its owners can change with `PATCH /orgs/{org}`.

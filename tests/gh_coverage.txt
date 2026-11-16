@@ -1,5 +1,5 @@
 # What the gh_cli tests exercise; `cargo xtask gh-coverage update` rewrites it.
-# gh version 2.101.0 (2026-09-15)
+# gh version 2.104.0 (2026-11-12)
 command api
 command auth setup-git
 command auth status
@@ -24,6 +24,8 @@ command repo list
 command repo rename
 command repo view
 command run list
+command search code
+command search commits
 flag api --field
 flag api --header
 flag api --include
@@ -99,6 +101,10 @@ flag repo view --jq
 flag repo view --json
 flag run list --json
 flag run list --repo
+flag search code --json
+flag search code --repo
+flag search commits --json
+flag search commits --repo
 git git-receive-pack
 git git-upload-pack
 git info/refs
@@ -147,6 +153,8 @@ graphql User.repositories
 rest actions/list-workflow-runs-for-repo
 rest git/get-ref
 rest git/list-matching-refs
+rest issues/create
+rest issues/create-comment
 rest issues/create-label
 rest issues/delete-label
 rest issues/get-label
@@ -157,7 +165,20 @@ rest meta/root
 rest orgs/get
 rest pulls/create
 rest pulls/get
+rest pulls/list-review-comments-for-repo
 rest rate-limit/get
+rest reactions/create-for-issue
+rest reactions/create-for-issue-comment
+rest reactions/create-for-pull-request-review-comment
+rest reactions/create-for-release
+rest reactions/delete-for-issue
+rest reactions/delete-for-issue-comment
+rest reactions/delete-for-pull-request-comment
+rest reactions/delete-for-release
+rest reactions/list-for-issue
+rest reactions/list-for-issue-comment
+rest reactions/list-for-pull-request-review-comment
+rest reactions/list-for-release
 rest repos/create-for-authenticated-user
 rest repos/create-in-org
 rest repos/create-or-update-file-contents
@@ -190,5 +211,19 @@ rest repos/update
 rest repos/update-release
 rest repos/update-webhook
 rest repos/upload-release-asset
+rest search/code
+rest search/commits
+rest search/labels
+rest search/topics
+rest search/users
+rest users/create-public-ssh-key-for-authenticated-user
+rest users/follow
 rest users/get-authenticated
+rest users/get-by-id
 rest users/get-by-username
+rest users/list
+rest users/list-emails-for-authenticated-user
+rest users/list-followers-for-user
+rest users/list-public-keys-for-user
+rest users/list-public-ssh-keys-for-authenticated-user
+rest users/update-authenticated

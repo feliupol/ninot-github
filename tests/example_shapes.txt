@@ -435,4 +435,7 @@ teams/update-in-org 200 always-omitted $.organization.is_verified
 teams/update-in-org 200 always-omitted $.organization.location
 teams/update-in-org 201 uncovered
 users/get-authenticated 200 always-omitted $.twitter_username
+users/get-by-id 200 always-omitted $.twitter_username
 users/get-by-username 200 always-omitted $.twitter_username
+users/update-authenticated 200 always-omitted $.plan
+users/update-authenticated 200 always-omitted $.twitter_username
