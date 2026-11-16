@@ -18,8 +18,8 @@ use crate::api::{ApiRequest, ApiResponse, ApiResult, Caller};
 use crate::handlers::repos::{Found, find_repo};
 use crate::operation::ops;
 use crate::render;
-use crate::state::{State, lock};
-use crate::types::{self, IssueStateReason};
+use crate::state::{Issue, IssueState, Name, State, StateReason, lock};
+use crate::types;
 
 struct Loaded {
     state: String,
@@ -27,8 +27,8 @@ struct Loaded {
 }
 
 struct Transition {
-    state: String,
-    reason: IssueStateReason,
+    state: IssueState,
+    reason: StateReason,
     closing: bool,
 }
 
@@ -37,7 +37,7 @@ struct Change {
     body: Option<Option<String>>,
     labels: Option<Vec<types::Label>>,
     assignees: Option<Vec<types::SimpleUser>>,
-    milestone: Option<Option<types::NullableMilestone>>,
+    milestone: Option<Option<u64>>,
     transition: Option<Transition>,
 }
 
@@ -66,19 +66,21 @@ fn load_issue(
         .issues
         .get(&number)
         .ok_or_else(ApiResponse::not_found)?;
-    let author =
-        super::author_login(&issue.data).is_some_and(|author| author.eq_ignore_ascii_case(login));
     // Issue owners and users with push access or Triage role can edit an issue.
     // Source: <https://docs.github.com/en/rest/issues/issues#update-an-issue>
-    if !found.permission.push && !author {
+    if !found.permission.push && !issue.authored_by(login) {
         return Err(ApiResponse::error(
             403,
             "Must have push access to this repository",
         ));
     }
     Ok(Loaded {
-        state: issue.data.state.clone(),
-        labels: super::label_names(&issue.data),
+        state: issue.state.as_str().to_owned(),
+        labels: issue
+            .labels
+            .iter()
+            .map(|name| name.as_str().to_owned())
+            .collect(),
     })
 }
 
@@ -96,7 +98,7 @@ fn parse_change(
         body: parse_body(body)?,
         labels: parse_labels(state, request, found, body, loaded)?,
         assignees: parse_assignees(state, request, found, body)?,
-        milestone: parse_milestone(state, request, found, body)?,
+        milestone: parse_milestone(state, found, body)?,
         transition: parse_transition(state, caller, body, loaded, found, number)?,
     })
 }
@@ -224,10 +226,9 @@ fn single_assignee(
 
 fn parse_milestone(
     state: &State,
-    request: &ApiRequest,
     found: &Found,
     body: &Map<String, Value>,
-) -> Result<Option<Option<types::NullableMilestone>>, ApiResponse> {
+) -> Result<Option<Option<u64>>, ApiResponse> {
     // Without push access milestone changes are silently dropped.
     // Source: <https://docs.github.com/en/rest/issues/issues#update-an-issue>
     if !found.permission.push {
@@ -239,21 +240,14 @@ fn parse_milestone(
     let Some(number) = milestone_number(value)? else {
         return Ok(Some(None));
     };
-    let repo = found.repo(state);
-    let Some(source) = repo.milestones.get(&number).cloned() else {
+    if !found.repo(state).milestones.contains_key(&number) {
         return Err(ApiResponse::validation_failed(
             "Issue",
             "milestone",
             "invalid",
         ));
-    };
-    Ok(Some(Some(super::render_stored(
-        repo,
-        request,
-        &found.owner,
-        &found.name,
-        &source,
-    ))))
+    }
+    Ok(Some(Some(number)))
 }
 
 fn milestone_number(value: &Value) -> Result<Option<u64>, ApiResponse> {
@@ -305,11 +299,11 @@ fn parse_transition(
         return Ok(None);
     }
     let reason = reason_for(next, explicit_reason(body)?)?;
-    if reason == IssueStateReason::Duplicate {
+    if reason == StateReason::Duplicate {
         require_duplicate(state, caller, body, found, number)?;
     }
     Ok(Some(Transition {
-        state: next.to_owned(),
+        state: IssueState::parse(next).expect("state was validated"),
         reason,
         closing: next == "closed",
     }))
@@ -327,12 +321,12 @@ fn explicit_reason(body: &Map<String, Value>) -> Result<Option<&str>, ApiRespons
     }
 }
 
-fn reason_for(next: &str, explicit: Option<&str>) -> Result<IssueStateReason, ApiResponse> {
+fn reason_for(next: &str, explicit: Option<&str>) -> Result<StateReason, ApiResponse> {
     match (next, explicit) {
-        ("closed", None | Some("completed")) => Ok(IssueStateReason::Completed),
-        ("closed", Some("not_planned")) => Ok(IssueStateReason::NotPlanned),
-        ("closed", Some("duplicate")) => Ok(IssueStateReason::Duplicate),
-        ("open", None | Some("reopened")) => Ok(IssueStateReason::Reopened),
+        ("closed", None | Some("completed")) => Ok(StateReason::Completed),
+        ("closed", Some("not_planned")) => Ok(StateReason::NotPlanned),
+        ("closed", Some("duplicate")) => Ok(StateReason::Duplicate),
+        ("open", None | Some("reopened")) => Ok(StateReason::Reopened),
         _ => Err(ApiResponse::validation_failed(
             "Issue",
             "state_reason",
@@ -391,7 +385,7 @@ fn other_issue(
         && repo.name.eq_ignore_ascii_case(&found.name);
     repo.issues
         .values()
-        .any(|issue| issue.data.id == id && !(same_repo && issue.data.number == render::id(number)))
+        .any(|issue| render::id(issue.number) == id && !(same_repo && issue.number == number))
 }
 
 fn other_pull(repo: &crate::state::Repo, id: i64) -> bool {
@@ -410,66 +404,68 @@ fn apply_change(
     change: Change,
 ) -> Result<types::Issue, ApiResponse> {
     let actor = super::caller_user(state, request, login)?;
-    let before = super::record::snapshot(found.repo(state), number)?;
-    let issue_before = found
-        .repo(state)
-        .issues
-        .get(&number)
-        .expect("issue exists")
-        .data
-        .clone();
+    let before = super::record::snapshot(state, request, found, number)?;
+    let issue_before = super::rendered_issue(state, request, found, number).expect("issue exists");
     let closer = change
         .transition
         .as_ref()
         .filter(|transition| transition.closing)
-        .map(|_| actor.clone());
+        .map(|_| Name::new(actor.login.clone()));
     {
         let repo = found.repo_mut(state);
+        let labels = change.labels.as_ref().map(|labels| {
+            labels
+                .iter()
+                .map(|label| super::ensure_label(repo, label))
+                .collect::<Vec<_>>()
+        });
         if let Some(issue) = repo.issues.get_mut(&number) {
-            apply_fields(&mut issue.data, &change, closer);
+            apply_fields(issue, &change, labels, closer);
         }
-        super::sync_milestones(repo, request, &found.owner, &found.name);
     }
-    let after = super::record::snapshot(found.repo(state), number)?;
+    let after = super::record::snapshot(state, request, found, number)?;
     super::record::record_changes(state, found, number, &actor, &before, &after);
-    let issue_after = found
-        .repo(state)
-        .issues
-        .get(&number)
-        .expect("issue exists")
-        .data
-        .clone();
+    let issue_after = super::rendered_issue(state, request, found, number).expect("issue exists");
     let mut ctx = crate::webhooks::events::Ctx::new(state, request, &found.owner, &found.name);
     crate::webhooks::events::issue_changes::from_update(&mut ctx, &issue_before, &issue_after)?;
     Ok(issue_after)
 }
 
-fn apply_fields(issue: &mut types::Issue, change: &Change, actor: Option<types::SimpleUser>) {
+fn apply_fields(
+    issue: &mut Issue,
+    change: &Change,
+    labels: Option<Vec<Name>>,
+    closer: Option<Name>,
+) {
+    let now = crate::time::now_utc();
     if let Some(title) = &change.title {
         issue.title.clone_from(title);
     }
     if let Some(body) = &change.body {
         issue.body.clone_from(body);
     }
-    if let Some(labels) = &change.labels {
-        issue.labels = labels.iter().map(render::label_on_issue).collect();
+    if let Some(labels) = labels {
+        issue.labels = labels;
     }
     if let Some(users) = &change.assignees {
-        super::assignees::write_assignees(&mut issue.assignee, &mut issue.assignees, users.clone());
+        issue.assignees = users
+            .iter()
+            .map(|user| Name::new(user.login.clone()))
+            .collect();
     }
-    if let Some(milestone) = &change.milestone {
-        issue.milestone.clone_from(milestone);
+    if let Some(milestone) = change.milestone {
+        issue.milestone = milestone;
     }
     if let Some(transition) = &change.transition {
-        issue.state.clone_from(&transition.state);
+        issue.state = transition.state;
         issue.state_reason = Some(transition.reason);
         if transition.closing {
-            issue.closed_at = Some(crate::time::now_utc());
-            issue.closed_by = actor.map(Into::into);
+            issue.closed_at = Some(now);
+            issue.closed_by = closer;
         } else {
             issue.closed_at = None;
             issue.closed_by = None;
         }
     }
-    issue.updated_at = crate::time::now_utc();
+    issue.updated_at = now;
 }

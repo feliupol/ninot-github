@@ -500,7 +500,14 @@ impl Handler for ops::IssuesListEventsForTimeline {
                 .map_err(|_| ApiResponse::not_found())?;
             let urls = request.urls().repo(&found.owner, &found.name);
             if let Some(issue) = repo.issues.get(&number) {
-                issue.comments.iter().filter_map(comment_event).collect()
+                let context = super::issues::context(&guard, request, &found);
+                issue
+                    .comments
+                    .iter()
+                    .filter_map(|comment| {
+                        comment_event(&render::issue_comment(context, number, comment))
+                    })
+                    .collect()
             } else {
                 let pull = repo
                     .pull_requests

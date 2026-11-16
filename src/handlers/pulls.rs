@@ -14,7 +14,7 @@ use super::issues::{label_from_issue_item, label_from_pull};
 use super::repos::find_repo;
 use crate::api::{ApiRequest, ApiResponse, ApiResult, paginate};
 use crate::operation::ops;
-use crate::state::{NewTimelineEvent, State, TimelineEventKind, lock};
+use crate::state::{Issue, IssueState, Name, NewTimelineEvent, State, TimelineEventKind, lock};
 use crate::types;
 use crate::webhooks::events::{self, Ctx};
 
@@ -76,7 +76,13 @@ fn pull_collection(
     if collection == "issue_comments"
         && let Some(issue) = repo.issues.get(&number)
     {
-        return Ok(paginate(request, &request.path, issue.comments.clone()));
+        let context = super::issues::context(&state, request, &found);
+        let comments = issue
+            .comments
+            .iter()
+            .map(|comment| crate::render::issue_comment(context, number, comment))
+            .collect::<Vec<_>>();
+        return Ok(paginate(request, &request.path, comments));
     }
     let pull = repo
         .pull_requests
@@ -382,88 +388,82 @@ impl Handler for ops::IssuesCreate {
         let user = state
             .account(&caller.login)
             .ok_or_else(ApiResponse::not_found)?;
+        let author = Name::new(user.login.clone());
         let user = crate::render::simple_user(request, user);
         let repo_urls = request.urls().repo(&found.owner, &found.name);
-        let urls = repo_urls.issue(number);
-        let created = crate::state::now();
-        let labels = body
-            .labels
-            .iter()
-            .enumerate()
-            .map(|(index, label)| {
+        let mut labels: Vec<types::Label> = Vec::new();
+        {
+            for (index, label) in body.labels.iter().enumerate() {
                 let name = match label {
                     types::IssuesCreateRequestLabelsItem::String(name) => name.as_str(),
                     types::IssuesCreateRequestLabelsItem::Object { name, .. } => {
                         name.as_deref().unwrap_or("label")
                     }
                 };
-                types::IssueLabelsItem::Object {
-                    archived_by: None,
-                    color: Some("ededed".to_owned()),
-                    default: Some(false),
-                    description: Some(String::new()),
-                    id: Some(crate::render::id(
-                        number.saturating_mul(100).saturating_add(index as u64 + 1),
-                    )),
-                    name: Some(name.to_owned()),
-                    node_id: Some(format!(
-                        "LA_{}_{}_{}_{index}",
-                        found.owner, found.name, number
-                    )),
-                    url: Some(repo_urls.label(name)),
+                let label =
+                    super::issues::resolve_issue_label(&mut state, request, &found, name, || {
+                        types::Label {
+                            archived_at: None,
+                            archived_by: None,
+                            color: "ededed".to_owned(),
+                            default: false,
+                            description: Some(String::new()),
+                            id: crate::render::id(
+                                number.saturating_mul(100).saturating_add(index as u64 + 1),
+                            ),
+                            name: name.to_owned(),
+                            node_id: format!(
+                                "LA_{}_{}_{}_{index}",
+                                found.owner, found.name, number
+                            ),
+                            url: repo_urls.label(name),
+                        }
+                    });
+                if !labels
+                    .iter()
+                    .any(|existing| existing.name.eq_ignore_ascii_case(&label.name))
+                {
+                    labels.push(label);
                 }
-            })
-            .collect::<Vec<_>>();
-        let issue = types::Issue {
-            active_lock_reason: None,
-            assignee: None,
-            assignees: Vec::new(),
-            author_association: Some(types::AuthorAssociation::Owner),
-            body: body.body,
-            body_html: None,
-            body_text: None,
-            closed_at: None,
-            closed_by: None,
-            comments: 0,
-            comments_url: urls.comments(),
-            created_at: crate::render::timestamp(&created),
-            draft: None,
-            events_url: urls.events(),
-            html_url: urls.html.clone(),
-            id: crate::render::id(number),
-            issue_dependencies_summary: None,
-            issue_field_values: Vec::new(),
-            labels,
-            labels_url: urls.labels(),
-            locked: false,
-            milestone: None,
-            node_id: format!("I_{}_{}_{}", found.owner, found.name, number),
-            number: crate::render::id(number),
-            parent_issue_url: None,
-            performed_via_github_app: None,
-            pinned_comment: None,
-            pull_request: None,
-            reactions: None,
-            repository: None,
-            repository_url: repo_urls.api.clone(),
-            state: "open".to_owned(),
-            state_reason: None,
-            sub_issues_summary: None,
-            timeline_url: None,
-            title,
-            type_: None,
-            updated_at: crate::render::timestamp(&created),
-            url: urls.api.clone(),
-            user: Some(user.clone().into()),
-        };
-        state.add_issue(&found.owner, &found.name, number, issue.clone());
-        for label in issue.labels.iter().filter_map(label_from_issue_item) {
-            super::issues::record::record_labeled(&mut state, &found, number, user.clone(), &label);
+            }
         }
+        let created = crate::time::now_utc();
+        state.add_issue(
+            &found.owner,
+            &found.name,
+            Issue {
+                number,
+                node_id: format!("I_{}_{}_{}", found.owner, found.name, number),
+                title,
+                body: body.body,
+                author,
+                state: IssueState::Open,
+                state_reason: None,
+                closed_at: None,
+                closed_by: None,
+                labels: labels
+                    .iter()
+                    .map(|label| Name::new(label.name.clone()))
+                    .collect(),
+                assignees: Vec::new(),
+                milestone: None,
+                locked: false,
+                lock_reason: None,
+                created_at: created,
+                updated_at: created,
+                comments: Vec::new(),
+                events: Vec::new(),
+            },
+        );
+        for label in &labels {
+            super::issues::record::record_labeled(&mut state, &found, number, user.clone(), label);
+        }
+        let issue = super::issues::rendered_issue(&state, request, &found, number)
+            .expect("the created issue is stored");
         let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
         events::issues::opened(&mut ctx, &issue)?;
-        for label in issue.labels.iter().filter_map(label_from_issue_item) {
-            events::issues::labeled(&mut ctx, &issue, &label)?;
+        for label in &labels {
+            events::issues::labeled(&mut ctx, &issue, label)?;
         }
         Ok(ApiResponse::typed(201, &issue))
     }
@@ -473,14 +473,12 @@ impl Handler for ops::IssuesListForRepo {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let state = lock(state);
         let found = find_repo(&state, request)?;
-        let repo = state
-            .account(&found.owner)
-            .and_then(|account| account.repo(&found.name))
-            .expect("repository exists");
-        let rows = repo
+        let context = super::issues::context(&state, request, &found);
+        let rows = context
+            .repo
             .issues
             .values()
-            .map(|issue| issue.data.clone())
+            .map(|issue| crate::render::issue(context, issue))
             .collect::<Vec<_>>();
         Ok(paginate(request, &request.path, rows))
     }
@@ -515,9 +513,8 @@ impl Handler for ops::IssuesListLabelsOnIssue {
                 .iter()
                 .map(label_from_pull)
                 .collect::<Vec<_>>()
-        } else if let Some(issue) = repo.issues.get(&number) {
+        } else if let Some(issue) = super::issues::rendered_issue(&state, request, &found, number) {
             issue
-                .data
                 .labels
                 .iter()
                 .filter_map(label_from_issue_item)
@@ -533,19 +530,13 @@ impl Handler for ops::IssuesGet {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let state = lock(state);
         let found = find_repo(&state, request)?;
-        let repo = state
-            .account(&found.owner)
-            .and_then(|account| account.repo(&found.name))
-            .expect("repository exists");
         let number = request
             .param("issue_number")
             .parse::<u64>()
             .map_err(|_| ApiResponse::not_found())?;
-        let issue = repo
-            .issues
-            .get(&number)
+        let issue = super::issues::rendered_issue(&state, request, &found, number)
             .ok_or_else(ApiResponse::not_found)?;
-        Ok(ApiResponse::typed(200, &issue.data))
+        Ok(ApiResponse::typed(200, &issue))
     }
 }
 
@@ -759,7 +750,7 @@ impl Handler for ops::IssuesAddLabels {
             .parse::<u64>()
             .map_err(|_| ApiResponse::not_found())?;
         let repo_urls = request.urls().repo(&found.owner, &found.name);
-        let (labels, pull, issue, added) = {
+        let (labels, pull, is_issue, added) = {
             let repo = state
                 .account_mut(&found.owner)
                 .and_then(|account| account.repo_mut(&found.name))
@@ -769,7 +760,7 @@ impl Handler for ops::IssuesAddLabels {
                 let pull = pull.data.as_mut().ok_or_else(|| {
                     ApiResponse::internal("Pull request REST model is not seeded")
                 })?;
-                for name in requested_labels {
+                for name in requested_labels.clone() {
                     if !pull.labels.iter().any(|label| label.name == name) {
                         let id = number
                             .saturating_mul(100)
@@ -790,46 +781,48 @@ impl Handler for ops::IssuesAddLabels {
                     }
                 }
                 let labels = pull.labels.iter().map(label_from_pull).collect::<Vec<_>>();
-                (labels, Some(pull.clone()), None, added)
-            } else if let Some(issue) = repo.issues.get_mut(&number) {
-                for name in requested_labels {
-                    let found_label = issue
-                        .data
-                        .labels
-                        .iter()
-                        .filter_map(label_from_issue_item)
-                        .any(|label| label.name == name);
-                    if !found_label {
-                        let id = number
-                            .saturating_mul(100)
-                            .saturating_add(issue.data.labels.len() as u64 + 1);
-                        let item = types::IssueLabelsItem::Object {
-                            archived_by: None,
-                            color: Some("ededed".to_owned()),
-                            default: Some(false),
-                            description: Some(String::new()),
-                            id: Some(crate::render::id(id)),
-                            name: Some(name.clone()),
-                            node_id: Some(format!("LA_{}_{}_{}", found.owner, found.name, id)),
-                            url: Some(repo_urls.label(&name)),
-                        };
-                        if let Some(label) = label_from_issue_item(&item) {
-                            added.push(label);
-                        }
-                        issue.data.labels.push(item);
-                    }
-                }
-                let labels = issue
-                    .data
-                    .labels
-                    .iter()
-                    .filter_map(label_from_issue_item)
-                    .collect::<Vec<_>>();
-                (labels, None, Some(issue.data.clone()), added)
+                (labels, Some(pull.clone()), false, added)
+            } else if repo.issues.contains_key(&number) {
+                (Vec::new(), None, true, added)
             } else {
                 return Err(ApiResponse::not_found());
             }
         };
+        let mut added = added;
+        if is_issue {
+            for name in requested_labels {
+                let issue = &found.repo(&state).issues[&number];
+                if issue.has_label(&name) {
+                    continue;
+                }
+                let id = number
+                    .saturating_mul(100)
+                    .saturating_add(issue.labels.len() as u64 + 1);
+                let label =
+                    super::issues::resolve_issue_label(&mut state, request, &found, &name, || {
+                        types::Label {
+                            archived_at: None,
+                            archived_by: None,
+                            color: "ededed".to_owned(),
+                            default: false,
+                            description: Some(String::new()),
+                            id: crate::render::id(id),
+                            name: name.clone(),
+                            node_id: format!("LA_{}_{}_{}", found.owner, found.name, id),
+                            url: repo_urls.label(&name),
+                        }
+                    });
+                let issue = found
+                    .repo_mut(&mut state)
+                    .issues
+                    .get_mut(&number)
+                    .expect("issue exists");
+                if !issue.has_label(&label.name) {
+                    issue.labels.push(Name::new(label.name.clone()));
+                    added.push(label);
+                }
+            }
+        }
         let actor = caller_user(&state, request, &caller.login)?;
         for label in &added {
             super::issues::record::record_labeled(&mut state, &found, number, actor.clone(), label);
@@ -840,11 +833,19 @@ impl Handler for ops::IssuesAddLabels {
                 events::pull_request::labeled(&mut ctx, pull, label)?;
             }
         }
-        if let Some(issue) = &issue {
-            for label in &added {
-                events::issues::labeled(&mut ctx, issue, label)?;
+        let labels = match super::issues::rendered_issue(ctx.state, request, &found, number) {
+            Some(issue) if is_issue => {
+                for label in &added {
+                    events::issues::labeled(&mut ctx, &issue, label)?;
+                }
+                issue
+                    .labels
+                    .iter()
+                    .filter_map(label_from_issue_item)
+                    .collect()
             }
-        }
+            _ => labels,
+        };
         Ok(ApiResponse::typed(200, &labels))
     }
 }
@@ -866,42 +867,65 @@ impl Handler for ops::IssuesCreateComment {
         let account = state
             .account(&caller.login)
             .ok_or_else(ApiResponse::not_found)?;
+        let author = Name::new(account.login.clone());
         let user = crate::render::simple_user(request, account);
         let id = state.next_id();
         let repo_urls = request.urls().repo(&found.owner, &found.name);
         let issue_urls = repo_urls.issue(number);
-        let repo = state
+        let (is_pull, is_issue) = state
             .account(&found.owner)
-            .and_then(|account| account.repo(&found.name));
-        let on_issue = repo.is_some_and(|repo| repo.issues.contains_key(&number));
-        let on_pull = repo.is_some_and(|repo| repo.pull_requests.contains_key(&number));
-        if !on_issue && !on_pull {
+            .and_then(|account| account.repo(&found.name))
+            .map_or((false, false), |repo| {
+                (
+                    repo.pull_requests.contains_key(&number),
+                    repo.issues.contains_key(&number),
+                )
+            });
+        if !is_pull && !is_issue {
             return Err(ApiResponse::not_found());
         }
         let created_at = crate::time::now_utc();
-        let comment = types::IssueComment {
-            author_association: Some(types::AuthorAssociation::Owner),
-            body: Some(text.to_owned()),
-            body_html: None,
-            body_text: None,
-            created_at,
-            html_url: if on_issue {
-                issue_urls.comment_html(id)
-            } else {
-                repo_urls.pull(number).comment_html(id)
-            },
-            id: crate::render::id(id),
-            issue_url: issue_urls.api,
-            minimized: None,
-            node_id: crate::render::node_id("IssueComment", id),
-            performed_via_github_app: None,
-            pin: None,
-            reactions: None,
-            updated_at: created_at,
-            url: repo_urls.issue_comment(id),
-            user: Some(user.into()),
+        let comment = if is_pull {
+            let comment = types::IssueComment {
+                author_association: Some(types::AuthorAssociation::Owner),
+                body: Some(text.to_owned()),
+                body_html: None,
+                body_text: None,
+                created_at,
+                html_url: repo_urls.pull(number).comment_html(id),
+                id: crate::render::id(id),
+                issue_url: issue_urls.api,
+                minimized: None,
+                node_id: crate::render::node_id("IssueComment", id),
+                performed_via_github_app: None,
+                pin: None,
+                reactions: None,
+                updated_at: created_at,
+                url: repo_urls.issue_comment(id),
+                user: Some(user.into()),
+            };
+            state.add_issue_comment(&found.owner, &found.name, number, comment.clone());
+            comment
+        } else {
+            let record = crate::state::Comment {
+                id,
+                author: Some(author),
+                body: text.to_owned(),
+                created_at,
+                updated_at: created_at,
+            };
+            let issue = found
+                .repo_mut(&mut state)
+                .issues
+                .get_mut(&number)
+                .expect("issue exists");
+            issue.comments.push(record.clone());
+            crate::render::issue_comment(
+                super::issues::context(&state, request, &found),
+                number,
+                &record,
+            )
         };
-        state.add_issue_comment(&found.owner, &found.name, number, comment.clone());
         let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
         events::issue_comment::created(&mut ctx, number, &comment)?;
         Ok(ApiResponse::typed(201, &comment))

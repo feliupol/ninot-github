@@ -1149,7 +1149,7 @@ fn search(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
                 }
             }
             if !want_pr {
-                for (number, issue) in &repo.issues {
+                for issue in repo.issues.values() {
                     if want_open && !read::issue_open(issue) {
                         continue;
                     }
@@ -1166,8 +1166,7 @@ fn search(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
                     if author_me && !read::issue_authored_by(issue, &env.caller.login) {
                         continue;
                     }
-                    let issue =
-                        projects::stored_issue_object(&account.login, &repo.name, *number, issue);
+                    let issue = projects::stored_issue_object(env, &account.login, repo, issue);
                     nodes.push(objects::SearchResultItem::Issue(Box::new(issue)));
                 }
             }

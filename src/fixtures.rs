@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::api::ApiRequest;
 use crate::render;
 use crate::state::{
-    Account, CheckRunApp, CheckRunRecord, CommitStatusRecord, JobRecord, SeededCheckRun, State,
-    StatusState, WorkflowRunRecord,
+    Account, CheckRunApp, CheckRunRecord, CommitStatusRecord, Issue, IssueState, JobRecord, Name,
+    SeededCheckRun, State, StatusState, WorkflowRunRecord, fold,
 };
 use crate::time;
 use crate::types;
@@ -176,6 +176,39 @@ pub struct UserSeed {
     pub user_view_type: SeedField<Option<String>>,
 }
 
+impl UserSeed {
+    /// The response names of the set fields other than `login`, in alphabetical order.
+    fn fields_besides_login(&self) -> Vec<&'static str> {
+        [
+            ("avatar_url", self.avatar_url.is_missing()),
+            ("email", self.email.is_missing()),
+            ("events_url", self.events_url.is_missing()),
+            ("followers_url", self.followers_url.is_missing()),
+            ("following_url", self.following_url.is_missing()),
+            ("gists_url", self.gists_url.is_missing()),
+            ("gravatar_id", self.gravatar_id.is_missing()),
+            ("html_url", self.html_url.is_missing()),
+            ("id", self.id.is_missing()),
+            ("name", self.name.is_missing()),
+            ("node_id", self.node_id.is_missing()),
+            ("organizations_url", self.organizations_url.is_missing()),
+            ("received_events_url", self.received_events_url.is_missing()),
+            ("repos_url", self.repos_url.is_missing()),
+            ("site_admin", self.site_admin.is_missing()),
+            ("starred_at", self.starred_at.is_missing()),
+            ("starred_url", self.starred_url.is_missing()),
+            ("subscriptions_url", self.subscriptions_url.is_missing()),
+            ("type", self.account_type.is_missing()),
+            ("url", self.url.is_missing()),
+            ("user_view_type", self.user_view_type.is_missing()),
+        ]
+        .into_iter()
+        .filter(|(_, missing)| !missing)
+        .map(|(field, _)| field)
+        .collect()
+    }
+}
+
 /// A team of the repository owner's organization, created when it does not exist.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -209,6 +242,32 @@ pub struct LabelSeed {
     /// Whether GitHub supplies this label by default.
     #[serde(default, skip_serializing_if = "SeedField::is_missing")]
     pub default: SeedField<bool>,
+}
+
+impl LabelSeed {
+    /// The response names of the set fields other than `name` that differ from `label`, in
+    /// alphabetical order.
+    fn conflicts_with(&self, label: &types::Label) -> Vec<&'static str> {
+        /// Whether `field` is set to something other than `stored`.
+        fn differs<T: PartialEq>(field: &SeedField<T>, stored: &T) -> bool {
+            matches!(field, SeedField::Present(value) if value != stored)
+        }
+        [
+            ("color", differs(&self.color, &label.color)),
+            ("default", differs(&self.default, &label.default)),
+            (
+                "description",
+                differs(&self.description, &label.description),
+            ),
+            ("id", differs(&self.id, &label.id)),
+            ("node_id", differs(&self.node_id, &label.node_id)),
+            ("url", differs(&self.url, &label.url)),
+        ]
+        .into_iter()
+        .filter(|(_, differs)| *differs)
+        .map(|(field, _)| field)
+        .collect()
+    }
 }
 
 /// Sparse branch information nested in a pull-request seed.
@@ -414,6 +473,9 @@ pub struct GitIdentitySeed {
 }
 
 /// Sparse issue response values accepted by [`crate::server::Repository`].
+///
+/// Issues reference users, labels and their comments, so a seed names users by login only and
+/// cannot set values the fake derives from them.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct IssueSeed {
@@ -423,25 +485,28 @@ pub struct IssueSeed {
     /// Markdown description.
     #[serde(default, skip_serializing_if = "SeedField::is_missing")]
     pub body: SeedField<Option<String>>,
-    /// Open or closed state.
+    /// `open` or `closed`; any other value is rejected.
     #[serde(default, skip_serializing_if = "SeedField::is_missing")]
     pub state: SeedField<String>,
-    /// Labels attached to the issue.
+    /// Labels attached to the issue. A label the repository lacks is added to it; one it has
+    /// may repeat but not contradict the stored label's fields.
     #[serde(default, skip_serializing_if = "SeedField::is_missing")]
     pub labels: SeedField<Vec<LabelSeed>>,
-    /// Number of issue comments.
+    /// Number of issue comments. Only `0` is accepted: the count is derived from the comments
+    /// seeded with `Issue::create_comment`.
     #[serde(default, skip_serializing_if = "SeedField::is_missing")]
     pub comments: SeedField<i64>,
     /// Whether the issue is locked.
     #[serde(default, skip_serializing_if = "SeedField::is_missing")]
     pub locked: SeedField<bool>,
-    /// User assigned to the issue.
+    /// User assigned to the issue, by login only. Alone it is the only assignee; with
+    /// `assignees` it must be the first of them.
     #[serde(default, skip_serializing_if = "SeedField::is_missing")]
     pub assignee: SeedField<Option<UserSeed>>,
-    /// Users assigned to the issue.
+    /// Users assigned to the issue, by login only.
     #[serde(default, skip_serializing_if = "SeedField::is_missing")]
     pub assignees: SeedField<Vec<UserSeed>>,
-    /// Issue author. The repository owner when omitted.
+    /// Issue author, by login only. The repository owner when omitted.
     #[serde(default, skip_serializing_if = "SeedField::is_missing")]
     pub user: SeedField<UserSeed>,
 }
@@ -477,7 +542,8 @@ pub struct IssueCommentSeed {
     /// Comment text.
     #[serde(default, skip_serializing_if = "SeedField::is_missing")]
     pub body: SeedField<String>,
-    /// Comment author.
+    /// Comment author. On an issue, by login only; a pull-request comment also takes the other
+    /// user fields.
     #[serde(default, skip_serializing_if = "SeedField::is_missing")]
     pub user: SeedField<Option<UserSeed>>,
     /// Creation timestamp.
@@ -909,89 +975,151 @@ pub(crate) fn commit_status(id: i64) -> CommitStatusRecord {
 }
 
 /// Completes an issue directly from its typed sparse fixture fields.
+///
+/// Users are seeded by login alone. Labels the repository lacks are added to its label store;
+/// a label it has is referenced, and a seed that contradicts it is rejected. The comment count
+/// is derived from seeded comments, so only `comments: 0` is accepted.
 pub(crate) fn seeded_issue(
     state: &mut State,
     request: &ApiRequest,
     owner: &str,
     repo_name: &str,
-    default_user: types::SimpleUser,
+    default_author: Name,
     number: u64,
     seed: IssueSeed,
-) -> io::Result<types::Issue> {
-    let repo_urls = request.urls().repo(owner, repo_name);
-    let urls = repo_urls.issue(number);
+) -> io::Result<Issue> {
+    model_id_or_input(number, "issue number")?;
     let now = crate::time::now_utc();
-    let signed_number = model_id_or_input(number, "issue number")?;
-    let user = default_user.into();
-    let mut issue = types::Issue {
-        active_lock_reason: None,
-        assignee: None,
-        assignees: Vec::new(),
-        author_association: None,
+    let mut issue = Issue {
+        number,
+        node_id: format!("I_{owner}_{repo_name}_{number}"),
+        title: format!("Issue #{number}"),
         body: None,
-        body_html: None,
-        body_text: None,
+        author: default_author,
+        state: IssueState::Open,
+        state_reason: None,
         closed_at: None,
         closed_by: None,
-        comments: 0,
-        comments_url: urls.comments(),
-        created_at: now,
-        draft: None,
-        events_url: urls.events(),
-        html_url: urls.html.clone(),
-        id: signed_number,
-        issue_dependencies_summary: None,
-        issue_field_values: Vec::new(),
         labels: Vec::new(),
-        labels_url: urls.labels(),
-        locked: false,
+        assignees: Vec::new(),
         milestone: None,
-        node_id: format!("I_{owner}_{repo_name}_{number}"),
-        number: signed_number,
-        parent_issue_url: None,
-        performed_via_github_app: None,
-        pinned_comment: None,
-        pull_request: None,
-        reactions: None,
-        repository: None,
-        repository_url: repo_urls.api.clone(),
-        state: "open".to_owned(),
-        state_reason: None,
-        sub_issues_summary: None,
-        timeline_url: None,
-        title: format!("Issue #{number}"),
-        type_: None,
+        locked: false,
+        lock_reason: None,
+        created_at: now,
         updated_at: now,
-        url: urls.api.clone(),
-        user: Some(user),
+        comments: Vec::new(),
+        events: Vec::new(),
     };
     apply!(issue.title, seed.title);
     apply!(issue.body, seed.body);
-    apply!(issue.state, seed.state);
-    apply!(issue.comments, seed.comments);
     apply!(issue.locked, seed.locked);
+    if let SeedField::Present(text) = seed.state {
+        issue.state = IssueState::parse(&text).ok_or_else(|| {
+            invalid_seed(format!(
+                "invalid issue state {text:?}: expected \"open\" or \"closed\""
+            ))
+        })?;
+    }
+    if let SeedField::Present(count) = seed.comments
+        && count != 0
+    {
+        return Err(invalid_seed(
+            "an issue's comment count is derived from its comments; seed them with \
+             Issue::create_comment",
+        ));
+    }
     if let SeedField::Present(labels) = seed.labels {
-        issue.labels = labels
-            .into_iter()
-            .enumerate()
-            .map(|(index, label)| issue_label(request, owner, repo_name, label, number, index))
-            .collect::<io::Result<Vec<_>>>()?;
+        for (index, label) in labels.into_iter().enumerate() {
+            let name = seeded_issue_label(state, request, owner, repo_name, label, number, index)?;
+            if !issue.has_label(name.as_str()) {
+                issue.labels.push(name);
+            }
+        }
     }
-    if let SeedField::Present(assignee) = seed.assignee {
-        issue.assignee = assignee
-            .map(|seed| simple_user(state, request, seed).map(Into::into))
-            .transpose()?;
-    }
-    if let SeedField::Present(assignees) = seed.assignees {
-        issue.assignees = assignees
-            .into_iter()
-            .map(|seed| simple_user(state, request, seed))
-            .collect::<io::Result<Vec<_>>>()?;
-    }
-    if let SeedField::Present(user_seed) = seed.user {
-        issue.user = Some(simple_user(state, request, user_seed)?.into());
+    let assignees = match seed.assignees {
+        SeedField::Present(users) => Some(
+            users
+                .into_iter()
+                .map(|user| seeded_login(state, user, "issue assignee"))
+                .collect::<io::Result<Vec<_>>>()?,
+        ),
+        SeedField::Missing => None,
+    };
+    let assignee = match seed.assignee {
+        SeedField::Present(user) => Some(
+            user.map(|user| seeded_login(state, user, "issue assignee"))
+                .transpose()?,
+        ),
+        SeedField::Missing => None,
+    };
+    issue.assignees = match (assignee, assignees) {
+        (None, None) => Vec::new(),
+        (Some(assignee), None) => assignee.into_iter().collect(),
+        (None, Some(assignees)) => assignees,
+        (Some(assignee), Some(assignees)) => {
+            if assignee.as_ref() != assignees.first() {
+                return Err(invalid_seed(
+                    "an issue's assignee is the first of its assignees; seed only assignees",
+                ));
+            }
+            assignees
+        }
+    };
+    if let SeedField::Present(user) = seed.user {
+        issue.author = seeded_login(state, user, "issue author")?;
     }
     Ok(issue)
+}
+
+/// The login a user seed names, creating the user when it does not exist. The seed may set only
+/// `login`: issues reference users, whose other fields come from the account.
+pub(crate) fn seeded_login(state: &mut State, seed: UserSeed, role: &str) -> io::Result<Name> {
+    let extra = seed.fields_besides_login();
+    if !extra.is_empty() {
+        return Err(invalid_seed(format!(
+            "an {role} is seeded by login only; {} come from the account",
+            extra.join(", ")
+        )));
+    }
+    let login = match seed.login {
+        SeedField::Present(login) => login,
+        SeedField::Missing => "admin".to_owned(),
+    };
+    Ok(Name::new(state.add_user(&login).login.clone()))
+}
+
+/// Stores the label a seed names unless the repository has it, and returns its name. A seed that
+/// names a stored label may repeat its fields but not change them.
+fn seeded_issue_label(
+    state: &mut State,
+    request: &ApiRequest,
+    owner: &str,
+    repo_name: &str,
+    seed: LabelSeed,
+    number: u64,
+    index: usize,
+) -> io::Result<Name> {
+    let label = label_model(request, owner, repo_name, seed.clone(), number, index)?;
+    let repo = state
+        .account(owner)
+        .and_then(|account| account.repo(repo_name))
+        .ok_or_else(|| invalid_seed(format!("no repository {owner}/{repo_name}")))?;
+    if let Some(stored) = repo.labels.get(fold(&label.name).as_ref()) {
+        let rendered = render::label(state, request, owner, repo_name, stored);
+        let conflicts = seed.conflicts_with(&rendered);
+        if !conflicts.is_empty() {
+            return Err(invalid_seed(format!(
+                "label {:?} is already stored with other {}",
+                stored.name,
+                conflicts.join(", ")
+            )));
+        }
+    }
+    let repo = state
+        .account_mut(owner)
+        .and_then(|account| account.repo_mut(repo_name))
+        .expect("repository found above");
+    Ok(crate::handlers::issues::ensure_label(repo, &label))
 }
 
 /// Completes a pull request directly from its typed sparse fixture fields.
@@ -1399,27 +1527,6 @@ pub(crate) fn requested_team(
     let org = state.account(org).expect("team organization exists");
     let team = org.team(slug).expect("team exists");
     Ok(render::team_simple(request, org, team))
-}
-
-fn issue_label(
-    request: &ApiRequest,
-    owner: &str,
-    repo: &str,
-    seed: LabelSeed,
-    number: u64,
-    index: usize,
-) -> io::Result<types::IssueLabelsItem> {
-    let label = label_model(request, owner, repo, seed, number, index)?;
-    Ok(types::IssueLabelsItem::Object {
-        archived_by: label.archived_by,
-        color: Some(label.color),
-        default: Some(label.default),
-        description: label.description,
-        id: Some(label.id),
-        name: Some(label.name),
-        node_id: Some(label.node_id),
-        url: Some(label.url),
-    })
 }
 
 fn pull_label(

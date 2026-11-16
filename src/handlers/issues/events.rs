@@ -45,8 +45,7 @@ impl Handler for ops::IssuesListEventsForRepo {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let state = lock(state);
         let found = find_repo(&state, request)?;
-        let repo = found.repo(&state);
-        let rows = repo_events(repo)
+        let rows = repo_events(super::context(&state, request, &found))
             .into_iter()
             .map(|(event, issue)| render_event(&state, request, &found, &event, Some(&issue)))
             .collect();
@@ -62,8 +61,7 @@ impl Handler for ops::IssuesGetEvent {
             .param("event_id")
             .parse::<u64>()
             .map_err(|_| ApiResponse::not_found())?;
-        let repo = found.repo(&state);
-        let (event, issue) = repo_events(repo)
+        let (event, issue) = repo_events(super::context(&state, request, &found))
             .into_iter()
             .find(|(event, _)| event.id == id)
             .ok_or_else(ApiResponse::not_found)?;
@@ -91,11 +89,13 @@ fn pull_events(pull: &crate::state::PullRequest) -> Vec<IssueEvent> {
     events
 }
 
-fn repo_events(repo: &Repo) -> Vec<(IssueEvent, types::Issue)> {
+fn repo_events(context: render::IssueContext<'_>) -> Vec<(IssueEvent, types::Issue)> {
+    let repo = context.repo;
     let mut rows = Vec::new();
     for issue in repo.issues.values() {
+        let rendered = render::issue(context, issue);
         for event in &issue.events {
-            rows.push((event.clone(), issue.data.clone()));
+            rows.push((event.clone(), rendered.clone()));
         }
     }
     for pull in repo.pull_requests.values() {

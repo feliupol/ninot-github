@@ -16,11 +16,9 @@ use super::super::Handler;
 use crate::api::{ApiRequest, ApiResponse, ApiResult};
 use crate::handlers::repos::find_repo;
 use crate::operation::ops;
-use crate::state::{Repo, State, lock};
+use crate::state::{Issue, LockReason, Repo, State, lock};
 use crate::types;
 use crate::webhooks::events;
-
-const REASONS: [&str; 4] = ["off-topic", "too heated", "resolved", "spam"];
 
 impl Handler for ops::IssuesLock {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
@@ -37,11 +35,12 @@ impl Handler for ops::IssuesLock {
         super::with_subject(
             found.repo_mut(&mut state),
             number,
-            |issue| lock_issue(issue, reason.clone()),
-            |pull| lock_pull(pull, reason.clone()),
+            |issue| lock_issue(issue, reason),
+            |pull| lock_pull(pull, reason),
         )?;
+        let reason = reason.map(|reason| reason.as_str().to_owned());
         super::record::record_locked(&mut state, &found, number, actor, reason);
-        if let Some(issue) = super::stored_issue(found.repo(&state), number) {
+        if let Some(issue) = super::rendered_issue(&state, request, &found, number) {
             let mut ctx = super::webhook_ctx(&mut state, request, &found);
             events::issues::locked(&mut ctx, &issue)?;
         }
@@ -58,7 +57,7 @@ impl Handler for ops::IssuesUnlock {
         ensure_subject(found.repo(&state), number)?;
         // Source: <https://docs.github.com/en/rest/issues/issues#unlock-an-issue>
         super::require_push(&found)?;
-        let was_locked = super::record::snapshot(found.repo(&state), number)?.locked;
+        let was_locked = super::record::snapshot(&state, request, &found, number)?.locked;
         let actor = super::caller_user(&state, request, &caller.login)?;
         super::with_subject(
             found.repo_mut(&mut state),
@@ -68,7 +67,7 @@ impl Handler for ops::IssuesUnlock {
         )?;
         if was_locked {
             super::record::record_unlocked(&mut state, &found, number, actor);
-            if let Some(issue) = super::stored_issue(found.repo(&state), number) {
+            if let Some(issue) = super::rendered_issue(&state, request, &found, number) {
                 let mut ctx = super::webhook_ctx(&mut state, request, &found);
                 events::issues::unlocked(&mut ctx, &issue)?;
             }
@@ -93,7 +92,7 @@ fn ensure_subject(repo: &Repo, number: u64) -> Result<(), ApiResponse> {
     }
 }
 
-fn lock_reason(body: &Value) -> Result<Option<String>, ApiResponse> {
+fn lock_reason(body: &Value) -> Result<Option<LockReason>, ApiResponse> {
     let value = match body {
         Value::Null => return Ok(None),
         Value::Object(object) => object.get("lock_reason"),
@@ -101,8 +100,8 @@ fn lock_reason(body: &Value) -> Result<Option<String>, ApiResponse> {
     };
     match value {
         None | Some(Value::Null) => Ok(None),
-        Some(Value::String(reason)) if REASONS.contains(&reason.as_str()) => {
-            Ok(Some(reason.clone()))
+        Some(Value::String(reason)) if LockReason::parse(reason).is_some() => {
+            Ok(LockReason::parse(reason))
         }
         Some(_) => Err(ApiResponse::validation_failed(
             "Issue",
@@ -112,30 +111,30 @@ fn lock_reason(body: &Value) -> Result<Option<String>, ApiResponse> {
     }
 }
 
-fn lock_issue(issue: &mut types::Issue, reason: Option<String>) -> Result<(), ApiResponse> {
+fn lock_issue(issue: &mut Issue, reason: Option<LockReason>) -> Result<(), ApiResponse> {
     if issue.locked {
         return Err(ApiResponse::validation_failed("Issue", "locked", "invalid"));
     }
     issue.locked = true;
-    issue.active_lock_reason = reason;
+    issue.lock_reason = reason;
     issue.updated_at = crate::time::now_utc();
     Ok(())
 }
 
-fn lock_pull(pull: &mut types::PullRequest, reason: Option<String>) -> Result<(), ApiResponse> {
+fn lock_pull(pull: &mut types::PullRequest, reason: Option<LockReason>) -> Result<(), ApiResponse> {
     if pull.locked {
         return Err(ApiResponse::validation_failed("Issue", "locked", "invalid"));
     }
     pull.locked = true;
-    pull.active_lock_reason = reason;
+    pull.active_lock_reason = reason.map(|reason| reason.as_str().to_owned());
     pull.updated_at = crate::time::now_utc();
     Ok(())
 }
 
-fn unlock_issue(issue: &mut types::Issue) -> Result<(), ApiResponse> {
-    if issue.locked || issue.active_lock_reason.is_some() {
+fn unlock_issue(issue: &mut Issue) -> Result<(), ApiResponse> {
+    if issue.locked || issue.lock_reason.is_some() {
         issue.locked = false;
-        issue.active_lock_reason = None;
+        issue.lock_reason = None;
         issue.updated_at = crate::time::now_utc();
     }
     Ok(())

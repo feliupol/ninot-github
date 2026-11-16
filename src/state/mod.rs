@@ -5,8 +5,10 @@
 mod account;
 pub(crate) mod actions_service;
 mod checks;
+mod comment;
 mod gist;
 mod hook;
+mod issue;
 mod issue_event;
 mod key;
 mod org;
@@ -24,16 +26,18 @@ pub use checks::{
     CheckAnnotationRecord, CheckRunApp, CheckRunRecord, CommitStatusRecord, SeededCheckRun,
     StatusState, combined_state, latest_per_context,
 };
+pub use comment::Comment;
 pub use gist::Gist;
 pub use hook::{Delivery, Hook};
+pub use issue::{Issue, IssueState, LockReason, StateReason};
 pub use issue_event::{IssueEvent, IssueEventKind, IssueEventLabel};
 pub use key::{InvalidSha, Name, NameMap, Sha, fold};
 pub use org::OrgRole;
 pub(crate) use org::TEAM_PERMISSIONS;
 pub use release::{Asset, Release};
 pub use repo::{
-    ActionsPublicKey, CheckSuiteRecord, Issue, LabelRecord, Milestone, NewTimelineEvent,
-    Permission, PullRequest, Repo, ReviewDecision, ReviewThread, ReviewThreadComment, Settings,
+    ActionsPublicKey, CheckSuiteRecord, LabelRecord, Milestone, NewTimelineEvent, Permission,
+    PullRequest, Repo, ReviewDecision, ReviewThread, ReviewThreadComment, Settings,
     StoredActionsSecret, TimelineEvent, TimelineEventKind,
 };
 pub(crate) use runner::RunnerTokenKind;
@@ -465,7 +469,7 @@ impl State {
         id
     }
 
-    /// Append an issue or review comment to a seeded pull request.
+    /// Appends a conversation comment to a seeded pull request.
     pub fn add_issue_comment(
         &mut self,
         owner: &str,
@@ -477,20 +481,15 @@ impl State {
             .account_mut(owner)
             .and_then(|account| account.repo_mut(repo))
             .unwrap_or_else(|| panic!("no repository {owner}/{repo}"));
-        if let Some(issue) = repository.issues.get_mut(&number) {
-            issue.comments.push(comment);
-            issue.data.comments = issue.comments.len() as i64;
-        } else {
-            let pull = repository
-                .pull_requests
-                .get_mut(&number)
-                .unwrap_or_else(|| panic!("no issue or pull request {owner}/{repo}#{number}"));
-            let created_at = comment.created_at;
-            pull.issue_comments.push(comment);
-            if let Some(data) = &mut pull.data {
-                data.comments = pull.issue_comments.len() as i64;
-                data.updated_at = data.updated_at.max(created_at);
-            }
+        let pull = repository
+            .pull_requests
+            .get_mut(&number)
+            .unwrap_or_else(|| panic!("no pull request {owner}/{repo}#{number}"));
+        let created_at = comment.created_at;
+        pull.issue_comments.push(comment);
+        if let Some(data) = &mut pull.data {
+            data.comments = pull.issue_comments.len() as i64;
+            data.updated_at = data.updated_at.max(created_at);
         }
     }
 
@@ -569,19 +568,12 @@ impl State {
             .push(status);
     }
 
-    /// Adds an issue to an existing repository.
-    pub fn add_issue(&mut self, owner: &str, name: &str, number: u64, data: crate::types::Issue) {
+    /// Adds an issue to an existing repository under its number.
+    pub fn add_issue(&mut self, owner: &str, name: &str, issue: Issue) {
         let repo = self
             .account_mut(owner)
             .and_then(|account| account.repo_mut(name))
             .unwrap_or_else(|| panic!("no repository {owner}/{name}"));
-        repo.issues.insert(
-            number,
-            Issue {
-                data,
-                comments: Vec::new(),
-                events: Vec::new(),
-            },
-        );
+        repo.issues.insert(issue.number, issue);
     }
 }

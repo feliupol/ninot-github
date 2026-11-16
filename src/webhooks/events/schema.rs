@@ -59,7 +59,7 @@ fn every_event_payload_matches_its_schema() {
         &request,
         "admin",
         "tool",
-        user.clone(),
+        crate::state::Name::new("admin"),
         1,
         IssueSeed {
             title: SeedField::Present("Bug".to_owned()),
@@ -72,7 +72,18 @@ fn every_event_payload_matches_its_schema() {
         },
     )
     .unwrap();
-    state.add_issue("admin", "tool", 1, issue.clone());
+    state.add_issue("admin", "tool", issue);
+    let issue = {
+        let account = state.account("admin").unwrap();
+        let repo = account.repo("tool").unwrap();
+        let context = crate::render::IssueContext {
+            state: &state,
+            request: &request,
+            owner: &account.login,
+            repo,
+        };
+        crate::render::issue(context, &repo.issues[&1])
+    };
     let pull = fixtures::seeded_pull_request(
         &mut state,
         &request,
@@ -609,17 +620,7 @@ fn an_open_release_asset_is_delivered_uploaded() {
 #[test]
 fn an_issue_label_given_by_name_is_delivered_as_a_label() {
     let (mut state, request) = hooked_state();
-    let user = render::simple_user(&request, state.account("admin").unwrap());
-    let mut issue = fixtures::seeded_issue(
-        &mut state,
-        &request,
-        "admin",
-        "tool",
-        user,
-        1,
-        IssueSeed::default(),
-    )
-    .unwrap();
+    let mut issue = seeded_issue(&mut state, &request);
     issue.labels = vec![types::IssueLabelsItem::String("bug".to_owned())];
     issues::opened(&mut Ctx::new(&mut state, &request, "admin", "tool"), &issue).unwrap();
     let label = &sole_payload(&state)["issue"]["labels"][0];
@@ -629,17 +630,25 @@ fn an_issue_label_given_by_name_is_delivered_as_a_label() {
 
 /// An issue #1 in the repository of `hooked_state`.
 fn seeded_issue(state: &mut State, request: &ApiRequest) -> types::Issue {
-    let user = render::simple_user(request, state.account("admin").unwrap());
-    fixtures::seeded_issue(
+    let issue = fixtures::seeded_issue(
         state,
         request,
         "admin",
         "tool",
-        user,
+        crate::state::Name::new("admin"),
         1,
         IssueSeed::default(),
     )
-    .unwrap()
+    .unwrap();
+    state.add_issue("admin", "tool", issue);
+    let repo = state.account("admin").unwrap().repo("tool").unwrap();
+    let context = render::IssueContext {
+        state,
+        request,
+        owner: "admin",
+        repo,
+    };
+    render::issue(context, &repo.issues[&1])
 }
 
 /// The only delivery of `state` records `error` and carries no payload.

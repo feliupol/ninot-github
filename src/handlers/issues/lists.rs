@@ -78,7 +78,7 @@ impl Handler for ops::IssuesList {
         let criteria = criteria(request, Pulls::FromQuery, TypeQuery::Ignored)?;
         let rows = {
             let state = lock(state);
-            listed(&state, caller, scope, &criteria)
+            listed(&state, request, caller, scope, &criteria)
         };
         Ok(paginate(request, &request.path, rows))
     }
@@ -95,7 +95,7 @@ impl Handler for ops::IssuesListForOrg {
         // Issues endpoints may return pull requests too.
         // Source: <https://docs.github.com/en/rest/issues/issues#list-organization-issues-assigned-to-the-authenticated-user>
         let criteria = criteria(request, Pulls::Included, TypeQuery::FromQuery)?;
-        let rows = listed(&state, caller, Scope::Organization(org), &criteria);
+        let rows = listed(&state, request, caller, Scope::Organization(org), &criteria);
         Ok(paginate(request, &request.path, rows))
     }
 }
@@ -107,7 +107,7 @@ impl Handler for ops::IssuesListForAuthenticatedUser {
         let criteria = criteria(request, Pulls::Included, TypeQuery::Ignored)?;
         let rows = {
             let state = lock(state);
-            listed(&state, caller, Scope::Administered, &criteria)
+            listed(&state, request, caller, Scope::Administered, &criteria)
         };
         Ok(paginate(request, &request.path, rows))
     }
@@ -195,9 +195,15 @@ fn is_organization(state: &State, org: &str) -> bool {
         .is_some_and(|account| account.kind == AccountKind::Organization)
 }
 
-fn listed(state: &State, caller: &Caller, scope: Scope, criteria: &Criteria) -> Vec<types::Issue> {
+fn listed(
+    state: &State,
+    request: &ApiRequest,
+    caller: &Caller,
+    scope: Scope,
+    criteria: &Criteria,
+) -> Vec<types::Issue> {
     let repos = selected(state, caller, &scope);
-    let mut rows = issues_from(state, &repos, criteria, &caller.login);
+    let mut rows = issues_from(state, request, &repos, criteria, &caller.login);
     sort_rows(&mut rows, &criteria.sort, criteria.ascending);
     rows
 }
@@ -251,6 +257,7 @@ fn in_scope(repo: &Selection, scope: &Scope) -> bool {
 
 fn issues_from(
     state: &State,
+    request: &ApiRequest,
     repos: &[Selection],
     criteria: &Criteria,
     login: &str,
@@ -263,9 +270,16 @@ fn issues_from(
         else {
             continue;
         };
+        let context = render::IssueContext {
+            state,
+            request,
+            owner: &repo.owner,
+            repo: repository,
+        };
         for issue in repository.issues.values() {
-            if accepts(&issue.data, criteria, login) {
-                rows.push(issue.data.clone());
+            let issue = render::issue(context, issue);
+            if accepts(&issue, criteria, login) {
+                rows.push(issue);
             }
         }
         if !criteria.include_pulls {

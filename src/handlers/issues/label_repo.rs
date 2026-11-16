@@ -1,8 +1,9 @@
 //! Repository label catalog: create, read, update and delete.
 //!
-//! A label that exists only as a copy on an issue or pull request is part of the catalog.
-//! Updating it stores the label on the repository and rewrites every copy. Deleting it removes
-//! the stored label and those copies.
+//! Issues reference stored labels by name. A label that exists only as a copy on a pull request
+//! is part of the catalog too. Updating a label stores it on the repository, renames its issue
+//! references and rewrites every copy. Deleting it removes the stored label, those references
+//! and those copies.
 
 #![expect(
     clippy::disallowed_types,
@@ -99,13 +100,10 @@ impl Handler for ops::IssuesDeleteLabel {
         repo.labels.remove_name(&key);
         let now = crate::time::now_utc();
         for issue in repo.issues.values_mut() {
-            let before = issue.data.labels.len();
-            issue
-                .data
-                .labels
-                .retain(|label| !super::labels::named(label, &key));
-            if issue.data.labels.len() != before {
-                issue.data.updated_at = now;
+            let before = issue.labels.len();
+            issue.labels.retain(|label| label.folded() != key);
+            if issue.labels.len() != before {
+                issue.updated_at = now;
             }
         }
         for pull in repo
@@ -309,19 +307,18 @@ fn apply_archive(label: &mut LabelRecord, archived: Option<bool>, archiver: Opti
 }
 
 fn rewrite_copies(repo: &mut crate::state::Repo, previous: &str, label: &types::Label) {
-    let on_issue = render::label_on_issue(label);
     let on_pull = render::label_on_pull(label);
     let now = crate::time::now_utc();
     for issue in repo.issues.values_mut() {
         let mut changed = false;
-        for slot in &mut issue.data.labels {
-            if super::labels::named(slot, previous) {
-                *slot = on_issue.clone();
+        for slot in &mut issue.labels {
+            if slot.folded() == previous {
+                *slot = crate::state::Name::new(label.name.clone());
                 changed = true;
             }
         }
         if changed {
-            issue.data.updated_at = now;
+            issue.updated_at = now;
         }
     }
     for pull in repo

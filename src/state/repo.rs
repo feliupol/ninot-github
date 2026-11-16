@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use super::{CheckRunRecord, CommitStatusRecord, Hook, IssueEvent, Name, Release, State};
+use super::{CheckRunRecord, CommitStatusRecord, Hook, Issue, IssueEvent, Name, Release, State};
 use crate::api::{ApiResponse, Caller};
 use crate::time::now;
 use crate::types::{
@@ -440,17 +440,6 @@ pub struct ReviewThreadComment {
     pub body: String,
     /// Last update timestamp.
     pub updated_at: String,
-}
-
-/// An issue and its comments, as GitHub REST reads them.
-#[derive(Clone)]
-pub struct Issue {
-    /// The GitHub REST issue model.
-    pub data: crate::types::Issue,
-    /// Comments returned by the issue comments endpoint.
-    pub comments: Vec<crate::types::IssueComment>,
-    /// Issue events, oldest first, as `GET .../issues/{number}/events` lists them.
-    pub events: Vec<IssueEvent>,
 }
 
 /// A repository milestone.

@@ -29,7 +29,7 @@ mod git_store;
 mod git_tags;
 mod git_trees;
 mod hooks;
-mod issues;
+pub(crate) mod issues;
 mod meta;
 mod org_members;
 mod org_support;

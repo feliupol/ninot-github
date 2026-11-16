@@ -14,6 +14,7 @@ use super::types::{
     IssueState, MilestoneState, PullRequestReviewDecision, PullRequestReviewState, StatusState,
 };
 use crate::state::{self, Account, Issue, Repo, ReviewDecision, State};
+use crate::urls::Urls;
 
 /// The stored repository `owner/name`.
 pub(super) fn repo<'a>(state: &'a State, owner: &str, name: &str) -> Option<&'a Repo> {
@@ -93,7 +94,7 @@ pub(super) fn can_push(account: &Account, repo: &Repo, login: &str) -> bool {
 
 /// Whether an issue is open.
 pub(super) fn issue_open(issue: &Issue) -> bool {
-    issue.data.state == "open"
+    issue.is_open()
 }
 
 /// An issue's state.
@@ -107,51 +108,42 @@ pub(super) fn issue_state(issue: &Issue) -> IssueState {
 
 /// An issue's node id.
 pub(super) fn issue_id(issue: &Issue) -> &str {
-    &issue.data.node_id
+    &issue.node_id
 }
 
 /// An issue's title.
 pub(super) fn issue_title(issue: &Issue) -> &str {
-    &issue.data.title
+    &issue.title
 }
 
 /// An issue's body.
 pub(super) fn issue_body(issue: &Issue) -> Option<&str> {
-    issue.data.body.as_deref()
+    issue.body.as_deref()
 }
 
 /// An issue's web page.
-pub(super) fn issue_url(issue: &Issue) -> &str {
-    &issue.data.html_url
+pub(super) fn issue_url(urls: &Urls<'_>, owner: &str, repo: &Repo, issue: &Issue) -> String {
+    urls.repo(owner, &repo.name).issue(issue.number).html
 }
 
 /// Whether an issue is locked.
 pub(super) fn issue_locked(issue: &Issue) -> bool {
-    issue.data.locked
+    issue.locked
 }
 
 /// Whether `login` opened the issue.
 pub(super) fn issue_authored_by(issue: &Issue, login: &str) -> bool {
-    issue
-        .data
-        .user
-        .as_ref()
-        .is_some_and(|author| author.login.eq_ignore_ascii_case(login))
+    issue.authored_by(login)
 }
 
 /// An issue's labels.
 pub(super) fn issue_labels(issue: &Issue) -> Vec<Label> {
-    use crate::types::IssueLabelsItem;
-
     issue
-        .data
         .labels
         .iter()
-        .filter_map(|label| match label {
-            IssueLabelsItem::String(name) => Some(name.clone()),
-            IssueLabelsItem::Object { name, .. } => name.clone(),
+        .map(|name| Label {
+            name: name.as_str().to_owned(),
         })
-        .map(|name| Label { name })
         .collect()
 }
 
@@ -161,29 +153,38 @@ pub(super) fn issue_comments(issue: &Issue) -> Vec<Comment> {
         .comments
         .iter()
         .map(|comment| Comment {
-            body: comment.body.clone().unwrap_or_default(),
+            body: comment.body.clone(),
             created_at: comment.created_at.to_rfc3339(),
             author: comment
-                .user
+                .author
                 .as_ref()
-                .map(|user| Actor::of_login(&user.login, &user.type_)),
+                .map(|login| Actor::of_login(login.as_str(), "User")),
         })
         .collect()
 }
 
 /// An issue's milestone.
-pub(super) fn issue_milestone(issue: &Issue) -> Option<Milestone> {
+pub(super) fn issue_milestone(
+    urls: &Urls<'_>,
+    owner: &str,
+    repo: &Repo,
+    issue: &Issue,
+) -> Option<Milestone> {
     use crate::types::NullableMilestoneState as Rest;
 
-    issue.data.milestone.as_ref().map(|milestone| Milestone {
-        id: milestone.node_id.clone(),
-        number: milestone.number,
+    let milestone = repo.milestones.get(&issue.milestone?)?;
+    Some(Milestone {
+        id: crate::render::node_id("Milestone", milestone.id),
+        number: i64::try_from(milestone.number).expect("milestone number fits i64"),
         title: milestone.title.clone(),
         description: milestone.description.clone(),
         state: match milestone.state {
             Rest::Open => MilestoneState::Open,
             Rest::Closed => MilestoneState::Closed,
         },
-        url: milestone.html_url.clone(),
+        url: urls
+            .repo(owner, &repo.name)
+            .milestone(milestone.number)
+            .html,
     })
 }

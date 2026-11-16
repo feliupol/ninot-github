@@ -11,7 +11,10 @@ use chrono::{DateTime, Utc};
 use url::Url;
 
 use crate::api::ApiRequest;
-use crate::state::{Account, AccountKind, Milestone, Permission, Repo, State};
+use crate::state::{
+    Account, AccountKind, Comment, Issue, LabelRecord, Milestone, Permission, Repo, State,
+    StateReason, fold,
+};
 use crate::types;
 use crate::webhook_types;
 
@@ -1273,6 +1276,243 @@ pub fn milestone(source: &Milestone, view: MilestoneRender<'_>) -> types::Nullab
     }
 }
 
+/// Open and closed issue and pull request counts keyed by milestone number.
+pub fn milestone_counts(repo: &Repo) -> std::collections::BTreeMap<u64, (i64, i64)> {
+    let mut counts = std::collections::BTreeMap::<u64, (i64, i64)>::new();
+    let mut bump = |number: u64, open: bool| {
+        let entry = counts.entry(number).or_insert((0, 0));
+        if open {
+            entry.0 += 1;
+        } else {
+            entry.1 += 1;
+        }
+    };
+    for issue in repo.issues.values() {
+        if let Some(number) = issue.milestone {
+            bump(number, issue.is_open());
+        }
+    }
+    for pull in repo
+        .pull_requests
+        .values()
+        .filter_map(|pull| pull.data.as_ref())
+    {
+        if let Some(milestone) = &pull.milestone
+            && let Ok(number) = u64::try_from(milestone.number)
+        {
+            bump(number, pull.state == types::PullRequestState::Open);
+        }
+    }
+    counts
+}
+
+/// Renders a milestone of `repo` with its live issue counts.
+pub fn stored_milestone(
+    request: &ApiRequest,
+    owner: &str,
+    repo: &Repo,
+    milestone: &Milestone,
+) -> types::NullableMilestone {
+    let (open_issues, closed_issues) = milestone_counts(repo)
+        .get(&milestone.number)
+        .copied()
+        .unwrap_or((0, 0));
+    self::milestone(
+        milestone,
+        MilestoneRender {
+            request,
+            owner,
+            name: &repo.name,
+            open_issues,
+            closed_issues,
+        },
+    )
+}
+
+/// What rendering an issue or one of its comments reads besides the record itself.
+#[derive(Clone, Copy)]
+pub struct IssueContext<'a> {
+    /// Accounts the issue's users are looked up in.
+    pub state: &'a State,
+    /// Request the response is being built for.
+    pub request: &'a ApiRequest,
+    /// Login of the repository owner.
+    pub owner: &'a str,
+    /// Repository holding the issue, its labels and milestones.
+    pub repo: &'a Repo,
+}
+
+impl IssueContext<'_> {
+    fn user(&self, login: &str) -> types::SimpleUser {
+        let account = self
+            .state
+            .account(login)
+            .unwrap_or_else(|| panic!("issue user {login} is not an account"));
+        simple_user(self.request, account)
+    }
+
+    /// How `login` relates to the repository.
+    ///
+    /// Source: https://docs.github.com/en/graphql/reference/enums#commentauthorassociation
+    /// (OWNER, MEMBER of the owning organization, NONE otherwise; this fake stores no outside
+    /// collaborators or contributor history).
+    fn association(&self, login: &str) -> types::AuthorAssociation {
+        if self.owner.eq_ignore_ascii_case(login) {
+            return types::AuthorAssociation::Owner;
+        }
+        let member = self.state.account(self.owner).is_some_and(|owner| {
+            owner.kind == AccountKind::Organization && owner.members.contains(fold(login).as_ref())
+        });
+        if member {
+            types::AuthorAssociation::Member
+        } else {
+            types::AuthorAssociation::None
+        }
+    }
+}
+
+/// Renders a stored issue.
+///
+/// # Panics
+///
+/// When a label, milestone or user the issue references is not stored.
+pub fn issue(context: IssueContext<'_>, issue: &Issue) -> types::Issue {
+    let repo_urls = context
+        .request
+        .urls()
+        .repo(context.owner, &context.repo.name);
+    let urls = repo_urls.issue(issue.number);
+    let number = id(issue.number);
+    let assignees: Vec<types::SimpleUser> = issue
+        .assignees
+        .iter()
+        .map(|login| context.user(login.as_str()))
+        .collect();
+    let labels = issue
+        .labels
+        .iter()
+        .map(|name| {
+            let stored = context
+                .repo
+                .labels
+                .get(name.folded())
+                .unwrap_or_else(|| panic!("issue label {name} is not stored"));
+            label_on_issue(&self::label(
+                context.state,
+                context.request,
+                context.owner,
+                &context.repo.name,
+                stored,
+            ))
+        })
+        .collect();
+    let milestone = issue.milestone.map(|number| {
+        let stored = context
+            .repo
+            .milestones
+            .get(&number)
+            .unwrap_or_else(|| panic!("issue milestone {number} is not stored"));
+        stored_milestone(context.request, context.owner, context.repo, stored)
+    });
+    types::Issue {
+        active_lock_reason: issue.lock_reason.map(|reason| reason.as_str().to_owned()),
+        // Source: OpenAPI example `issue` (issues/get 200), whose `assignee` is the first of
+        // its `assignees`; REST edits keep the same rule.
+        assignee: assignees.first().cloned().map(Into::into),
+        assignees,
+        author_association: Some(context.association(issue.author.as_str())),
+        body: issue.body.clone(),
+        body_html: None,
+        body_text: None,
+        closed_at: issue.closed_at,
+        closed_by: issue
+            .closed_by
+            .as_ref()
+            .map(|login| context.user(login.as_str()).into()),
+        comments: i64::try_from(issue.comments.len()).expect("comment counts fit in i64"),
+        comments_url: urls.comments(),
+        created_at: issue.created_at,
+        draft: None,
+        events_url: urls.events(),
+        html_url: urls.html.clone(),
+        id: number,
+        issue_dependencies_summary: None,
+        issue_field_values: Vec::new(),
+        labels,
+        labels_url: urls.labels(),
+        locked: issue.locked,
+        milestone,
+        node_id: issue.node_id.clone(),
+        number,
+        parent_issue_url: None,
+        performed_via_github_app: None,
+        pinned_comment: None,
+        pull_request: None,
+        reactions: None,
+        repository: None,
+        repository_url: repo_urls.api.clone(),
+        state: issue.state.as_str().to_owned(),
+        state_reason: issue.state_reason.map(state_reason),
+        sub_issues_summary: None,
+        timeline_url: None,
+        title: issue.title.clone(),
+        type_: None,
+        updated_at: issue.updated_at,
+        url: urls.api,
+        user: Some(context.user(issue.author.as_str()).into()),
+    }
+}
+
+fn state_reason(reason: StateReason) -> types::IssueStateReason {
+    match reason {
+        StateReason::Completed => types::IssueStateReason::Completed,
+        StateReason::NotPlanned => types::IssueStateReason::NotPlanned,
+        StateReason::Duplicate => types::IssueStateReason::Duplicate,
+        StateReason::Reopened => types::IssueStateReason::Reopened,
+    }
+}
+
+/// Renders a stored comment on the issue `number`.
+pub fn issue_comment(
+    context: IssueContext<'_>,
+    number: u64,
+    comment: &Comment,
+) -> types::IssueComment {
+    let repo_urls = context
+        .request
+        .urls()
+        .repo(context.owner, &context.repo.name);
+    let urls = repo_urls.issue(number);
+    types::IssueComment {
+        author_association: Some(
+            comment
+                .author
+                .as_ref()
+                .map_or(types::AuthorAssociation::None, |login| {
+                    context.association(login.as_str())
+                }),
+        ),
+        body: Some(comment.body.clone()),
+        body_html: None,
+        body_text: None,
+        created_at: comment.created_at,
+        html_url: urls.comment_html(comment.id),
+        id: id(comment.id),
+        issue_url: urls.api,
+        minimized: None,
+        node_id: node_id("IssueComment", comment.id),
+        performed_via_github_app: None,
+        pin: None,
+        reactions: None,
+        updated_at: comment.updated_at,
+        url: repo_urls.issue_comment(comment.id),
+        user: comment
+            .author
+            .as_ref()
+            .map(|login| context.user(login.as_str()).into()),
+    }
+}
+
 /// The issue-label object embedded on an issue, copied from a repository label.
 pub fn label_on_issue(label: &types::Label) -> types::IssueLabelsItem {
     types::IssueLabelsItem::Object {
@@ -1284,6 +1524,30 @@ pub fn label_on_issue(label: &types::Label) -> types::IssueLabelsItem {
         name: Some(label.name.clone()),
         node_id: Some(label.node_id.clone()),
         url: Some(label.url.clone()),
+    }
+}
+
+/// A stored label of `owner/name` as the label endpoints return it.
+pub fn label(
+    state: &State,
+    request: &ApiRequest,
+    owner: &str,
+    name: &str,
+    label: &LabelRecord,
+) -> types::Label {
+    types::Label {
+        archived_at: label.archived_at,
+        archived_by: label
+            .archived_by
+            .as_deref()
+            .map(|login| referenced_user(state, request, login)),
+        color: label.color.clone(),
+        default: label.default,
+        description: label.description.clone(),
+        id: id(label.id),
+        name: label.name.clone(),
+        node_id: label.node_id.clone(),
+        url: request.urls().repo(owner, name).label(&label.name),
     }
 }
 

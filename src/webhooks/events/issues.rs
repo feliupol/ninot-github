@@ -288,12 +288,23 @@ mod tests {
             &request,
             "admin",
             "tool",
-            user.clone(),
+            crate::state::Name::new("admin"),
             1,
             IssueSeed::default(),
         )
         .unwrap();
-        state.add_issue("admin", "tool", 1, issue.clone());
+        state.add_issue("admin", "tool", issue);
+        let issue = {
+            let account = state.account("admin").unwrap();
+            let repo = account.repo("tool").unwrap();
+            let context = crate::render::IssueContext {
+                state: &state,
+                request: &request,
+                owner: &account.login,
+                repo,
+            };
+            crate::render::issue(context, &repo.issues[&1])
+        };
         let mut ctx = Ctx::new(&mut state, &request, "admin", "tool");
         edited(&mut ctx, &issue, Some("Earlier"), Some("")).unwrap();
         let mut closed_issue = issue.clone();

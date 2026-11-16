@@ -2031,3 +2031,320 @@ fn label_and_comment_urls_follow_github_shapes() {
         format!("{base}/admin/project/issues/{number}#issuecomment-{id}")
     );
 }
+
+fn label_names(body: &Value) -> Vec<String> {
+    body.as_array()
+        .unwrap()
+        .iter()
+        .map(|label| label["name"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[test]
+fn issue_labels_are_the_repository_labels() {
+    let server = Server::start().unwrap();
+    let repository = server
+        .create_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+    let admin = common::Api::admin(&server);
+    let stored = admin.post(
+        "/repos/admin/project/labels",
+        json!({"name": "bug", "color": "abcdef"}),
+    );
+    assert_eq!(stored.status, 201, "{:?}", stored.body);
+
+    let created = admin.post(
+        "/repos/admin/project/issues",
+        json!({"title": "Labelled", "labels": ["Bug", "fresh", "bug"]}),
+    );
+    assert_eq!(created.status, 201, "{:?}", created.body);
+    assert_eq!(label_names(&created.body["labels"]), ["bug", "fresh"]);
+    assert_eq!(created.body["labels"][0]["color"], "abcdef");
+    assert_eq!(created.body["labels"][0]["id"], stored.body["id"]);
+    let issue = format!(
+        "/repos/admin/project/issues/{}",
+        created.body["number"].as_u64().unwrap()
+    );
+
+    let added = admin.post(&format!("{issue}/labels"), json!({"labels": ["BUG"]}));
+    assert_eq!(added.status, 200, "{:?}", added.body);
+    assert_eq!(label_names(&added.body), ["bug", "fresh"]);
+
+    let removed = admin.delete(&format!("{issue}/labels/fresh"));
+    assert_eq!(removed.status, 200, "{:?}", removed.body);
+    assert_eq!(
+        label_names(&admin.get("/repos/admin/project/labels").body),
+        ["bug", "fresh"]
+    );
+
+    repository
+        .create_issue(
+            50,
+            IssueSeed {
+                labels: SeedField::present(vec![LabelSeed {
+                    name: SeedField::present("BUG".to_owned()),
+                    color: SeedField::present("abcdef".to_owned()),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let seeded = admin.get("/repos/admin/project/issues/50");
+    assert_eq!(seeded.body["labels"][0]["name"], "bug");
+    assert_eq!(seeded.body["labels"][0]["id"], stored.body["id"]);
+
+    let contradicting = repository.create_issue(
+        51,
+        IssueSeed {
+            labels: SeedField::present(vec![LabelSeed {
+                name: SeedField::present("bug".to_owned()),
+                color: SeedField::present("000000".to_owned()),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        },
+    );
+    let error = contradicting
+        .err()
+        .expect("a contradicting label seed fails");
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput, "{error}");
+}
+
+#[test]
+fn issue_assignee_is_the_first_assignee() {
+    let server = Server::start().unwrap();
+    let repository = server
+        .create_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+    let admin = common::Api::admin(&server);
+    repository
+        .create_issue(
+            1,
+            IssueSeed {
+                assignees: SeedField::present(vec![user("bob"), user("carol")]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let both = admin.get("/repos/admin/project/issues/1");
+    assert_eq!(both.body["assignee"]["login"], "bob");
+    assert_eq!(logins(&both.body["assignees"]), ["bob", "carol"]);
+
+    repository
+        .create_issue(
+            2,
+            IssueSeed {
+                assignee: SeedField::present(Some(user("carol"))),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let single = admin.get("/repos/admin/project/issues/2");
+    assert_eq!(single.body["assignee"]["login"], "carol");
+    assert_eq!(logins(&single.body["assignees"]), ["carol"]);
+
+    let disagreeing = repository.create_issue(
+        3,
+        IssueSeed {
+            assignee: SeedField::present(Some(user("carol"))),
+            assignees: SeedField::present(vec![user("bob")]),
+            ..Default::default()
+        },
+    );
+    assert!(disagreeing.is_err());
+}
+
+#[test]
+fn author_association_follows_the_repository_owner() {
+    let server = Server::start().unwrap();
+    server.add_user("bob");
+    server.add_user("carol");
+    server.add_org("acme", &["bob"]);
+    let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
+    let carol_token = server.user("carol").unwrap().add_token(&["repo"]);
+    let bob = common::Api::new(&server, Some(&bob_token));
+    let carol = common::Api::new(&server, Some(&carol_token));
+    let admin = common::Api::admin(&server);
+    server
+        .create_repository("acme", "tool", false, None, None, "main")
+        .unwrap();
+    let repository = server
+        .create_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+
+    let member_issue = bob.post("/repos/acme/tool/issues", json!({"title": "From a member"}));
+    assert_eq!(member_issue.status, 201, "{:?}", member_issue.body);
+    assert_eq!(member_issue.body["author_association"], "MEMBER");
+    let number = member_issue.body["number"].as_u64().unwrap();
+    let member_comment = bob.post(
+        &format!("/repos/acme/tool/issues/{number}/comments"),
+        json!({"body": "mine"}),
+    );
+    assert_eq!(member_comment.status, 201, "{:?}", member_comment.body);
+    assert_eq!(member_comment.body["author_association"], "MEMBER");
+
+    let issue = repository
+        .create_issue(
+            1,
+            IssueSeed {
+                user: SeedField::present(user("carol")),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        admin.get("/repos/admin/project/issues/1").body["author_association"],
+        "NONE"
+    );
+    issue
+        .create_comment(IssueCommentSeed {
+            user: SeedField::present(Some(user("admin"))),
+            ..Default::default()
+        })
+        .unwrap();
+    let outsider = carol.post(
+        "/repos/admin/project/issues/1/comments",
+        json!({"body": "drive-by"}),
+    );
+    assert_eq!(outsider.status, 201, "{:?}", outsider.body);
+    assert_eq!(outsider.body["author_association"], "NONE");
+    let comments = admin.get("/repos/admin/project/issues/1/comments");
+    assert_eq!(comments.body[0]["author_association"], "OWNER");
+    assert_eq!(comments.body[1]["author_association"], "NONE");
+}
+
+#[test]
+fn seeded_issue_comments_link_to_the_issue() {
+    let server = Server::start().unwrap();
+    let repository = server
+        .create_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+    let admin = common::Api::admin(&server);
+    repository
+        .create_issue(4, IssueSeed::default())
+        .unwrap()
+        .create_comment(IssueCommentSeed::default())
+        .unwrap();
+    let comment = &admin.get("/repos/admin/project/issues/4/comments").body[0];
+    let id = comment["id"].as_u64().unwrap();
+    assert_eq!(
+        comment["html_url"],
+        format!("{}/admin/project/issues/4#issuecomment-{id}", server.url())
+    );
+}
+
+#[test]
+fn issue_seeds_reject_values_issues_derive() {
+    let server = Server::start().unwrap();
+    let repository = server
+        .create_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+    let styled_user = UserSeed {
+        login: SeedField::present("bob".to_owned()),
+        avatar_url: SeedField::present("https://example.com/bob.png".to_owned()),
+        ..Default::default()
+    };
+    let refused = [
+        IssueSeed {
+            user: SeedField::present(styled_user.clone()),
+            ..Default::default()
+        },
+        IssueSeed {
+            comments: SeedField::present(3),
+            ..Default::default()
+        },
+        IssueSeed {
+            state: SeedField::present("merged".to_owned()),
+            ..Default::default()
+        },
+    ];
+    for (offset, seed) in refused.into_iter().enumerate() {
+        let error = repository
+            .create_issue(10 + offset as u64, seed)
+            .err()
+            .expect("the seed is refused");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput, "{error}");
+    }
+    let issue = repository
+        .create_issue(
+            20,
+            IssueSeed {
+                comments: SeedField::present(0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let error = issue
+        .create_comment(IssueCommentSeed {
+            user: SeedField::present(Some(styled_user)),
+            ..Default::default()
+        })
+        .expect_err("a styled comment author is refused");
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput, "{error}");
+}
+
+#[test]
+fn issue_urls_follow_a_repository_rename() {
+    let server = Server::start().unwrap();
+    let repository = server
+        .create_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+    let admin = common::Api::admin(&server);
+    repository
+        .create_issue(1, IssueSeed::default())
+        .unwrap()
+        .create_comment(IssueCommentSeed::default())
+        .unwrap();
+    let renamed = admin.patch("/repos/admin/project", json!({"name": "renamed"}));
+    assert_eq!(renamed.status, 200, "{:?}", renamed.body);
+    let base = server.url();
+    let issue = admin.get("/repos/admin/renamed/issues/1");
+    assert_eq!(issue.status, 200, "{:?}", issue.body);
+    assert_eq!(
+        issue.body["url"],
+        format!("{base}/repos/admin/renamed/issues/1")
+    );
+    assert_eq!(
+        issue.body["html_url"],
+        format!("{base}/admin/renamed/issues/1")
+    );
+    let comment = &admin.get("/repos/admin/renamed/issues/1/comments").body[0];
+    assert_eq!(
+        comment["issue_url"],
+        format!("{base}/repos/admin/renamed/issues/1")
+    );
+}
+
+#[test]
+fn issue_users_follow_their_accounts() {
+    let server = Server::start().unwrap();
+    let repository = server
+        .create_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+    let admin = common::Api::admin(&server);
+    repository
+        .create_issue(
+            1,
+            IssueSeed {
+                user: SeedField::present(user("bob")),
+                assignees: SeedField::present(vec![user("bob")]),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .create_comment(IssueCommentSeed {
+            user: SeedField::present(Some(user("bob"))),
+            ..Default::default()
+        })
+        .unwrap();
+    server
+        .user("bob")
+        .unwrap()
+        .set_name(Some("Bob Builder".to_owned()));
+    let issue = admin.get("/repos/admin/project/issues/1").body;
+    assert_eq!(issue["user"]["name"], "Bob Builder");
+    assert_eq!(issue["assignees"][0]["name"], "Bob Builder");
+    let comments = admin.get("/repos/admin/project/issues/1/comments").body;
+    assert_eq!(comments[0]["user"]["name"], "Bob Builder");
+}

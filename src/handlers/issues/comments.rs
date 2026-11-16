@@ -15,8 +15,9 @@ use serde_json::Value;
 
 use super::super::Handler;
 use crate::api::{ApiRequest, ApiResponse, ApiResult, paginate};
-use crate::handlers::repos::find_repo;
+use crate::handlers::repos::{Found, find_repo};
 use crate::operation::ops;
+use crate::render;
 use crate::state::{Repo, State, lock};
 use crate::types;
 use crate::webhooks::events;
@@ -33,7 +34,7 @@ impl Handler for ops::IssuesGetComment {
         let found = find_repo(&state, request)?;
         let id = super::comment_id(request)?;
         let comment = locate(found.repo(&state), id)
-            .map(|place| comment_at(found.repo(&state), &place).clone())
+            .map(|place| rendered(&state, request, &found, &place))
             .ok_or_else(ApiResponse::not_found)?;
         Ok(ApiResponse::typed(200, &comment))
     }
@@ -48,10 +49,8 @@ impl Handler for ops::IssuesUpdateComment {
         let found = find_repo(&state, request)?;
         let id = super::comment_id(request)?;
         let place = locate(found.repo(&state), id).ok_or_else(ApiResponse::not_found)?;
-        let author = comment_at(found.repo(&state), &place)
-            .user
-            .as_ref()
-            .map(|user| user.login.clone());
+        let before = rendered(&state, request, &found, &place);
+        let author = before.user.as_ref().map(|user| user.login.clone());
         if !may_change(&found, author.as_deref(), &caller.login) {
             return Err(ApiResponse::error(
                 403,
@@ -59,11 +58,9 @@ impl Handler for ops::IssuesUpdateComment {
             ));
         }
         let number = place_number(&place);
-        let old_body = comment_at(found.repo(&state), &place)
-            .body
-            .clone()
-            .unwrap_or_default();
-        let comment = write_body(found.repo_mut(&mut state), &place, text);
+        let old_body = before.body.unwrap_or_default();
+        write_body(found.repo_mut(&mut state), &place, text);
+        let comment = rendered(&state, request, &found, &place);
         let mut ctx = super::webhook_ctx(&mut state, request, &found);
         events::issue_comment::edited(&mut ctx, number, &comment, &old_body)?;
         Ok(ApiResponse::typed(200, &comment))
@@ -77,10 +74,8 @@ impl Handler for ops::IssuesDeleteComment {
         let found = find_repo(&state, request)?;
         let id = super::comment_id(request)?;
         let place = locate(found.repo(&state), id).ok_or_else(ApiResponse::not_found)?;
-        let author = comment_at(found.repo(&state), &place)
-            .user
-            .as_ref()
-            .map(|user| user.login.clone());
+        let comment = rendered(&state, request, &found, &place);
+        let author = comment.user.as_ref().map(|user| user.login.clone());
         if !may_change(&found, author.as_deref(), &caller.login) {
             return Err(ApiResponse::error(
                 403,
@@ -88,7 +83,6 @@ impl Handler for ops::IssuesDeleteComment {
             ));
         }
         let number = place_number(&place);
-        let comment = comment_at(found.repo(&state), &place).clone();
         remove_comment(found.repo_mut(&mut state), &place);
         let mut ctx = super::webhook_ctx(&mut state, request, &found);
         events::issue_comment::deleted(&mut ctx, number, &comment)?;
@@ -104,7 +98,7 @@ impl Handler for ops::IssuesListCommentsForRepo {
             Some(value) => Some(super::parse_timestamp(value, "Issue", "since")?),
             None => None,
         };
-        let mut comments = gather(found.repo(&state));
+        let mut comments = gather(&state, request, &found);
         if let Some(since) = since {
             comments.retain(|comment| comment.updated_at > since);
         }
@@ -135,7 +129,10 @@ fn may_change(found: &crate::handlers::repos::Found, author: Option<&str>, login
 
 fn locate(repo: &Repo, id: i64) -> Option<Place> {
     for (number, issue) in &repo.issues {
-        if let Some(index) = issue.comments.iter().position(|comment| comment.id == id) {
+        if let Some(index) = u64::try_from(id)
+            .ok()
+            .and_then(|id| issue.comment_index(id))
+        {
             return Some(Place::Issue {
                 number: *number,
                 index,
@@ -163,23 +160,35 @@ fn place_number(place: &Place) -> u64 {
     }
 }
 
-fn comment_at<'a>(repo: &'a Repo, place: &Place) -> &'a types::IssueComment {
+/// The comment at `place` as the REST API returns it.
+fn rendered(
+    state: &State,
+    request: &ApiRequest,
+    found: &Found,
+    place: &Place,
+) -> types::IssueComment {
+    let context = super::context(state, request, found);
     match place {
-        Place::Issue { number, index } => &repo.issues[number].comments[*index],
-        Place::Pull { number, index } => &repo.pull_requests[number].issue_comments[*index],
+        Place::Issue { number, index } => render::issue_comment(
+            context,
+            *number,
+            &context.repo.issues[number].comments[*index],
+        ),
+        Place::Pull { number, index } => {
+            context.repo.pull_requests[number].issue_comments[*index].clone()
+        }
     }
 }
 
-fn write_body(repo: &mut Repo, place: &Place, text: String) -> types::IssueComment {
+fn write_body(repo: &mut Repo, place: &Place, text: String) {
     let now = crate::time::now_utc();
     match place {
         Place::Issue { number, index } => {
             let issue = repo.issues.get_mut(number).expect("comment located");
-            issue.data.updated_at = now;
+            issue.updated_at = now;
             let comment = &mut issue.comments[*index];
-            comment.body = Some(text);
+            comment.body = text;
             comment.updated_at = now;
-            comment.clone()
         }
         Place::Pull { number, index } => {
             let pull = repo.pull_requests.get_mut(number).expect("comment located");
@@ -189,7 +198,6 @@ fn write_body(repo: &mut Repo, place: &Place, text: String) -> types::IssueComme
             let comment = &mut pull.issue_comments[*index];
             comment.body = Some(text);
             comment.updated_at = now;
-            comment.clone()
         }
     }
 }
@@ -200,8 +208,7 @@ fn remove_comment(repo: &mut Repo, place: &Place) {
         Place::Issue { number, index } => {
             let issue = repo.issues.get_mut(number).expect("comment located");
             issue.comments.remove(*index);
-            issue.data.comments = issue.comments.len() as i64;
-            issue.data.updated_at = now;
+            issue.updated_at = now;
         }
         Place::Pull { number, index } => {
             let pull = repo.pull_requests.get_mut(number).expect("comment located");
@@ -214,10 +221,17 @@ fn remove_comment(repo: &mut Repo, place: &Place) {
     }
 }
 
-fn gather(repo: &Repo) -> Vec<types::IssueComment> {
+fn gather(state: &State, request: &ApiRequest, found: &Found) -> Vec<types::IssueComment> {
+    let context = super::context(state, request, found);
+    let repo = context.repo;
     let mut comments = Vec::new();
-    for issue in repo.issues.values() {
-        comments.extend(issue.comments.iter().cloned());
+    for (number, issue) in &repo.issues {
+        comments.extend(
+            issue
+                .comments
+                .iter()
+                .map(|comment| render::issue_comment(context, *number, comment)),
+        );
     }
     for pull in repo.pull_requests.values() {
         comments.extend(pull.issue_comments.iter().cloned());

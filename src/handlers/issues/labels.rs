@@ -30,7 +30,7 @@ impl Handler for ops::IssuesSetLabels {
         let found = find_repo(&state, request)?;
         let number = super::issue_number(request)?;
         let names = requested_names(&body)?;
-        let before = super::record::snapshot(found.repo(&state), number)?;
+        let before = super::record::snapshot(&state, request, &found, number)?;
         let current = before
             .labels
             .iter()
@@ -59,11 +59,12 @@ impl Handler for ops::IssuesSetLabels {
             .collect();
         let actor = super::caller_user(&state, request, &caller.login)?;
         let repo = found.repo_mut(&mut state);
+        let names = super::issue_label_names(repo, number, &labels);
         super::with_subject(
             repo,
             number,
             |issue| {
-                issue.labels = labels.iter().map(render::label_on_issue).collect();
+                issue.labels = names;
                 issue.updated_at = crate::time::now_utc();
                 Ok(())
             },
@@ -74,7 +75,7 @@ impl Handler for ops::IssuesSetLabels {
             },
         )?;
         fire_label_diff(&mut state, request, &found, number, &added, &removed)?;
-        let after = super::record::snapshot(found.repo(&state), number)?;
+        let after = super::record::snapshot(&state, request, &found, number)?;
         super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
         Ok(ApiResponse::typed(200, &labels))
     }
@@ -86,7 +87,7 @@ impl Handler for ops::IssuesRemoveAllLabels {
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         let number = super::issue_number(request)?;
-        let before = super::record::snapshot(found.repo(&state), number)?;
+        let before = super::record::snapshot(&state, request, &found, number)?;
         let current = before
             .labels
             .iter()
@@ -115,7 +116,7 @@ impl Handler for ops::IssuesRemoveAllLabels {
             },
         )?;
         fire_label_diff(&mut state, request, &found, number, &[], &removed)?;
-        let after = super::record::snapshot(found.repo(&state), number)?;
+        let after = super::record::snapshot(&state, request, &found, number)?;
         super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
         Ok(ApiResponse::no_content())
     }
@@ -128,7 +129,7 @@ impl Handler for ops::IssuesRemoveLabel {
         let found = find_repo(&state, request)?;
         let number = super::issue_number(request)?;
         let key = super::label_key(&super::decode_param(request.param("name")));
-        let before = super::record::snapshot(found.repo(&state), number)?;
+        let before = super::record::snapshot(&state, request, &found, number)?;
         if !before
             .labels
             .iter()
@@ -146,7 +147,7 @@ impl Handler for ops::IssuesRemoveLabel {
         let actor = super::caller_user(&state, request, &caller.login)?;
         let remaining = remove_named(&mut state, &found, number, &key)?;
         fire_label_diff(&mut state, request, &found, number, &[], &removed)?;
-        let after = super::record::snapshot(found.repo(&state), number)?;
+        let after = super::record::snapshot(&state, request, &found, number)?;
         super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
         Ok(ApiResponse::typed(
             200,
@@ -238,11 +239,6 @@ pub(super) fn trimmed_name(name: &str) -> Result<String, ApiResponse> {
     Ok(name.to_owned())
 }
 
-/// Whether `label` is stored under the lowercase key `key`.
-pub(super) fn named(label: &types::IssueLabelsItem, key: &str) -> bool {
-    super::label_from_issue_item(label).is_some_and(|label| super::label_key(&label.name) == key)
-}
-
 fn remove_named(
     state: &mut State,
     found: &Found,
@@ -253,9 +249,13 @@ fn remove_named(
         found.repo_mut(state),
         number,
         |issue| {
-            issue.labels.retain(|label| !named(label, key));
+            issue.labels.retain(|label| label.folded() != key);
             issue.updated_at = crate::time::now_utc();
-            Ok(super::label_names(issue))
+            Ok(issue
+                .labels
+                .iter()
+                .map(|label| label.as_str().to_owned())
+                .collect())
         },
         |pull| {
             pull.labels
@@ -274,7 +274,7 @@ fn fire_label_diff(
     added: &[types::Label],
     removed: &[types::Label],
 ) -> Result<(), PayloadError> {
-    let issue = super::stored_issue(found.repo(state), number);
+    let issue = super::rendered_issue(state, request, found, number);
     let pull = super::stored_pull(found.repo(state), number);
     let mut ctx = super::webhook_ctx(state, request, found);
     if let Some(issue) = &issue {

@@ -104,9 +104,16 @@ fn deliver<P: Serialize>(
 
 /// The issue or pull request `number` as a webhook issue, when it exists.
 fn issue(ctx: &Ctx, number: u64) -> Option<Result<wt::Issue, PayloadError>> {
-    let repo = ctx.state.account(ctx.owner)?.repo(ctx.name)?;
+    let account = ctx.state.account(ctx.owner)?;
+    let repo = account.repo(ctx.name)?;
     if let Some(issue) = repo.issues.get(&number) {
-        return Some(model::issue(&issue.data));
+        let context = crate::render::IssueContext {
+            state: ctx.state,
+            request: ctx.request,
+            owner: &account.login,
+            repo,
+        };
+        return Some(model::issue(&crate::render::issue(context, issue)));
     }
     let pull = repo.pull_requests.get(&number)?.data.as_ref()?;
     Some(issue_from_pull(pull, &ctx.urls()))

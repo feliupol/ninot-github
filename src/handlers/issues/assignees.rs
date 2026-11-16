@@ -19,7 +19,7 @@ use crate::api::{ApiRequest, ApiResponse, ApiResult, paginate};
 use crate::handlers::repos::find_repo;
 use crate::operation::ops;
 use crate::render;
-use crate::state::{Account, State, lock};
+use crate::state::{Account, Name, State, lock};
 use crate::types;
 use crate::webhooks::events;
 
@@ -36,7 +36,7 @@ impl Handler for ops::IssuesAddAssignees {
         // Without push access the assignees are silently ignored.
         // Source: <https://docs.github.com/en/rest/issues/assignees#add-assignees-to-an-issue>
         if !found.permission.push {
-            return current_issue(&state, &found, number)
+            return current_issue(&state, request, &found, number)
                 .map(|issue| ApiResponse::typed(201, &issue));
         }
         let logins = match body.get("assignees") {
@@ -44,7 +44,7 @@ impl Handler for ops::IssuesAddAssignees {
             None => Vec::new(),
         };
         let added = resolve_assignees(&state, request, &found.owner, &logins)?;
-        let stored = super::stored_issue(found.repo(&state), number);
+        let stored = super::rendered_issue(&state, request, &found, number);
         let already = stored
             .as_ref()
             .map(|issue| issue.assignees.clone())
@@ -58,31 +58,31 @@ impl Handler for ops::IssuesAddAssignees {
             })
             .cloned()
             .collect();
-        let before = super::record::snapshot(found.repo(&state), number)?;
+        let before = super::record::snapshot(&state, request, &found, number)?;
         let actor = super::caller_user(&state, request, &caller.login)?;
-        let issue = super::with_subject(
+        let projected = super::with_subject(
             found.repo_mut(&mut state),
             number,
             |issue| {
-                let merged = merge_assignees(&issue.assignees, added.clone())?;
-                write_assignees(&mut issue.assignee, &mut issue.assignees, merged);
+                issue.assignees = merge_names(&issue.assignees, &added)?;
                 issue.updated_at = crate::time::now_utc();
-                Ok(issue.clone())
+                Ok(None)
             },
             |pull| {
                 let merged = merge_assignees(&pull.assignees, added.clone())?;
                 write_assignees(&mut pull.assignee, &mut pull.assignees, merged);
                 pull.updated_at = crate::time::now_utc();
-                Ok(render::issue_from_pull(pull))
+                Ok(Some(render::issue_from_pull(pull)))
             },
         )?;
-        if let Some(issue) = super::stored_issue(found.repo(&state), number) {
+        let issue = current(&state, request, &found, number, projected);
+        if let Some(stored) = super::rendered_issue(&state, request, &found, number) {
             let mut ctx = super::webhook_ctx(&mut state, request, &found);
             for user in &newly {
-                events::issues::assigned(&mut ctx, &issue, user)?;
+                events::issues::assigned(&mut ctx, &stored, user)?;
             }
         }
-        let after = super::record::snapshot(found.repo(&state), number)?;
+        let after = super::record::snapshot(&state, request, &found, number)?;
         super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
         Ok(ApiResponse::typed(201, &issue))
     }
@@ -98,41 +98,43 @@ impl Handler for ops::IssuesRemoveAssignees {
         // Without push access the assignees are silently ignored.
         // Source: <https://docs.github.com/en/rest/issues/assignees#remove-assignees-from-an-issue>
         if !found.permission.push {
-            return current_issue(&state, &found, number)
+            return current_issue(&state, request, &found, number)
                 .map(|issue| ApiResponse::typed(200, &issue));
         }
         let logins = match body.get("assignees") {
             Some(value) => string_logins(value)?,
             None => Vec::new(),
         };
-        let removed = super::stored_issue(found.repo(&state), number)
+        let removed = super::rendered_issue(&state, request, &found, number)
             .map(|issue| without_kept(&issue.assignees, &logins))
             .unwrap_or_default();
-        let before = super::record::snapshot(found.repo(&state), number)?;
+        let before = super::record::snapshot(&state, request, &found, number)?;
         let actor = super::caller_user(&state, request, &caller.login)?;
-        let issue = super::with_subject(
+        let projected = super::with_subject(
             found.repo_mut(&mut state),
             number,
             |issue| {
-                let remaining = without_logins(&issue.assignees, &logins);
-                write_assignees(&mut issue.assignee, &mut issue.assignees, remaining);
+                issue
+                    .assignees
+                    .retain(|user| !logins.iter().any(|login| user.matches(login)));
                 issue.updated_at = crate::time::now_utc();
-                Ok(issue.clone())
+                Ok(None)
             },
             |pull| {
                 let remaining = without_logins(&pull.assignees, &logins);
                 write_assignees(&mut pull.assignee, &mut pull.assignees, remaining);
                 pull.updated_at = crate::time::now_utc();
-                Ok(render::issue_from_pull(pull))
+                Ok(Some(render::issue_from_pull(pull)))
             },
         )?;
-        if let Some(issue) = super::stored_issue(found.repo(&state), number) {
+        let issue = current(&state, request, &found, number, projected);
+        if let Some(stored) = super::rendered_issue(&state, request, &found, number) {
             let mut ctx = super::webhook_ctx(&mut state, request, &found);
             for user in &removed {
-                events::issues::unassigned(&mut ctx, &issue, user)?;
+                events::issues::unassigned(&mut ctx, &stored, user)?;
             }
         }
-        let after = super::record::snapshot(found.repo(&state), number)?;
+        let after = super::record::snapshot(&state, request, &found, number)?;
         super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
         Ok(ApiResponse::typed(200, &issue))
     }
@@ -314,6 +316,37 @@ fn merge_assignees(
     Ok(users)
 }
 
+/// `existing` followed by the users of `added` it does not name, at most [`MAX_ASSIGNEES`].
+fn merge_names(existing: &[Name], added: &[types::SimpleUser]) -> Result<Vec<Name>, ApiResponse> {
+    let mut names = existing.to_vec();
+    for user in added {
+        if !names.iter().any(|name| name.matches(&user.login)) {
+            names.push(Name::new(user.login.clone()));
+        }
+    }
+    if names.len() > MAX_ASSIGNEES {
+        return Err(ApiResponse::validation_failed(
+            "Issue",
+            "assignees",
+            "invalid",
+        ));
+    }
+    Ok(names)
+}
+
+/// The issue a pull-request edit projected, or the stored issue rendered after an issue edit.
+fn current(
+    state: &State,
+    request: &ApiRequest,
+    found: &crate::handlers::repos::Found,
+    number: u64,
+    projected: Option<types::Issue>,
+) -> types::Issue {
+    projected.unwrap_or_else(|| {
+        super::rendered_issue(state, request, found, number).expect("the edited issue is stored")
+    })
+}
+
 fn without_kept(existing: &[types::SimpleUser], logins: &[String]) -> Vec<types::SimpleUser> {
     existing
         .iter()
@@ -340,6 +373,7 @@ fn without_logins(existing: &[types::SimpleUser], logins: &[String]) -> Vec<type
 
 fn current_issue(
     state: &State,
+    request: &ApiRequest,
     found: &crate::handlers::repos::Found,
     number: u64,
 ) -> Result<types::Issue, ApiResponse> {
@@ -351,8 +385,5 @@ fn current_issue(
             .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?;
         return Ok(render::issue_from_pull(data));
     }
-    repo.issues
-        .get(&number)
-        .map(|issue| issue.data.clone())
-        .ok_or_else(ApiResponse::not_found)
+    super::rendered_issue(state, request, found, number).ok_or_else(ApiResponse::not_found)
 }

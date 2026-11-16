@@ -653,25 +653,26 @@ impl Repository {
         self.ensure_running()?;
         let request = self.api_request();
         let mut state = lock(&self.app.state);
-        let default_user = {
+        let default_author = {
             let account = state.account(&self.owner).ok_or_else(|| {
                 io::Error::new(io::ErrorKind::NotFound, "repository owner does not exist")
             })?;
             account.repo(&self.name).ok_or_else(|| {
                 io::Error::new(io::ErrorKind::NotFound, "repository does not exist")
             })?;
-            crate::render::simple_user(&request, account)
+            crate::state::Name::new(account.login.clone())
         };
         let issue = crate::fixtures::seeded_issue(
             &mut state,
             &request,
             &self.owner,
             &self.name,
-            default_user,
+            default_author,
             number,
             seed,
         )?;
-        state.add_issue(&self.owner, &self.name, number, issue.clone());
+        state.add_issue(&self.owner, &self.name, issue);
+        let issue = rendered_issue(&state, &request, self, number);
         let labels = crate::webhooks::events::issues::issue_labels(&issue);
         let mut ctx =
             crate::webhooks::events::Ctx::new(&mut state, &request, &self.owner, &self.name);
@@ -1616,6 +1617,28 @@ fn require_issue(state: &State, repository: &Repository, number: u64) -> io::Res
         })
 }
 
+/// The stored issue `number` of `repository` as the REST API returns it.
+fn rendered_issue(
+    state: &State,
+    request: &ApiRequest,
+    repository: &Repository,
+    number: u64,
+) -> types::Issue {
+    let account = state
+        .account(&repository.owner)
+        .expect("the repository owner exists");
+    let repo = account
+        .repo(&repository.name)
+        .expect("the repository exists");
+    let context = crate::render::IssueContext {
+        state,
+        request,
+        owner: &account.login,
+        repo,
+    };
+    crate::render::issue(context, &repo.issues[&number])
+}
+
 fn not_found(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::NotFound, message.into())
 }
@@ -1638,6 +1661,9 @@ fn create_issue_comment(
             "issue or pull request {}/{}#{number} does not exist",
             repository.owner, repository.name
         )));
+    }
+    if repo.issues.contains_key(&number) {
+        return create_comment_on_issue(&mut state, repository, number, seed);
     }
     let user = seeded_nullable_user(&mut state, repository, seed.user)?;
     let global_id = state.next_id();
@@ -1679,6 +1705,72 @@ fn create_issue_comment(
         &repository.name,
     );
     crate::webhooks::events::issue_comment::created(&mut ctx, number, &comment)
+        .map_err(io::Error::other)?;
+    Ok(())
+}
+
+/// Seeds a comment on the stored issue `number`. Its author is seeded by login alone.
+fn create_comment_on_issue(
+    state: &mut State,
+    repository: &Repository,
+    number: u64,
+    seed: crate::fixtures::IssueCommentSeed,
+) -> io::Result<()> {
+    let author = match seed.user {
+        crate::fixtures::SeedField::Present(None) => None,
+        crate::fixtures::SeedField::Present(Some(user)) => Some(crate::fixtures::seeded_login(
+            state,
+            user,
+            "issue comment author",
+        )?),
+        crate::fixtures::SeedField::Missing => Some(crate::fixtures::seeded_login(
+            state,
+            crate::fixtures::UserSeed::default(),
+            "issue comment author",
+        )?),
+    };
+    let id = state.next_id();
+    let now = crate::time::now_utc();
+    let mut comment = crate::state::Comment {
+        id,
+        author,
+        body: String::new(),
+        created_at: now,
+        updated_at: now,
+    };
+    seed.body.apply(&mut comment.body);
+    if let crate::fixtures::SeedField::Present(value) = seed.created_at {
+        comment.created_at = crate::fixtures::parse_timestamp(&value, "issue comment created_at")?;
+    }
+    if let crate::fixtures::SeedField::Present(value) = seed.updated_at {
+        comment.updated_at = crate::fixtures::parse_timestamp(&value, "issue comment updated_at")?;
+    }
+    state
+        .account_mut(&repository.owner)
+        .and_then(|account| account.repo_mut(&repository.name))
+        .and_then(|repo| repo.issues.get_mut(&number))
+        .expect("the issue exists")
+        .comments
+        .push(comment.clone());
+    let request = repository.api_request();
+    let rendered = {
+        let account = state
+            .account(&repository.owner)
+            .expect("the repository owner exists");
+        let repo = account
+            .repo(&repository.name)
+            .expect("the repository exists");
+        let context = crate::render::IssueContext {
+            state,
+            request: &request,
+            owner: &account.login,
+            repo,
+        };
+        crate::render::issue_comment(context, number, &comment)
+    };
+    let mut ctx =
+        crate::webhooks::events::Ctx::new(state, &request, &repository.owner, &repository.name);
+    crate::webhooks::events::issue_comment::created(&mut ctx, number, &rendered)
         .map_err(io::Error::other)?;
     Ok(())
 }

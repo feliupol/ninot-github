@@ -1,5 +1,6 @@
 //! Records issue events for mutations that GitHub lists in the issue-event stream.
 
+use crate::api::{ApiRequest, ApiResponse};
 use crate::handlers::repos::Found;
 use crate::state::{IssueEvent, IssueEventKind, IssueEventLabel, Repo, State};
 use crate::types;
@@ -21,8 +22,13 @@ pub(crate) struct Snapshot {
 }
 
 /// Reads the fields whose changes produce issue events.
-pub(crate) fn snapshot(repo: &Repo, number: u64) -> Result<Snapshot, crate::api::ApiResponse> {
-    use crate::api::ApiResponse;
+pub(crate) fn snapshot(
+    state: &State,
+    request: &ApiRequest,
+    found: &Found,
+    number: u64,
+) -> Result<Snapshot, ApiResponse> {
+    let repo = found.repo(state);
     if let Some(pull) = repo.pull_requests.get(&number) {
         let data = pull
             .data
@@ -43,25 +49,18 @@ pub(crate) fn snapshot(repo: &Repo, number: u64) -> Result<Snapshot, crate::api:
             locked: data.locked,
         });
     }
-    let issue = repo
-        .issues
-        .get(&number)
-        .ok_or_else(ApiResponse::not_found)?;
+    let issue =
+        super::rendered_issue(state, request, found, number).ok_or_else(ApiResponse::not_found)?;
     Ok(Snapshot {
         labels: issue
-            .data
             .labels
             .iter()
             .filter_map(super::label_from_issue_item)
             .collect(),
-        assignees: issue.data.assignees.clone(),
-        milestone: issue
-            .data
-            .milestone
-            .as_ref()
-            .map(|milestone| milestone.title.clone()),
-        state: issue.data.state.clone(),
-        locked: issue.data.locked,
+        assignees: issue.assignees,
+        milestone: issue.milestone.map(|milestone| milestone.title),
+        state: issue.state,
+        locked: issue.locked,
     })
 }
 

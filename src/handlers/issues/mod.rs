@@ -27,8 +27,8 @@ use serde_json::Value;
 
 use crate::api::{ApiRequest, ApiResponse};
 use crate::handlers::repos::Found;
-use crate::render::{self, MilestoneRender};
-use crate::state::{Account, AccountKind, LabelRecord, Milestone, Repo, State};
+use crate::render;
+use crate::state::{Account, AccountKind, Issue, LabelRecord, Milestone, Name, Repo, State};
 use crate::types;
 
 /// Every label a repository currently has: stored labels, then labels that exist only as copies
@@ -46,15 +46,10 @@ fn catalog(state: &State, request: &ApiRequest, found: &Found) -> BTreeMap<Strin
     let repo = found.repo(state);
     let mut labels = BTreeMap::new();
     for label in repo
-        .issues
+        .pull_requests
         .values()
-        .flat_map(|issue| issue.data.labels.iter().filter_map(label_from_issue_item))
-        .chain(
-            repo.pull_requests
-                .values()
-                .filter_map(|pull| pull.data.as_ref())
-                .flat_map(|pull| pull.labels.iter().map(label_from_pull)),
-        )
+        .filter_map(|pull| pull.data.as_ref())
+        .flat_map(|pull| pull.labels.iter().map(label_from_pull))
     {
         labels.entry(label_key(&label.name)).or_insert(label);
     }
@@ -68,29 +63,13 @@ fn catalog(state: &State, request: &ApiRequest, found: &Found) -> BTreeMap<Strin
 }
 
 /// A stored label as the label endpoints return it.
-fn render_label(
+pub(crate) fn render_label(
     state: &State,
     request: &ApiRequest,
     found: &Found,
     label: &LabelRecord,
 ) -> types::Label {
-    types::Label {
-        archived_at: label.archived_at,
-        archived_by: label
-            .archived_by
-            .as_deref()
-            .map(|login| render::referenced_user(state, request, login)),
-        color: label.color.clone(),
-        default: label.default,
-        description: label.description.clone(),
-        id: render::id(label.id),
-        name: label.name.clone(),
-        node_id: label.node_id.clone(),
-        url: request
-            .urls()
-            .repo(&found.owner, &found.name)
-            .label(&label.name),
-    }
+    render::label(state, request, &found.owner, &found.name, label)
 }
 
 pub(super) fn label_from_issue_item(label: &types::IssueLabelsItem) -> Option<types::Label> {
@@ -145,6 +124,84 @@ pub(super) fn label_from_pull(label: &types::PullRequestLabelsItem) -> types::La
 
 fn label_key(name: &str) -> String {
     name.to_lowercase()
+}
+
+/// Stores `label` in the repository's label store unless a label with its name is stored, and
+/// returns the stored spelling an issue references it by.
+pub(crate) fn ensure_label(repo: &mut Repo, label: &types::Label) -> Name {
+    let stored = repo
+        .labels
+        .entry(Name::new(label.name.clone()))
+        .or_insert_with(|| label.clone().into());
+    Name::new(stored.name.clone())
+}
+
+/// The repository label named `name`, ignoring case, storing it when it exists only as a copy
+/// on a pull request; otherwise `fresh()`, stored as a new label. GitHub creates a label an issue
+/// is given that the repository lacks.
+pub(crate) fn resolve_issue_label(
+    state: &mut State,
+    request: &ApiRequest,
+    found: &Found,
+    name: &str,
+    fresh: impl FnOnce() -> types::Label,
+) -> types::Label {
+    let label = catalog(state, request, found)
+        .remove(&label_key(name))
+        .unwrap_or_else(fresh);
+    let stored = ensure_label(found.repo_mut(state), &label);
+    render_label(
+        state,
+        request,
+        found,
+        &found.repo(state).labels[stored.folded()],
+    )
+}
+
+/// The names an issue references `labels` by, storing each label that is not stored yet.
+///
+/// Empty, storing nothing, when `number` is a pull request, which keeps copies of its labels.
+pub(crate) fn issue_label_names(
+    repo: &mut Repo,
+    number: u64,
+    labels: &[types::Label],
+) -> Vec<Name> {
+    if repo.pull_requests.contains_key(&number) || !repo.issues.contains_key(&number) {
+        return Vec::new();
+    }
+    labels
+        .iter()
+        .map(|label| ensure_label(repo, label))
+        .collect()
+}
+
+/// What rendering an issue in the repository `find_repo` resolved reads.
+pub(crate) fn context<'a>(
+    state: &'a State,
+    request: &'a ApiRequest,
+    found: &'a Found,
+) -> render::IssueContext<'a> {
+    render::IssueContext {
+        state,
+        request,
+        owner: &found.owner,
+        repo: found.repo(state),
+    }
+}
+
+/// The issue `number` as the REST API returns it, when it is stored.
+pub(crate) fn rendered_issue(
+    state: &State,
+    request: &ApiRequest,
+    found: &Found,
+    number: u64,
+) -> Option<types::Issue> {
+    let context = context(state, request, found);
+    context
+        .repo
+        .issues
+        .get(&number)
+        .map(|issue| render::issue(context, issue))
 }
 
 /// Percent-decodes a path parameter. Invalid `%` sequences are left in place.
@@ -265,71 +322,26 @@ fn object_body(request: &ApiRequest) -> Result<serde_json::Map<String, Value>, A
     }
 }
 
-/// Open and closed issue counts keyed by milestone number.
-fn milestone_counts(repo: &Repo) -> BTreeMap<i64, (i64, i64)> {
-    let mut counts = BTreeMap::<i64, (i64, i64)>::new();
-    let mut bump = |number: i64, open: bool| {
-        let entry = counts.entry(number).or_insert((0, 0));
-        if open {
-            entry.0 += 1;
-        } else {
-            entry.1 += 1;
-        }
-    };
-    for issue in repo.issues.values() {
-        if let Some(milestone) = &issue.data.milestone {
-            bump(milestone.number, issue.data.state == "open");
-        }
-    }
-    for pull in repo
-        .pull_requests
-        .values()
-        .filter_map(|pull| pull.data.as_ref())
-    {
-        if let Some(milestone) = &pull.milestone {
-            bump(
-                milestone.number,
-                pull.state == types::PullRequestState::Open,
-            );
-        }
-    }
-    counts
-}
-
-/// Rewrites every embedded milestone from the repository store and refreshes its counts.
-///
-/// An embedded milestone whose number is no longer stored is cleared.
-fn sync_milestones(repo: &mut Repo, request: &ApiRequest, owner: &str, name: &str) {
-    let counts = milestone_counts(repo);
+/// Rewrites every milestone embedded in a pull request from the repository store and refreshes
+/// its counts. Issues reference milestones by number; one whose milestone is no longer stored
+/// loses it.
+fn sync_milestones(repo: &mut Repo, request: &ApiRequest, owner: &str) {
     let rendered: BTreeMap<i64, types::NullableMilestone> = repo
         .milestones
         .values()
         .map(|milestone| {
-            let number = render::id(milestone.number);
-            let (open_issues, closed_issues) = counts.get(&number).copied().unwrap_or((0, 0));
             (
-                number,
-                render::milestone(
-                    milestone,
-                    MilestoneRender {
-                        request,
-                        owner,
-                        name,
-                        open_issues,
-                        closed_issues,
-                    },
-                ),
+                render::id(milestone.number),
+                render::stored_milestone(request, owner, repo, milestone),
             )
         })
         .collect();
     for issue in repo.issues.values_mut() {
-        let number = issue
-            .data
+        if issue
             .milestone
-            .as_ref()
-            .map(|milestone| milestone.number);
-        if let Some(number) = number {
-            issue.data.milestone = rendered.get(&number).cloned();
+            .is_some_and(|number| !repo.milestones.contains_key(&number))
+        {
+            issue.milestone = None;
         }
     }
     for pull in repo
@@ -344,28 +356,13 @@ fn sync_milestones(repo: &mut Repo, request: &ApiRequest, owner: &str, name: &st
     }
 }
 
-fn render_stored<'a>(
-    repo: &'a Repo,
+fn render_stored(
+    repo: &Repo,
     request: &ApiRequest,
     owner: &str,
-    name: &str,
-    milestone: &'a Milestone,
+    milestone: &Milestone,
 ) -> types::NullableMilestone {
-    let number = render::id(milestone.number);
-    let (open_issues, closed_issues) = milestone_counts(repo)
-        .get(&number)
-        .copied()
-        .unwrap_or((0, 0));
-    render::milestone(
-        milestone,
-        MilestoneRender {
-            request,
-            owner,
-            name,
-            open_issues,
-            closed_issues,
-        },
-    )
+    render::stored_milestone(request, owner, repo, milestone)
 }
 
 fn author_login(issue: &types::Issue) -> Option<&str> {
@@ -442,7 +439,7 @@ fn query_choice<'a>(
 fn with_subject<T>(
     repo: &mut Repo,
     number: u64,
-    on_issue: impl FnOnce(&mut types::Issue) -> Result<T, ApiResponse>,
+    on_issue: impl FnOnce(&mut Issue) -> Result<T, ApiResponse>,
     on_pull: impl FnOnce(&mut types::PullRequest) -> Result<T, ApiResponse>,
 ) -> Result<T, ApiResponse> {
     if repo.pull_requests.contains_key(&number) {
@@ -454,7 +451,7 @@ fn with_subject<T>(
         return on_pull(pull);
     }
     if let Some(issue) = repo.issues.get_mut(&number) {
-        return on_issue(&mut issue.data);
+        return on_issue(issue);
     }
     Err(ApiResponse::not_found())
 }
@@ -465,10 +462,6 @@ fn webhook_ctx<'a>(
     found: &'a Found,
 ) -> crate::webhooks::events::Ctx<'a> {
     crate::webhooks::events::Ctx::new(state, request, &found.owner, &found.name)
-}
-
-fn stored_issue(repo: &Repo, number: u64) -> Option<types::Issue> {
-    repo.issues.get(&number).map(|issue| issue.data.clone())
 }
 
 fn stored_pull(repo: &Repo, number: u64) -> Option<types::PullRequest> {

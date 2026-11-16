@@ -47,9 +47,7 @@ impl Handler for ops::IssuesListMilestones {
         let stored = repo.milestones.values().cloned().collect::<Vec<_>>();
         let mut rows = stored
             .iter()
-            .map(|milestone| {
-                super::render_stored(repo, request, &found.owner, &found.name, milestone)
-            })
+            .map(|milestone| super::render_stored(repo, request, &found.owner, milestone))
             .filter(|milestone| {
                 state_filter == "all" || milestone.state.to_string() == state_filter
             })
@@ -99,7 +97,7 @@ impl Handler for ops::IssuesCreateMilestone {
             due_on,
         };
         repo.milestones.insert(number, milestone);
-        let rendered = render_number(repo, request, &found.owner, &found.name, number);
+        let rendered = render_number(repo, request, &found.owner, number);
         Ok(ApiResponse::typed(201, &rendered).with_header("location", rendered.url.clone()))
     }
 }
@@ -114,7 +112,7 @@ impl Handler for ops::IssuesGetMilestone {
             .milestones
             .get(&number)
             .ok_or_else(ApiResponse::not_found)?;
-        let rendered = super::render_stored(repo, request, &found.owner, &found.name, milestone);
+        let rendered = super::render_stored(repo, request, &found.owner, milestone);
         Ok(ApiResponse::typed(200, &rendered))
     }
 }
@@ -159,8 +157,8 @@ impl Handler for ops::IssuesUpdateMilestone {
             apply_state(milestone, milestone_state);
         }
         milestone.updated_at = crate::time::now_utc();
-        super::sync_milestones(repo, request, &found.owner, &found.name);
-        let rendered = render_number(repo, request, &found.owner, &found.name, number);
+        super::sync_milestones(repo, request, &found.owner);
+        let rendered = render_number(repo, request, &found.owner, number);
         Ok(ApiResponse::typed(200, &rendered))
     }
 }
@@ -177,7 +175,7 @@ impl Handler for ops::IssuesDeleteMilestone {
         super::require_push(&found)?;
         let repo = found.repo_mut(&mut state);
         repo.milestones.remove(&number);
-        super::sync_milestones(repo, request, &found.owner, &found.name);
+        super::sync_milestones(repo, request, &found.owner);
         Ok(ApiResponse::no_content())
     }
 }
@@ -203,15 +201,10 @@ fn render_number(
     repo: &Repo,
     request: &ApiRequest,
     owner: &str,
-    name: &str,
     number: u64,
 ) -> types::NullableMilestone {
-    let milestone = repo
-        .milestones
-        .get(&number)
-        .expect("milestone exists")
-        .clone();
-    super::render_stored(repo, request, owner, name, &milestone)
+    let milestone = repo.milestones.get(&number).expect("milestone exists");
+    super::render_stored(repo, request, owner, milestone)
 }
 
 fn milestone_labels(
@@ -225,15 +218,12 @@ fn milestone_labels(
     let catalog = super::catalog(state, request, found);
     let mut found = BTreeMap::new();
     for issue in repo.issues.values() {
-        if issue
-            .data
-            .milestone
-            .as_ref()
-            .is_some_and(|milestone| milestone.number == target)
-        {
-            for label in &issue.data.labels {
-                if let Some(label) = super::label_from_issue_item(label) {
-                    found.entry(super::label_key(&label.name)).or_insert(label);
+        if issue.milestone == Some(number) {
+            for name in &issue.labels {
+                if let Some(label) = catalog.get(name.folded()) {
+                    found
+                        .entry(name.folded().to_owned())
+                        .or_insert_with(|| label.clone());
                 }
             }
         }

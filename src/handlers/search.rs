@@ -124,19 +124,14 @@ fn matches_issue(query: &str, caller: &str, owner: &str, repo: &str, issue: &Iss
     }
     for term in query.split_whitespace() {
         if let Some(wanted) = term.strip_prefix("author:")
-            && !issue
-                .data
-                .user
-                .as_ref()
-                .map(|user| user.login.as_str())
-                .is_some_and(|author| author.eq_ignore_ascii_case(login(wanted, caller)))
+            && !issue.authored_by(login(wanted, caller))
         {
             return false;
         }
-        if term == "is:open" && issue.data.state != "open" {
+        if term == "is:open" && !issue.is_open() {
             return false;
         }
-        if term == "is:closed" && issue.data.state != "closed" {
+        if term == "is:closed" && issue.is_open() {
             return false;
         }
         if term == "is:merged"
@@ -153,7 +148,7 @@ fn matches_issue(query: &str, caller: &str, owner: &str, repo: &str, issue: &Iss
         if let Some(number) = term.strip_prefix('#')
             && number
                 .parse::<u64>()
-                .is_ok_and(|number| u64::try_from(issue.data.number).ok() != Some(number))
+                .is_ok_and(|number| issue.number != number)
         {
             return false;
         }
@@ -565,11 +560,20 @@ impl Handler for ops::SearchIssuesAndPullRequests {
                     }
                     items.push(search_pull_item(data, api_repo.clone()));
                 }
+                let context = crate::render::IssueContext {
+                    state: &state,
+                    request,
+                    owner: &account.login,
+                    repo,
+                };
                 for issue in repo.issues.values() {
                     if !matches_issue(query, caller, &account.login, &repo.name, issue) {
                         continue;
                     }
-                    items.push(search_issue_item(&issue.data, api_repo.clone()));
+                    items.push(search_issue_item(
+                        &crate::render::issue(context, issue),
+                        api_repo.clone(),
+                    ));
                 }
             }
         }
