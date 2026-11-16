@@ -109,11 +109,11 @@ impl State {
 
     /// The organization and name of the runner with `runner_id`.
     pub(crate) fn runner_by_id(&self, runner_id: u64) -> Option<(String, super::Runner)> {
-        self.accounts.iter().find_map(|(login, account)| {
+        self.accounts.values().find_map(|account| {
             account
                 .runners
                 .get(&runner_id)
-                .map(|runner| (login.clone(), runner.clone()))
+                .map(|runner| (account.login.clone(), runner.clone()))
         })
     }
 

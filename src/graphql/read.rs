@@ -8,12 +8,14 @@
 )]
 
 use async_graphql::Error;
+use chrono::{DateTime, Utc};
 
 use super::objects::{Actor, Comment, Label, Milestone, StatusContext};
 use super::types::{
     IssueState, MilestoneState, PullRequestReviewDecision, PullRequestReviewState, StatusState,
 };
 use crate::state::{self, Account, Issue, Repo, ReviewDecision, State};
+use crate::time;
 use crate::urls::Urls;
 
 /// The stored repository `owner/name`.
@@ -24,17 +26,15 @@ pub(super) fn repo<'a>(state: &'a State, owner: &str, name: &str) -> Option<&'a 
 /// A repository's `createdAt`, `updatedAt` and `pushedAt`.
 pub(super) fn repo_times(repo: &Repo) -> (String, String, Option<String>) {
     (
-        repo.created_at.clone(),
-        repo.updated_at.clone(),
-        repo.pushed_at.clone(),
+        time::format(&repo.created_at),
+        time::format(&repo.updated_at),
+        repo.pushed_at.as_ref().map(time::format),
     )
 }
 
 /// When a repository was last pushed to, or created if never.
-pub(super) fn repo_pushed_or_created(repo: &Repo) -> String {
-    repo.pushed_at
-        .clone()
-        .unwrap_or_else(|| repo.created_at.clone())
+pub(super) fn repo_pushed_or_created(repo: &Repo) -> DateTime<Utc> {
+    repo.pushed_at.unwrap_or(repo.created_at)
 }
 
 /// An account's `createdAt`.

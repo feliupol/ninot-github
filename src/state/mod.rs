@@ -71,8 +71,8 @@ pub struct State {
     runner_tokens: HashMap<String, runner::RunnerToken>,
     /// What the Actions runner's service endpoints serve: tokens, sessions and queued jobs.
     pub(crate) actions_service: actions_service::ActionsService,
-    /// Users and organizations by lowercase login.
-    pub(crate) accounts: BTreeMap<String, Account>,
+    /// Users and organizations by login.
+    pub(crate) accounts: BTreeMap<Name, Account>,
     /// Old `owner/name` (lowercase) of renamed or transferred repositories, to the current one.
     redirects: HashMap<String, (String, String)>,
     last_id: u64,
@@ -260,11 +260,10 @@ impl State {
     }
 
     fn add_account(&mut self, login: &str, kind: AccountKind) -> &mut Account {
-        let key = login.to_lowercase();
-        if !self.accounts.contains_key(&key) {
+        if !self.accounts.contains_name(login) {
             let id = self.next_id();
             self.accounts.insert(
-                key.clone(),
+                Name::new(login),
                 Account {
                     id,
                     login: login.to_owned(),
@@ -284,7 +283,7 @@ impl State {
                 },
             );
         }
-        self.accounts.get_mut(&key).unwrap()
+        self.accounts.get_name_mut(login).unwrap()
     }
 
     /// Issues a token acting as `login`, which must be an existing user.
@@ -305,11 +304,11 @@ impl State {
     }
 
     pub fn account(&self, login: &str) -> Option<&Account> {
-        self.accounts.get(&login.to_lowercase())
+        self.accounts.get_name(login)
     }
 
     pub fn account_mut(&mut self, login: &str) -> Option<&mut Account> {
-        self.accounts.get_mut(&login.to_lowercase())
+        self.accounts.get_name_mut(login)
     }
 
     pub fn accounts(&self) -> impl Iterator<Item = &Account> {

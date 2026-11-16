@@ -8,9 +8,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use super::{CheckRunRecord, CommitStatusRecord, Hook, Issue, IssueEvent, Name, Release, State};
+use super::{
+    CheckRunRecord, CommitStatusRecord, Hook, Issue, IssueEvent, Name, NameMap, Release, State,
+};
 use crate::api::{ApiResponse, Caller};
-use crate::time::now;
 use crate::types::{
     FullRepositoryMergeCommitMessage, FullRepositoryMergeCommitTitle,
     FullRepositoryPullRequestCreationPolicy, FullRepositorySquashMergeCommitMessage,
@@ -26,9 +27,9 @@ pub struct Repo {
     /// Primary language reported by repository metadata.
     pub language: Option<String>,
     pub default_branch: String,
-    pub created_at: String,
-    pub updated_at: String,
-    pub pushed_at: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub pushed_at: Option<DateTime<Utc>>,
     /// Bare git repository, named after the id so renames and transfers leave it in place.
     pub git_dir: Option<PathBuf>,
     /// Upstream repository anchoring this repository's fork network.
@@ -588,17 +589,16 @@ impl State {
             .as_ref()
             .map(|root| root.join(format!("{id}.git")));
         let account = self.account_mut(owner).ok_or_else(ApiResponse::not_found)?;
-        let key = name.to_lowercase();
-        if account.repos.contains_key(&key) {
+        if account.repos.contains_name(name) {
             return Err(ApiResponse::validation_failed(
                 "Repository",
                 "name",
                 "custom",
             ));
         }
-        let created = now();
+        let created = crate::time::now_utc();
         account.repos.insert(
-            key.clone(),
+            Name::new(name),
             Repo {
                 id,
                 name: name.to_owned(),
@@ -606,7 +606,7 @@ impl State {
                 description,
                 language: None,
                 default_branch: "main".to_owned(),
-                created_at: created.clone(),
+                created_at: created,
                 updated_at: created,
                 pushed_at: None,
                 git_dir,
@@ -630,22 +630,19 @@ impl State {
             },
         );
         self.redirects
-            .remove(&format!("{}/{key}", owner.to_lowercase()));
+            .remove(&format!("{}/{}", owner.to_lowercase(), name.to_lowercase()));
         Ok(self
             .account_mut(owner)
             .unwrap()
             .repos
-            .get_mut(&key)
+            .get_name_mut(name)
             .unwrap())
     }
 
     /// Removes a repository and any redirects pointing at it. Its `git_dir` stays on disk for
     /// the caller to remove with the lock released.
     pub fn delete_repo(&mut self, owner: &str, name: &str) -> Option<Repo> {
-        let repo = self
-            .account_mut(owner)?
-            .repos
-            .remove(&name.to_lowercase())?;
+        let repo = self.account_mut(owner)?.repos.remove_name(name)?;
         let (owner, name) = (owner.to_lowercase(), name.to_lowercase());
         self.redirects.retain(|_, (to_owner, to_name)| {
             to_owner.to_lowercase() != owner || to_name.to_lowercase() != name
@@ -674,13 +671,13 @@ impl State {
         }
         let mut repo = self
             .account_mut(owner)
-            .and_then(|account| account.repos.remove(&name.to_lowercase()))
+            .and_then(|account| account.repos.remove_name(name))
             .ok_or_else(ApiResponse::not_found)?;
         repo.name = new_name.to_owned();
-        repo.updated_at = now();
+        repo.updated_at = crate::time::now_utc();
         let target = self.account_mut(new_owner).unwrap();
         let new_owner = target.login.clone();
-        target.repos.insert(new_name.to_lowercase(), repo);
+        target.repos.insert(Name::new(new_name), repo);
         let old = format!("{}/{}", owner.to_lowercase(), name.to_lowercase());
         for (to_owner, to_name) in self.redirects.values_mut() {
             if format!("{}/{}", to_owner.to_lowercase(), to_name.to_lowercase()) == old {

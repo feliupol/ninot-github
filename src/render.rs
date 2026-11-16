@@ -690,7 +690,7 @@ pub fn full_repository(
 ) -> types::FullRepository {
     let full_name = format!("{}/{}", owner.login, repo.name);
     let urls = request.urls().repo(&owner.login, &repo.name);
-    let created = timestamp(&repo.created_at);
+    let created = repo.created_at;
     let settings = &repo.settings;
     types::FullRepository {
         allow_auto_merge: Some(settings.allow_auto_merge),
@@ -776,7 +776,7 @@ pub fn full_repository(
         private: repo.private,
         pull_request_creation_policy: Some(settings.pull_request_creation_policy),
         pulls_url: urls.api("/pulls{/number}"),
-        pushed_at: repo.pushed_at.as_deref().map_or(created, timestamp),
+        pushed_at: repo.pushed_at.unwrap_or(created),
         releases_url: urls.api("/releases{/id}"),
         security_and_analysis: None,
         size: 0,
@@ -797,7 +797,7 @@ pub fn full_repository(
         template_repository: None,
         topics: Vec::new(),
         trees_url: urls.api("/git/trees{/sha}"),
-        updated_at: timestamp(&repo.updated_at),
+        updated_at: repo.updated_at,
         url: urls.api,
         use_squash_pr_title_as_default: Some(settings.use_squash_pr_title_as_default),
         visibility: Some(if repo.private { "private" } else { "public" }.to_owned()),

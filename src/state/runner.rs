@@ -1,6 +1,6 @@
 //! Self-hosted Actions runners, runner groups and the one-time tokens that register them.
 
-use super::{Account, AccountKind, State};
+use super::{Account, AccountKind, Name, NameMap, State};
 use crate::api::ApiResponse;
 use crate::time::{format_timestamp, unix_now};
 
@@ -420,12 +420,11 @@ impl State {
     }
 
     fn make_label(&mut self, org: &str, name: String, read_only: bool) -> RunnerLabel {
-        let key = name.to_lowercase();
         let id = match self
             .account(org)
             .unwrap()
             .runner_label_ids
-            .get(&key)
+            .get_name(&name)
             .copied()
         {
             Some(id) => id,
@@ -434,7 +433,7 @@ impl State {
                 self.account_mut(org)
                     .unwrap()
                     .runner_label_ids
-                    .insert(key, id);
+                    .insert(Name::new(name.clone()), id);
                 id
             }
         };

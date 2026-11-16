@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{Repo, Runner, RunnerGroup};
+use super::{Name, NameMap, Repo, Runner, RunnerGroup};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AccountKind {
@@ -40,14 +40,17 @@ pub struct Account {
     pub profile: OrgProfile,
     /// An organization's teams by lowercase slug.
     pub teams: BTreeMap<String, Team>,
-    /// Repositories by lowercase name.
-    pub(crate) repos: BTreeMap<String, Repo>,
+    /// Repositories by name.
+    pub(crate) repos: BTreeMap<Name, Repo>,
     /// Self-hosted Actions runners by id.
     pub runners: BTreeMap<u64, Runner>,
     /// Self-hosted runner groups by id.
     pub runner_groups: BTreeMap<u64, RunnerGroup>,
-    /// Lowercase runner-label name to its stable id within this account.
-    pub(super) runner_label_ids: BTreeMap<String, u64>,
+    /// Runner-label name to its stable id within this account.
+    ///
+    /// Source: <https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/using-labels-with-self-hosted-runners>
+    /// ("Labels are case-insensitive.")
+    pub(super) runner_label_ids: BTreeMap<Name, u64>,
 }
 
 /// Settings of an organization that its owners can change with `PATCH /orgs/{org}`.
@@ -128,11 +131,11 @@ impl Account {
     }
 
     pub fn repo(&self, name: &str) -> Option<&Repo> {
-        self.repos.get(&name.to_lowercase())
+        self.repos.get_name(name)
     }
 
     pub fn repo_mut(&mut self, name: &str) -> Option<&mut Repo> {
-        self.repos.get_mut(&name.to_lowercase())
+        self.repos.get_name_mut(name)
     }
 
     pub fn repos(&self) -> impl Iterator<Item = &Repo> {

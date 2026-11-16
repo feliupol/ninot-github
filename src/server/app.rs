@@ -554,7 +554,7 @@ impl App {
                 .account_mut(&owner)
                 .and_then(|account| account.repo_mut(&name))
             {
-                repo.pushed_at = Some(crate::state::now());
+                repo.pushed_at = Some(crate::time::now_utc());
                 if let Some(branch) = first_default_branch(&repo.default_branch, &before, &after)
                     && let Err(error) = repo.set_default_branch(&branch)
                 {

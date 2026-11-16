@@ -275,7 +275,7 @@ fn create(
         .and_then(|account| account.repo_mut(&name))
         .ok_or_else(ApiResponse::not_found)?;
     if auto_init && storage.is_some() {
-        repo.pushed_at = Some(crate::state::now());
+        repo.pushed_at = Some(crate::time::now_utc());
     }
     let account = state.account(owner).unwrap();
     let value = render::full_repository(
@@ -489,7 +489,7 @@ impl Handler for ops::ReposUpdate {
             repo.set_default_branch(branch)
                 .map_err(ApiResponse::internal)?;
         }
-        repo.updated_at = crate::state::now();
+        repo.updated_at = crate::time::now_utc();
         Ok(ApiResponse::typed(
             200,
             &render_found(&state, request, &found),
