@@ -1,5 +1,7 @@
 # Where the fake's responses differ from the spec's examples; `cargo xtask example-shapes update` rewrites it.
 actions/create-self-hosted-runner-group-for-org 201 always-omitted $.hosted_runners_url
+actions/get-github-actions-permissions-repository 200 always-omitted $.selected_actions_url
+actions/get-github-actions-permissions-repository 200 always-omitted $.sha_pinning_required
 actions/get-repo-secret 200 uncovered
 actions/get-self-hosted-runner-for-org 200 always-omitted $.version
 actions/get-self-hosted-runner-group-for-org 200 always-omitted $.hosted_runners_url
@@ -178,7 +180,6 @@ orgs/get 200 always-omitted $.members_can_fork_private_repositories
 orgs/get 200 always-omitted $.members_can_invite_outside_collaborators
 orgs/get 200 always-omitted $.members_can_view_dependency_insights
 orgs/get 200 always-omitted $.owned_private_repos
-orgs/get 200 always-omitted $.plan
 orgs/get 200 always-omitted $.private_gists
 orgs/get 200 always-omitted $.readers_can_create_discussions
 orgs/get 200 always-omitted $.secret_scanning_enabled_for_new_repositories
@@ -343,6 +344,7 @@ repos/create-in-org 201 always-omitted $.source
 repos/create-in-org 201 always-omitted $.temp_clone_token
 repos/create-in-org 201 always-omitted $.template_repository
 repos/create-in-org 201 always-omitted $.topics
+repos/create-or-update-environment 200 always-omitted $.protection_rules[].wait_timer
 repos/create-or-update-file-contents 200 always-omitted $.commit.verification.payload
 repos/create-or-update-file-contents 200 always-omitted $.commit.verification.signature
 repos/create-or-update-file-contents 200 always-omitted $.commit.verification.verified_at
@@ -350,20 +352,28 @@ repos/create-or-update-file-contents 201 always-omitted $.commit.verification.pa
 repos/create-or-update-file-contents 201 always-omitted $.commit.verification.signature
 repos/create-or-update-file-contents 201 always-omitted $.commit.verification.verified_at
 repos/create-release 201 always-omitted $.discussion_url
+repos/create-repo-ruleset 201 always-omitted $.bypass_actors
+repos/create-repo-ruleset 201 always-omitted $.conditions.ref_name.exclude
+repos/create-repo-ruleset 201 always-omitted $.rules[].parameters
+repos/create-repo-ruleset 201 enum $.rules[].type
 repos/get 200 always-omitted $.organization
 repos/get 200 always-omitted $.parent
 repos/get 200 always-omitted $.source
 repos/get 200 always-omitted $.temp_clone_token
 repos/get 200 always-omitted $.template_repository
-repos/get 200 always-omitted $.topics
 repos/get-branch 200 always-omitted $.protection.required_status_checks
 repos/get-commit 200 always-omitted $.files
 repos/get-commit 200 always-omitted $.stats
 repos/get-content 200 type $ array object
+repos/get-environment 200 always-omitted $.protection_rules[].wait_timer
 repos/get-latest-release 200 always-omitted $.discussion_url
 repos/get-release 200 always-omitted $.discussion_url
 repos/get-release-asset 200 uncovered
 repos/get-release-by-tag 200 always-omitted $.discussion_url
+repos/get-repo-ruleset 200 always-omitted $.bypass_actors
+repos/get-repo-ruleset 200 always-omitted $.conditions.ref_name.exclude
+repos/get-repo-ruleset 200 always-omitted $.rules[].parameters
+repos/get-repo-ruleset 200 enum $.rules[].type
 repos/list-branches 200 always-omitted $[].protection
 repos/list-branches 200 always-omitted $[].protection_url
 repos/list-for-authenticated-user 200 always-omitted $[].network_count
@@ -395,6 +405,10 @@ repos/update 200 always-omitted $.temp_clone_token
 repos/update 200 always-omitted $.template_repository
 repos/update 200 always-omitted $.topics
 repos/update-release 200 always-omitted $.discussion_url
+repos/update-repo-ruleset 200 always-omitted $.bypass_actors
+repos/update-repo-ruleset 200 always-omitted $.conditions.ref_name.exclude
+repos/update-repo-ruleset 200 always-omitted $.rules[].parameters
+repos/update-repo-ruleset 200 enum $.rules[].type
 search/issues-and-pull-requests 200 always-omitted $.lexical_fallback_reason
 search/issues-and-pull-requests 200 type $.items[] string object
 search/repos 200 always-omitted $.items[].master_branch

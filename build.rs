@@ -34,8 +34,8 @@ const OVERRIDES: &str = "spec/overrides.json";
 const RESPONSE_SCHEMAS: [&str; 37] = [
     "actions-public-key",
     "actions-secret",
-    "base-gist",
     "basic-error",
+    "base-gist",
     "blob",
     "branch-with-protection",
     "commit",
@@ -44,7 +44,6 @@ const RESPONSE_SCHEMAS: [&str; 37] = [
     "content-file",
     "content-submodule",
     "content-symlink",
-    "email",
     "full-repository",
     "git-commit",
     "git-ref",
@@ -53,14 +52,10 @@ const RESPONSE_SCHEMAS: [&str; 37] = [
     "hook",
     "hook-delivery-item",
     "issue-search-result-item",
-    "key",
-    "key-simple",
     "minimal-repository",
     "organization-full",
-    "private-user",
     "public-user",
     "rate-limit-overview",
-    "reaction",
     "release",
     "release-asset",
     "repository",
@@ -69,10 +64,15 @@ const RESPONSE_SCHEMAS: [&str; 37] = [
     "short-branch",
     "simple-user",
     "validation-error",
+    "email",
+    "key",
+    "key-simple",
+    "private-user",
+    "reaction",
 ];
 
 /// Supported operations whose JSON request models are generated alongside their responses.
-const REQUEST_OPERATIONS: [&str; 39] = [
+const REQUEST_OPERATIONS: [&str; 47] = [
     "actions/create-or-update-repo-secret",
     "actions/re-run-workflow",
     "actions/re-run-workflow-failed-jobs",
@@ -97,10 +97,6 @@ const REQUEST_OPERATIONS: [&str; 39] = [
     "pulls/remove-requested-reviewers",
     "pulls/request-reviewers",
     "pulls/update",
-    "reactions/create-for-issue",
-    "reactions/create-for-issue-comment",
-    "reactions/create-for-pull-request-review-comment",
-    "reactions/create-for-release",
     "repos/create-for-authenticated-user",
     "repos/create-in-org",
     "repos/create-or-update-file-contents",
@@ -110,12 +106,24 @@ const REQUEST_OPERATIONS: [&str; 39] = [
     "repos/update",
     "repos/update-release",
     "repos/update-webhook",
+    "actions/create-or-update-environment-secret",
+    "actions/set-github-actions-default-workflow-permissions-repository",
+    "actions/set-github-actions-permissions-repository",
+    "repos/create-deployment-branch-policy",
+    "repos/create-or-update-environment",
+    "repos/create-repo-ruleset",
+    "repos/replace-all-topics",
+    "repos/update-repo-ruleset",
+    "reactions/create-for-issue",
+    "reactions/create-for-issue-comment",
+    "reactions/create-for-pull-request-review-comment",
+    "reactions/create-for-release",
     "users/create-public-ssh-key-for-authenticated-user",
     "users/update-authenticated",
 ];
 
 /// Supported REST operations whose JSON response models are used by handlers.
-const RESPONSE_OPERATIONS: [&str; 75] = [
+const RESPONSE_OPERATIONS: [&str; 89] = [
     "actions/create-or-update-repo-secret",
     "actions/get-repo-public-key",
     "actions/get-repo-secret",
@@ -186,6 +194,20 @@ const RESPONSE_OPERATIONS: [&str; 75] = [
     "repos/list-pull-requests-associated-with-commit",
     "search/issues-and-pull-requests",
     "search/repos",
+    "actions/get-environment-public-key",
+    "actions/get-github-actions-default-workflow-permissions-repository",
+    "actions/get-github-actions-permissions-repository",
+    "actions/list-environment-secrets",
+    "repos/create-deployment-branch-policy",
+    "repos/create-or-update-environment",
+    "repos/create-repo-ruleset",
+    "repos/get-environment",
+    "repos/get-repo-ruleset",
+    "repos/get-repo-rulesets",
+    "repos/list-deployment-branch-policies",
+    "repos/replace-all-topics",
+    "repos/update-repo-ruleset",
+    "repos/get-all-topics",
     "search/code",
     "search/commits",
     "search/labels",
@@ -334,6 +356,11 @@ fn main() {
         .as_array_mut()
         .expect("issue-event-for-issue is an anyOf")
         .insert(0, json!({ "$ref": "#/components/schemas/issue-event" }));
+    // An environment's `deployment_branch_policy` is set to `null` to let any branch deploy, as
+    // its description says, but the schema it references is not nullable.
+    spec["paths"]["/repos/{owner}/{repo}/environments/{environment_name}"]["put"]["requestBody"]
+        ["content"]["application/json"]["schema"]["properties"]["deployment_branch_policy"]["nullable"] =
+        Value::Bool(true);
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     // `validate` checks responses against this patched copy.
     fs::write(
@@ -1036,6 +1063,10 @@ fn api_types(spec: &Value) -> TokenStream {
         .iter()
         .map(|(name, schema)| (name.clone(), schema.clone()))
         .collect();
+    // A repository ruleset's conditions are `repository-ruleset-conditions`; the anyOf with the
+    // organization conditions makes typify generate a second type of the same name.
+    schemas.get_mut("repository-ruleset").unwrap()["properties"]["conditions"] =
+        json!({ "$ref": "#/components/schemas/repository-ruleset-conditions" });
     let paths = spec["paths"].as_object().expect("the spec has no paths");
     let mut roots: Vec<String> = RESPONSE_SCHEMAS
         .iter()
@@ -1092,8 +1123,10 @@ fn api_types(spec: &Value) -> TokenStream {
                 "$ref": format!("#/components/schemas/{config_name}")
             });
         }
-        let mut request_rules =
-            RequestFields::from_schema(&schema, method.eq_ignore_ascii_case("patch"));
+        // Updating a ruleset keeps the properties the PUT omits, as a PATCH does.
+        let partial =
+            method.eq_ignore_ascii_case("patch") || operation_id == "repos/update-repo-ruleset";
+        let mut request_rules = RequestFields::from_schema(&schema, partial);
         if operation_id == "repos/update" {
             request_rules
                 .nullable

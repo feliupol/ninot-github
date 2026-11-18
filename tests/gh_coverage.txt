@@ -26,6 +26,7 @@ command repo view
 command run list
 command search code
 command search commits
+command secret set
 flag api --field
 flag api --header
 flag api --include
@@ -83,6 +84,7 @@ flag repo create --push
 flag repo create --source
 flag repo delete --yes
 flag repo edit --accept-visibility-change-consequences
+flag repo edit --add-topic
 flag repo edit --default-branch
 flag repo edit --delete-branch-on-merge
 flag repo edit --description
@@ -105,6 +107,9 @@ flag search code --json
 flag search code --repo
 flag search commits --json
 flag search commits --repo
+flag secret set --body
+flag secret set --env
+flag secret set --repo
 git git-receive-pack
 git git-upload-pack
 git info/refs
@@ -150,7 +155,14 @@ graphql RepositoryConnection.pageInfo
 graphql RepositoryConnection.totalCount
 graphql User.login
 graphql User.repositories
+rest actions/create-or-update-environment-secret
+rest actions/get-environment-public-key
+rest actions/get-github-actions-default-workflow-permissions-repository
+rest actions/get-github-actions-permissions-repository
+rest actions/list-environment-secrets
 rest actions/list-workflow-runs-for-repo
+rest actions/set-github-actions-default-workflow-permissions-repository
+rest actions/set-github-actions-permissions-repository
 rest git/get-ref
 rest git/list-matching-refs
 rest issues/create
@@ -179,25 +191,33 @@ rest reactions/list-for-issue
 rest reactions/list-for-issue-comment
 rest reactions/list-for-pull-request-review-comment
 rest reactions/list-for-release
+rest repos/create-deployment-branch-policy
 rest repos/create-for-authenticated-user
 rest repos/create-in-org
+rest repos/create-or-update-environment
 rest repos/create-or-update-file-contents
 rest repos/create-release
+rest repos/create-repo-ruleset
 rest repos/create-webhook
 rest repos/delete
 rest repos/delete-release
 rest repos/delete-release-asset
 rest repos/delete-webhook
 rest repos/get
+rest repos/get-all-topics
 rest repos/get-branch
 rest repos/get-commit
 rest repos/get-content
+rest repos/get-environment
 rest repos/get-latest-release
 rest repos/get-release
 rest repos/get-release-asset
 rest repos/get-release-by-tag
+rest repos/get-repo-ruleset
+rest repos/get-repo-rulesets
 rest repos/get-webhook
 rest repos/list-branches
+rest repos/list-deployment-branch-policies
 rest repos/list-for-authenticated-user
 rest repos/list-for-org
 rest repos/list-for-user
@@ -206,9 +226,11 @@ rest repos/list-releases
 rest repos/list-webhook-deliveries
 rest repos/list-webhooks
 rest repos/ping-webhook
+rest repos/replace-all-topics
 rest repos/transfer
 rest repos/update
 rest repos/update-release
+rest repos/update-repo-ruleset
 rest repos/update-webhook
 rest repos/upload-release-asset
 rest search/code

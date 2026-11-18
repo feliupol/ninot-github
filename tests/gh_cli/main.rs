@@ -15,6 +15,7 @@ mod issues;
 mod labels;
 mod pulls;
 mod reactions_search_users;
+mod repo_setup;
 
 use std::fs::File;
 use std::io::Write as _;

@@ -398,7 +398,15 @@ impl App {
         let Some(method) = method(&parts.method) else {
             return into_response(ApiResponse::not_found(), caller.as_ref());
         };
-        let Some(found) = self.router.find(method, path) else {
+        let listed_refs = list_refs_alias(method, path);
+        let found = match &listed_refs {
+            Some((routed, prefix)) => self.router.find(method, routed).map(|mut found| {
+                found.params.insert("ref".to_owned(), prefix.clone());
+                found
+            }),
+            None => self.router.find(method, path),
+        };
+        let Some(found) = found else {
             self.record(Hit::Unrouted {
                 method: parts.method.to_string(),
                 path: path.to_owned(),
@@ -640,6 +648,26 @@ impl App {
         // Source: <https://docs.github.com/en/rest/authentication/authenticating-to-the-rest-api#failed-login-limit>
         Err(ApiResponse::error(401, "Bad credentials"))
     }
+}
+
+/// `GET /repos/{owner}/{repo}/git/refs[/{prefix}]`, which GitHub still serves although the
+/// pinned description dropped it, as list-matching-refs of `prefix`: every ref when it is empty,
+/// or `409 Git Repository is empty.` for an empty repository. Returns a path that routes to
+/// list-matching-refs and the `ref` to serve, which may be empty.
+fn list_refs_alias(method: Method, path: &str) -> Option<(String, String)> {
+    if method != Method::Get {
+        return None;
+    }
+    let rest = path.strip_prefix("/repos/")?;
+    let mut parts = rest.splitn(3, '/');
+    let (owner, repo, tail) = (parts.next()?, parts.next()?, parts.next()?);
+    let prefix = tail
+        .strip_prefix("git/refs")
+        .filter(|prefix| prefix.is_empty() || prefix.starts_with('/'))?;
+    Some((
+        format!("/repos/{owner}/{repo}/git/matching-refs/all"),
+        prefix.trim_matches('/').to_owned(),
+    ))
 }
 
 fn method(method: &http::Method) -> Option<Method> {

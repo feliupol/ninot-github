@@ -12,7 +12,7 @@ use url::Url;
 
 use crate::api::ApiRequest;
 use crate::state::{
-    Account, AccountKind, Comment, Issue, LabelRecord, Milestone, Permission, Repo, State,
+    Account, AccountKind, Comment, Issue, LabelRecord, Milestone, OrgRole, Permission, Repo, State,
     StateReason, fold,
 };
 use crate::types;
@@ -604,6 +604,24 @@ fn public_repos(account: &Account) -> i64 {
     account.repos().filter(|repo| !repo.private).count() as i64
 }
 
+/// The plan of `org`, which GitHub shows its owners only.
+// Source: <https://docs.github.com/en/rest/orgs/orgs#get-an-organization>
+fn organization_plan(request: &ApiRequest, org: &Account) -> Option<types::OrganizationFullPlan> {
+    let plan = org.plan?;
+    let caller = request.caller.as_ref()?;
+    if caller.login != crate::server::ADMIN_LOGIN && org.role_of(&caller.login) != OrgRole::Owner {
+        return None;
+    }
+    let seats = org.members.len() as i64;
+    Some(types::OrganizationFullPlan {
+        filled_seats: Some(seats),
+        name: plan.as_str().to_owned(),
+        private_repos: 10_000,
+        seats: Some(seats),
+        space: 976_562_499,
+    })
+}
+
 /// An organization as GitHub returns it from `GET /orgs/{org}`.
 pub fn organization(request: &ApiRequest, org: &Account) -> types::OrganizationFull {
     debug_assert_eq!(org.kind, AccountKind::Organization);
@@ -661,7 +679,7 @@ pub fn organization(request: &ApiRequest, org: &Account) -> types::OrganizationF
         name: Some(org.name.clone().unwrap_or_else(|| login.clone())),
         node_id: node_id("Organization", org.id),
         owned_private_repos: None,
-        plan: None,
+        plan: organization_plan(request, org),
         private_gists: None,
         public_gists: 0,
         public_members_url: urls.api("/public_members{/member}"),
@@ -796,7 +814,7 @@ pub fn full_repository(
         teams_url: urls.api("/teams"),
         temp_clone_token: None,
         template_repository: None,
-        topics: Vec::new(),
+        topics: repo.setup.topics.clone(),
         trees_url: urls.api("/git/trees{/sha}"),
         updated_at: repo.updated_at,
         url: urls.api,

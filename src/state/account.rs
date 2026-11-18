@@ -51,6 +51,8 @@ pub struct Account {
     /// Source: <https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/using-labels-with-self-hosted-runners>
     /// ("Labels are case-insensitive.")
     pub(super) runner_label_ids: BTreeMap<Name, u64>,
+    /// Billing plan a fixture set; `None` applies no plan limits.
+    pub plan: Option<super::Plan>,
     /// A user's own profile details; unused for organizations, which keep `profile`.
     pub user_profile: UserProfile,
     /// A user's public SSH keys, oldest first.

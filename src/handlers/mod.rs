@@ -21,6 +21,7 @@ mod apps;
 mod check_suites;
 mod checks;
 pub(crate) mod checks_model;
+mod environments;
 mod gists;
 mod git_blobs;
 mod git_commits;
@@ -41,7 +42,9 @@ mod pull_reviews;
 mod pulls;
 pub(crate) mod reactions;
 pub mod releases;
+mod repo_admin;
 pub mod repos;
+mod rulesets;
 pub(crate) mod runner_service;
 mod runners;
 pub(crate) mod search;
@@ -79,6 +82,23 @@ macro_rules! registry {
 }
 
 registry![
+    ops::ReposGetAllTopics,
+    ops::ReposReplaceAllTopics,
+    ops::ActionsGetGithubActionsPermissionsRepository,
+    ops::ActionsSetGithubActionsPermissionsRepository,
+    ops::ActionsGetGithubActionsDefaultWorkflowPermissionsRepository,
+    ops::ActionsSetGithubActionsDefaultWorkflowPermissionsRepository,
+    ops::ReposGetEnvironment,
+    ops::ReposCreateOrUpdateEnvironment,
+    ops::ReposListDeploymentBranchPolicies,
+    ops::ReposCreateDeploymentBranchPolicy,
+    ops::ActionsGetEnvironmentPublicKey,
+    ops::ActionsListEnvironmentSecrets,
+    ops::ActionsCreateOrUpdateEnvironmentSecret,
+    ops::ReposGetRepoRulesets,
+    ops::ReposGetRepoRuleset,
+    ops::ReposCreateRepoRuleset,
+    ops::ReposUpdateRepoRuleset,
     ops::GistsList,
     ops::GistsCreate,
     ops::AppsGetRepoInstallation,

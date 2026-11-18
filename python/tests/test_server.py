@@ -219,3 +219,28 @@ def test_team_review_requests_are_searchable_by_member() -> None:
         )
         found = json.loads(urllib.request.urlopen(request).read())
         assert [item["number"] for item in found["items"]] == [1]
+
+
+def test_org_plan_is_shown_to_owners_and_limits_private_repositories() -> None:
+    """A Free plan shows on the organization and refuses rulesets on its private repositories."""
+    with Server() as server:
+        token = server.add_user("me").add_token(["repo"])
+        org = server.add_org("org", ["me"])
+        server.create_repository("org", "project", private=True)
+        org.set_plan("free")
+
+        def get(path: str) -> urllib.request.Request:
+            return urllib.request.Request(
+                f"{server.url}{path}", headers={"Authorization": f"token {token}"}
+            )
+
+        found = json.loads(urllib.request.urlopen(get("/orgs/org")).read())
+        assert found["plan"]["name"] == "free"
+        with pytest.raises(urllib.error.HTTPError) as refused:
+            urllib.request.urlopen(get("/repos/org/project/rulesets"))
+        assert refused.value.code == 403
+
+        org.set_plan(None)
+        assert json.loads(urllib.request.urlopen(get("/repos/org/project/rulesets")).read()) == []
+        with pytest.raises(ValueError, match="unknown plan"):
+            org.set_plan("platinum")

@@ -741,6 +741,21 @@ impl Org {
         self.inner.login()
     }
 
+    /// Sets the billing plan (`free`, `pro`, `team` or `enterprise`), or clears it with `None`.
+    /// A plan limits rulesets and reviewers on the organization's private repositories.
+    #[pyo3(signature = (plan))]
+    fn set_plan(&self, plan: Option<&str>) -> PyResult<()> {
+        let plan = plan
+            .map(|name| {
+                ninot_github::state::Plan::parse(name)
+                    .ok_or_else(|| PyValueError::new_err(format!("unknown plan {name:?}")))
+            })
+            .transpose()?;
+        self.inner
+            .set_plan(plan)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
+    }
+
     /// Adds members to the team slug of this organization, creating both if needed.
     fn add_team(&self, slug: &str, members: Vec<String>) -> PyResult<Team> {
         let member_refs = members.iter().map(String::as_str).collect::<Vec<_>>();

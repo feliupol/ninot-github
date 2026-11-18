@@ -15,6 +15,7 @@ mod org;
 mod reaction;
 mod release;
 mod repo;
+mod repo_setup;
 mod runner;
 mod user;
 mod workflow;
@@ -42,6 +43,9 @@ pub use repo::{
     ActionsPublicKey, CheckSuiteRecord, LabelRecord, Milestone, NewTimelineEvent, Permission,
     PullRequest, Repo, ReviewDecision, ReviewThread, ReviewThreadComment, Settings,
     StoredActionsSecret, TimelineEvent, TimelineEventKind,
+};
+pub use repo_setup::{
+    ActionsPermissions, DeploymentPolicy, Environment, EnvironmentSecret, Plan, RepoSetup, Ruleset,
 };
 pub(crate) use runner::RunnerTokenKind;
 pub(crate) use runner::{CreateRunnerError, RunnerSpec, valid_label_name, valid_runner_name};
@@ -286,6 +290,7 @@ impl State {
                     runners: BTreeMap::new(),
                     runner_groups: BTreeMap::new(),
                     runner_label_ids: BTreeMap::new(),
+                    plan: None,
                     user_profile: UserProfile::default(),
                     ssh_keys: Vec::new(),
                     followers: BTreeSet::new(),

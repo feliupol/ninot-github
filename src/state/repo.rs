@@ -66,6 +66,8 @@ pub struct Repo {
     pub commit_statuses: BTreeMap<String, Vec<CommitStatusRecord>>,
     pub hooks: Vec<Hook>,
     pub settings: Settings,
+    /// Topics, Actions permissions, environments and rulesets.
+    pub setup: super::RepoSetup,
 }
 
 /// A check suite owned by one GitHub App and one commit.
@@ -627,6 +629,7 @@ impl State {
                 commit_statuses: BTreeMap::new(),
                 hooks: Vec::new(),
                 settings: Settings::default(),
+                setup: super::RepoSetup::default(),
             },
         );
         self.redirects

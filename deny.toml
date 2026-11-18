@@ -26,3 +26,9 @@ unknown-git = "deny"
 allow-registry = [
     "https://github.com/rust-lang/crates.io-index",
 ]
+
+[advisories]
+ignore = [
+    { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained with no replacement upgrade; used for timestamps throughout" },
+    { id = "RUSTSEC-2026-0542", reason = "humantime wraps chrono; dev-only" },
+]

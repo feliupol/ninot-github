@@ -131,6 +131,25 @@ port of its `--url`, so it has to reach the fake on port 443. Details, including
 [`examples/orgs_and_runners.rs`](examples/orgs_and_runners.rs) creates an organization, a
 team and a runner.
 
+## Repository setup
+
+A repository administrator can set its topics, its Actions permissions, deployment
+environments and rulesets. An environment keeps user reviewers, `prevent_self_review`, the
+deployment branch policy, custom branch and tag policies, and secrets. Its secrets key is
+derived from the repository and environment ids, so `gh secret set --env` can seal values to
+it; nothing can decrypt them. Rulesets are stored and served back, not enforced on push. Team
+reviewers are refused with `422`.
+
+`GET /repos/{owner}/{repo}/git/refs[/{prefix}]`, which the pinned description no longer lists,
+answers like list-matching-refs: `409 Git Repository is empty.` for a repository without refs.
+
+[`Org::set_plan`](src/server/seed/plan.rs) gives an organization a billing plan, shown to its
+owners in `GET /orgs/{org}`. On its private repositories, `free` refuses rulesets with `403
+Upgrade to GitHub Pro or make this repository public to enable this feature.`, and every plan
+but `enterprise` refuses required reviewers with a `422` naming the billing plan; environments
+themselves exist on every plan. Public repositories, and organizations without a plan, have no
+limits.
+
 ## Python package
 
 [`python/`](python/) is a PyO3 binding of the same handles (`Server`, `User`, `Org`, `Team`,
@@ -142,11 +161,11 @@ team and a runner.
 
 ## Status
 
-REST operations: 221 / 1231 (18.0%).
+REST operations: 238 / 1231 (19.3%).
 
 | Tag | Implemented | Total | % |
 | --- | ---: | ---: | ---: |
-| actions | 30 | 200 | 15.0% |
+| actions | 37 | 200 | 18.5% |
 | activity | 0 | 34 | 0.0% |
 | agent-tasks | 0 | 5 | 0.0% |
 | agents | 0 | 30 | 0.0% |
@@ -184,25 +203,25 @@ REST operations: 221 / 1231 (18.0%).
 | pulls | 27 | 34 | 79.4% |
 | rate-limit | 1 | 1 | 100.0% |
 | reactions | 12 | 15 | 80.0% |
-| repos | 36 | 203 | 17.7% |
+| repos | 46 | 203 | 22.7% |
 | search | 7 | 7 | 100.0% |
 | secret-scanning | 0 | 17 | 0.0% |
 | security-advisories | 0 | 10 | 0.0% |
 | teams | 15 | 32 | 46.9% |
 | users | 11 | 47 | 23.4% |
 
-GitHub CLI leaf commands: 26 / 204 (12.7%).
+GitHub CLI leaf commands: 27 / 204 (13.2%).
 
 GraphQL resolvers: 27 / 5577 schema fields (0.5%). The published schema is served. A field without a resolver reads the same-named key of its parent object and returns the error `Not implemented by ninot-github: Type.field` when that key is absent.
 
-Python bindings: 67 / 77 public methods.
+Python bindings: 68 / 78 public methods.
 
 | Type | Exposed | Total | Missing |
 | --- | ---: | ---: | --- |
 | ActionsSecret | 3 | 3 | none |
 | Commit | 3 | 3 | none |
 | Issue | 2 | 2 | none |
-| Org | 3 | 3 | none |
+| Org | 4 | 4 | none |
 | Project | 3 | 3 | none |
 | PullRequest | 8 | 8 | none |
 | Repository | 16 | 20 | `commit_file_by`, `create_app_installation`, `create_installation_with_secrets_permission`, `queue_script_job` |
