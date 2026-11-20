@@ -52,7 +52,9 @@ pub(crate) use runner::RunnerTokenKind;
 pub(crate) use runner::{CreateRunnerError, RunnerSpec, valid_label_name, valid_runner_name};
 pub use runner::{Runner, RunnerGroup, RunnerLabel};
 pub use user::{SshKey, UserProfile};
-pub use workflow::{JobRecord, WorkflowRunRecord};
+pub use workflow::{
+    ArtifactRecord, AttemptRecord, CacheRecord, JobRecord, WorkflowRecord, WorkflowRunRecord,
+};
 
 use crate::api::Caller;
 pub use crate::time::now;

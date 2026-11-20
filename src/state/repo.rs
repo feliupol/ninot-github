@@ -52,6 +52,14 @@ pub struct Repo {
     pub workflow_jobs: BTreeMap<u64, Vec<super::JobRecord>>,
     /// Plain-text workflow job logs, keyed by job id.
     pub workflow_job_logs: BTreeMap<u64, String>,
+    /// Workflows from the default branch and from seeded runs.
+    pub workflows: Vec<super::WorkflowRecord>,
+    /// Actions artifacts.
+    pub artifacts: Vec<super::ArtifactRecord>,
+    /// Actions caches.
+    pub caches: Vec<super::CacheRecord>,
+    /// Earlier attempts of a run, keyed by run id and then attempt number.
+    pub workflow_attempts: BTreeMap<u64, BTreeMap<u64, super::AttemptRecord>>,
     /// Public key used by Actions secret clients, if configured by the fixture.
     pub actions_public_key: Option<ActionsPublicKey>,
     /// Encrypted Actions secret payloads, keyed by their case-sensitive name.
@@ -621,6 +629,10 @@ impl State {
                 workflow_runs: Vec::new(),
                 workflow_jobs: BTreeMap::new(),
                 workflow_job_logs: BTreeMap::new(),
+                workflows: Vec::new(),
+                artifacts: Vec::new(),
+                caches: Vec::new(),
+                workflow_attempts: BTreeMap::new(),
                 actions_public_key: None,
                 actions_secrets: BTreeMap::new(),
                 check_runs: Vec::new(),

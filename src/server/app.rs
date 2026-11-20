@@ -301,19 +301,22 @@ impl App {
                         return into_response(ApiResponse::not_found(), caller.as_ref());
                     }
                     jobs.iter()
-                        .filter_map(|job| {
+                        .enumerate()
+                        .filter_map(|(index, job)| {
                             repository
                                 .workflow_job_logs
                                 .get(&job.id)
-                                .map(|text| (job.id, text.clone()))
+                                .map(|text| (index, job.name.clone(), text.clone()))
                         })
                         .collect::<Vec<_>>()
                 };
                 let mut archive = zip::ZipWriter::new(Cursor::new(Vec::new()));
                 let options = zip::write::SimpleFileOptions::default()
                     .compression_method(zip::CompressionMethod::Deflated);
-                for (job_id, log) in archive_data {
-                    let path = format!("run-{run_id}/job-{job_id}.txt");
+                for (index, job_name, log) in archive_data {
+                    // `gh run view --log` matches `{ordinal}_{job}.txt` and rejects `/` and `:`.
+                    let safe = job_name.replace(['/', ':'], "");
+                    let path = format!("{index}_{safe}.txt");
                     if archive.start_file(path, options).is_err()
                         || archive.write_all(log.as_bytes()).is_err()
                     {
@@ -336,6 +339,41 @@ impl App {
                     ApiResponse::bytes(200, "application/zip", bytes),
                     caller.as_ref(),
                 );
+            }
+            return into_response(ApiResponse::not_found(), None);
+        }
+        if parts.method == http::Method::GET
+            && let Some(rest) = full_path.strip_prefix("/_ninot/actions/artifacts/")
+        {
+            let segments: Vec<&str> = rest.split('/').collect();
+            if let [owner, repo_name, id] = segments.as_slice()
+                && let Ok(id) = id.parse::<u64>()
+            {
+                let caller = match self.authenticate(&parts.headers) {
+                    Ok(caller) => caller,
+                    Err(response) => return into_response(response, None),
+                };
+                let bytes = {
+                    let state = lock(&self.state);
+                    if state
+                        .permission(caller.as_ref(), owner, repo_name)
+                        .is_none()
+                    {
+                        return into_response(ApiResponse::not_found(), caller.as_ref());
+                    }
+                    state
+                        .account(owner)
+                        .and_then(|account| account.repo(repo_name))
+                        .and_then(|repo| repo.artifacts.iter().find(|artifact| artifact.id == id))
+                        .map(|artifact| artifact.zip.clone())
+                };
+                if let Some(bytes) = bytes {
+                    return into_response(
+                        ApiResponse::bytes(200, "application/zip", bytes),
+                        caller.as_ref(),
+                    );
+                }
+                return into_response(ApiResponse::not_found(), caller.as_ref());
             }
             return into_response(ApiResponse::not_found(), None);
         }

@@ -27,12 +27,12 @@ fn implemented_operation_is_served_at_root_and_enterprise_prefix() {
 #[test]
 fn unimplemented_operation_names_its_operation_id() {
     let server = Server::start().unwrap();
-    let response = get(&server, "/repos/o/r/actions/workflows", None);
+    let response = get(&server, "/repos/o/r/tarball/main", None);
     assert_eq!(response.status(), 501);
     let body: Value = response.json().unwrap();
     assert_eq!(
         body["message"],
-        "Not implemented by ninot-github: actions/list-repo-workflows"
+        "Not implemented by ninot-github: repos/download-tarball-archive"
     );
     assert_eq!(body["status"], "501");
     let mut keys: Vec<&String> = body.as_object().unwrap().keys().collect();
@@ -129,7 +129,7 @@ fn hits_record_operations_fields_and_unrouted_requests() {
     use ninot_github::server::Hit;
     let server = Server::start().unwrap();
     get(&server, "/zen", None);
-    get(&server, "/repos/o/r/actions/workflows", None);
+    get(&server, "/repos/o/r/tarball/main", None);
     get(&server, "/no/such/route", None);
     Client::new()
         .post(format!("{}/api/graphql", server.url()))
@@ -150,7 +150,7 @@ fn hits_record_operations_fields_and_unrouted_requests() {
             status: 200,
         },
         Hit::Rest {
-            operation: "actions/list-repo-workflows",
+            operation: "repos/download-tarball-archive",
             status: 501,
         },
         Hit::Unrouted {

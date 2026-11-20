@@ -9,6 +9,27 @@ use crate::rate_limit::Resource;
 use crate::state::{State, lock};
 use crate::types;
 
+/// The subset of `GET /meta` that `gh` reads.
+#[derive(serde::Serialize)]
+struct Meta {
+    verifiable_password_authentication: bool,
+    installed_version: &'static str,
+}
+
+/// API metadata. `installed_version` makes `gh` treat this host as GHES 3.21, which
+/// opts `gh workflow run` into `return_run_details`.
+impl Handler for ops::MetaGet {
+    fn handle(_: &Mutex<State>, _: &ApiRequest) -> ApiResult {
+        Ok(ApiResponse::typed(
+            200,
+            &Meta {
+                verifiable_password_authentication: true,
+                installed_version: "3.21.0",
+            },
+        ))
+    }
+}
+
 impl Handler for ops::MetaGetZen {
     fn handle(_: &Mutex<State>, _: &ApiRequest) -> ApiResult {
         Ok(ApiResponse::bytes(

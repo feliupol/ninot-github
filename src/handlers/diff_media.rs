@@ -5,8 +5,8 @@
 //! Source: <https://docs.github.com/en/rest/pulls/pulls#get-a-pull-request>
 
 use std::path::Path;
-use std::process::{Command, Stdio};
 
+use super::{diff_patch, diff_text};
 use crate::api::{ApiRequest, ApiResponse};
 use crate::types;
 
@@ -63,7 +63,7 @@ pub(crate) fn pull(
     )?)))
 }
 
-/// `git show` of `sha` as a diff, or `git format-patch -1`, when `Accept` asks for it.
+/// Diff or patch of `sha`, when `Accept` asks for it.
 pub(crate) fn commit(
     request: &ApiRequest,
     git_dir: &Path,
@@ -73,21 +73,8 @@ pub(crate) fn commit(
         return Ok(None);
     };
     let bytes = match kind {
-        Kind::Diff => git(
-            git_dir,
-            &[
-                "diff-tree",
-                "--root",
-                "--no-commit-id",
-                "-p",
-                "--no-color",
-                "--no-renames",
-                "--src-prefix=a/",
-                "--dst-prefix=b/",
-                sha,
-            ],
-        )?,
-        Kind::Patch => git(git_dir, &["format-patch", "-1", "--stdout", sha])?,
+        Kind::Diff => diff_text::commit_diff(git_dir, sha)?,
+        Kind::Patch => diff_patch::commit_patch(git_dir, sha)?,
     };
     Ok(Some(text(bytes)))
 }
@@ -105,67 +92,10 @@ pub(crate) fn compare(
     Ok(Some(text(range(git_dir, kind, base, head)?)))
 }
 
-/// `git diff base...head`, or `format-patch` of the commits reachable from `head` since the merge base.
+/// Three-dot diff, or format-patch of the commits reachable from `head` since the merge base.
 fn range(git_dir: &Path, kind: Kind, base: &str, head: &str) -> Result<Vec<u8>, ApiResponse> {
     match kind {
-        Kind::Diff => {
-            let spec = format!("{base}...{head}");
-            git(
-                git_dir,
-                &[
-                    "diff",
-                    "--no-color",
-                    "--no-renames",
-                    "--src-prefix=a/",
-                    "--dst-prefix=b/",
-                    &spec,
-                ],
-            )
-        }
-        Kind::Patch => {
-            let merge_base = merge_base(git_dir, base, head)?;
-            let spec = format!("{merge_base}..{head}");
-            git(git_dir, &["format-patch", "--stdout", &spec])
-        }
+        Kind::Diff => diff_text::range_diff(git_dir, base, head),
+        Kind::Patch => diff_patch::range_patch(git_dir, base, head),
     }
-}
-
-fn merge_base(git_dir: &Path, base: &str, head: &str) -> Result<String, ApiResponse> {
-    let output = git(git_dir, &["merge-base", base, head])?;
-    let sha = String::from_utf8_lossy(&output).trim().to_owned();
-    if sha.is_empty() {
-        return Err(ApiResponse::internal("no merge base"));
-    }
-    Ok(sha)
-}
-
-fn git(git_dir: &Path, args: &[&str]) -> Result<Vec<u8>, ApiResponse> {
-    let output = Command::new("git")
-        .arg("--git-dir")
-        .arg(git_dir)
-        .args([
-            "-c",
-            "color.ui=false",
-            "-c",
-            "diff.mnemonicPrefix=false",
-            "-c",
-            "diff.noprefix=false",
-            "-c",
-            "core.quotepath=false",
-        ])
-        .args(args)
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .stdin(Stdio::null())
-        .output()
-        .map_err(ApiResponse::internal)?;
-    if output.status.success() {
-        return Ok(output.stdout);
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    Err(ApiResponse::internal(format!(
-        "git {} failed: {}",
-        args.first().copied().unwrap_or("command"),
-        stderr.trim()
-    )))
 }

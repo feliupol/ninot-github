@@ -1,19 +1,19 @@
 {
   "matrices": [
     {
-      "done": 261,
+      "done": 282,
       "name": "rest-operations",
       "total": 1231
     },
     {
-      "done": 34,
+      "done": 47,
       "name": "gh-commands",
       "total": 204
     },
     {
       "done": 68,
       "name": "python-api",
-      "total": 78
+      "total": 80
     }
   ],
   "schema": 1

@@ -2,6 +2,9 @@
 
 use super::*;
 
+#[path = "seed_actions.rs"]
+mod seed_actions;
+
 /// A repository fixture handle. Repository-owned API state is seeded through this value.
 #[derive(Clone)]
 pub struct Repository {

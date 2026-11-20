@@ -60,7 +60,6 @@ fn run_list_of_a_repository_without_runs() {
 /// `gh run list` names each run's workflow from `GET /repos/{owner}/{repo}/actions/workflows`
 /// (cli/cli v2.101.0 pkg/cmd/run/shared/shared.go:446).
 #[test]
-#[ignore = "not implemented: REST actions/list-repo-workflows"]
 fn run_list_shows_runs() {
     let server = tls_server();
     let config = TempDir::new();
@@ -93,7 +92,6 @@ fn run_list_shows_runs() {
 /// `gh run view` names the run's workflow from `GET /repos/{owner}/{repo}/actions/workflows/{id}`
 /// (cli/cli v2.101.0 pkg/cmd/run/shared/shared.go:588).
 #[test]
-#[ignore = "not implemented: REST actions/get-workflow"]
 fn run_view_shows_the_run_and_its_jobs() {
     let server = tls_server();
     let config = TempDir::new();
@@ -118,7 +116,6 @@ fn run_view_shows_the_run_and_its_jobs() {
 }
 
 #[test]
-#[ignore = "not implemented: REST actions/list-repo-workflows"]
 fn workflow_list_and_view() {
     let server = tls_server();
     let config = TempDir::new();

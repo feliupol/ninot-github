@@ -161,11 +161,11 @@ limits.
 
 ## Status
 
-REST operations: 261 / 1231 (21.2%).
+REST operations: 282 / 1231 (22.9%).
 
 | Tag | Implemented | Total | % |
 | --- | ---: | ---: | ---: |
-| actions | 60 | 200 | 30.0% |
+| actions | 80 | 200 | 40.0% |
 | activity | 0 | 34 | 0.0% |
 | agent-tasks | 0 | 5 | 0.0% |
 | agents | 0 | 30 | 0.0% |
@@ -193,7 +193,7 @@ REST operations: 261 / 1231 (21.2%).
 | issues | 40 | 61 | 65.6% |
 | licenses | 0 | 3 | 0.0% |
 | markdown | 0 | 2 | 0.0% |
-| meta | 2 | 5 | 40.0% |
+| meta | 3 | 5 | 60.0% |
 | migrations | 0 | 22 | 0.0% |
 | oidc | 0 | 8 | 0.0% |
 | orgs | 11 | 116 | 9.5% |
@@ -210,11 +210,11 @@ REST operations: 261 / 1231 (21.2%).
 | teams | 15 | 32 | 46.9% |
 | users | 11 | 47 | 23.4% |
 
-GitHub CLI leaf commands: 34 / 204 (16.7%).
+GitHub CLI leaf commands: 47 / 204 (23.0%).
 
 GraphQL resolvers: 27 / 5577 schema fields (0.5%). The published schema is served. A field without a resolver reads the same-named key of its parent object and returns the error `Not implemented by ninot-github: Type.field` when that key is absent.
 
-Python bindings: 68 / 78 public methods.
+Python bindings: 68 / 80 public methods.
 
 | Type | Exposed | Total | Missing |
 | --- | ---: | ---: | --- |
@@ -224,7 +224,7 @@ Python bindings: 68 / 78 public methods.
 | Org | 4 | 4 | none |
 | Project | 3 | 3 | none |
 | PullRequest | 8 | 8 | none |
-| Repository | 16 | 20 | `commit_file_by`, `create_app_installation`, `create_installation_with_secrets_permission`, `queue_script_job` |
+| Repository | 16 | 22 | `commit_file_by`, `create_actions_cache`, `create_app_installation`, `create_artifact`, `create_installation_with_secrets_permission`, `queue_script_job` |
 | Review | 2 | 2 | none |
 | Runner | 2 | 2 | none |
 | Server | 18 | 24 | `deliveries`, `hits`, `runner`, `user`, `wait`, `wait_for_deliveries` |

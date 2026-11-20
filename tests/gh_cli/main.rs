@@ -17,6 +17,7 @@ mod pulls;
 mod reactions_search_users;
 mod repo_setup;
 mod secrets_variables;
+mod workflows_runs;
 
 use std::fs::File;
 use std::io::Write as _;

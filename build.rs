@@ -72,8 +72,10 @@ const RESPONSE_SCHEMAS: [&str; 37] = [
 ];
 
 /// Supported operations whose JSON request models are generated alongside their responses.
-const REQUEST_OPERATIONS: [&str; 47] = [
+const REQUEST_OPERATIONS: [&str; 49] = [
     "actions/create-or-update-repo-secret",
+    "actions/create-workflow-dispatch",
+    "actions/re-run-job-for-workflow-run",
     "actions/re-run-workflow",
     "actions/re-run-workflow-failed-jobs",
     "apps/create-installation-access-token",
@@ -123,17 +125,31 @@ const REQUEST_OPERATIONS: [&str; 47] = [
 ];
 
 /// Supported REST operations whose JSON response models are used by handlers.
-const RESPONSE_OPERATIONS: [&str; 89] = [
+const RESPONSE_OPERATIONS: [&str; 103] = [
     "actions/create-or-update-repo-secret",
+    "actions/create-workflow-dispatch",
     "actions/get-repo-public-key",
     "actions/get-repo-secret",
     "actions/list-repo-secrets",
     "actions/get-job-for-workflow-run",
+    "actions/get-workflow",
     "actions/get-workflow-run",
+    "actions/get-workflow-run-attempt",
     "actions/list-jobs-for-workflow-run",
+    "actions/list-jobs-for-workflow-run-attempt",
+    "actions/list-repo-workflows",
+    "actions/list-workflow-runs",
     "actions/list-workflow-runs-for-repo",
+    "actions/cancel-workflow-run",
+    "actions/force-cancel-workflow-run",
+    "actions/re-run-job-for-workflow-run",
     "actions/re-run-workflow",
     "actions/re-run-workflow-failed-jobs",
+    "actions/get-artifact",
+    "actions/list-artifacts-for-repo",
+    "actions/list-workflow-run-artifacts",
+    "actions/get-actions-cache-list",
+    "actions/delete-actions-cache-by-key",
     "apps/create-installation-access-token",
     "apps/get-repo-installation",
     "checks/create",

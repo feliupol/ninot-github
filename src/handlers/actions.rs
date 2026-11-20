@@ -64,20 +64,7 @@ impl Handler for ops::ActionsListWorkflowRunsForRepo {
         let mut runs = repo
             .workflow_runs
             .iter()
-            .filter(|run| {
-                request
-                    .query("branch")
-                    .is_none_or(|value| run.head_branch.as_deref() == Some(value))
-                    && request
-                        .query("event")
-                        .is_none_or(|value| run.event == value)
-                    && request
-                        .query("status")
-                        .is_none_or(|value| run.status.as_deref() == Some(value))
-                    && request
-                        .query("head_sha")
-                        .is_none_or(|value| run.head_sha == value)
-            })
+            .filter(|run| super::actions_workflows::run_visible(run, request))
             .collect::<Vec<_>>();
         // Newest first, as GitHub lists them.
         runs.sort_by_key(|run| std::cmp::Reverse((run.created_at, run.id)));
@@ -146,6 +133,7 @@ fn rerun_workflow(state: &Mutex<State>, request: &ApiRequest, failed_only: bool)
             .account_mut(&found.owner)
             .and_then(|owner| owner.repo_mut(&found.name))
             .expect("repository exists");
+        super::actions_control::remember_attempt(repo, id);
         let run = repo
             .workflow_runs
             .iter_mut()
@@ -261,8 +249,8 @@ impl Handler for ops::ActionsListJobsForWorkflowRun {
         let jobs = repo
             .workflow_jobs
             .get(&id)
-            .ok_or_else(ApiResponse::not_found)?
-            .iter()
+            .into_iter()
+            .flatten()
             .map(|job| render::workflow_job(request, &found.owner, &found.name, run, job))
             .collect::<Vec<_>>();
         let response = types::ActionsListJobsForWorkflowRunResponse {

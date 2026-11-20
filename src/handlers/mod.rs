@@ -15,16 +15,23 @@ pub(crate) const BOT: git::Bot = git::Bot {
 };
 
 mod actions;
+mod actions_artifacts;
+mod actions_caches;
 mod actions_config;
+mod actions_control;
 mod actions_org;
 mod actions_secrets;
 pub(crate) mod actions_service;
 mod actions_variables;
+mod actions_workflow_files;
+mod actions_workflows;
 mod apps;
 mod check_suites;
 mod checks;
 pub(crate) mod checks_model;
 mod diff_media;
+mod diff_patch;
+mod diff_text;
 mod environments;
 mod gists;
 mod git_blobs;
@@ -140,6 +147,27 @@ registry![
     ops::ActionsGetWorkflowRun,
     ops::ActionsReRunWorkflow,
     ops::ActionsReRunWorkflowFailedJobs,
+    ops::ActionsListRepoWorkflows,
+    ops::ActionsGetWorkflow,
+    ops::ActionsDisableWorkflow,
+    ops::ActionsEnableWorkflow,
+    ops::ActionsCreateWorkflowDispatch,
+    ops::ActionsListWorkflowRuns,
+    ops::ActionsCancelWorkflowRun,
+    ops::ActionsForceCancelWorkflowRun,
+    ops::ActionsReRunJobForWorkflowRun,
+    ops::ActionsGetWorkflowRunAttempt,
+    ops::ActionsListJobsForWorkflowRunAttempt,
+    ops::ActionsDeleteWorkflowRun,
+    ops::ActionsListArtifactsForRepo,
+    ops::ActionsGetArtifact,
+    ops::ActionsDeleteArtifact,
+    ops::ActionsDownloadArtifact,
+    ops::ActionsListWorkflowRunArtifacts,
+    ops::ActionsGetActionsCacheList,
+    ops::ActionsDeleteActionsCacheById,
+    ops::ActionsDeleteActionsCacheByKey,
+    ops::MetaGet,
     ops::ActionsGetRepoPublicKey,
     ops::ActionsListRepoSecrets,
     ops::ActionsGetRepoSecret,

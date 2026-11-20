@@ -4,6 +4,8 @@ command api
 command auth setup-git
 command auth status
 command auth token
+command cache delete
+command cache list
 command label create
 command label delete
 command label edit
@@ -24,7 +26,13 @@ command repo edit
 command repo list
 command repo rename
 command repo view
+command run cancel
+command run delete
+command run download
 command run list
+command run rerun
+command run view
+command run watch
 command search code
 command search commits
 command secret delete
@@ -34,6 +42,11 @@ command variable delete
 command variable get
 command variable list
 command variable set
+command workflow disable
+command workflow enable
+command workflow list
+command workflow run
+command workflow view
 flag api --field
 flag api --header
 flag api --include
@@ -49,6 +62,11 @@ flag auth status --active
 flag auth status --hostname
 flag auth status --json
 flag auth status --show-token
+flag cache delete --repo
+flag cache list --json
+flag cache list --key
+flag cache list --ref
+flag cache list --repo
 flag label create --color
 flag label create --description
 flag label create --force
@@ -112,8 +130,26 @@ flag repo rename --repo
 flag repo rename --yes
 flag repo view --jq
 flag repo view --json
+flag run cancel --force
+flag run cancel --repo
+flag run delete --repo
+flag run download --dir
+flag run download --name
+flag run download --repo
+flag run list --branch
+flag run list --event
 flag run list --json
 flag run list --repo
+flag run list --status
+flag run list --workflow
+flag run rerun --failed
+flag run rerun --job
+flag run rerun --repo
+flag run view --json
+flag run view --log
+flag run view --log-failed
+flag run view --repo
+flag run watch --repo
 flag search code --json
 flag search code --repo
 flag search commits --json
@@ -148,6 +184,15 @@ flag variable set --org
 flag variable set --repo
 flag variable set --repos
 flag variable set --visibility
+flag workflow disable --repo
+flag workflow enable --repo
+flag workflow list --all
+flag workflow list --json
+flag workflow list --repo
+flag workflow run --raw-field
+flag workflow run --ref
+flag workflow run --repo
+flag workflow view --repo
 git git-receive-pack
 git git-upload-pack
 git info/refs
@@ -193,37 +238,63 @@ graphql RepositoryConnection.pageInfo
 graphql RepositoryConnection.totalCount
 graphql User.login
 graphql User.repositories
+rest actions/cancel-workflow-run
 rest actions/create-environment-variable
 rest actions/create-or-update-environment-secret
 rest actions/create-or-update-org-secret
 rest actions/create-or-update-repo-secret
 rest actions/create-org-variable
 rest actions/create-repo-variable
+rest actions/create-workflow-dispatch
+rest actions/delete-actions-cache-by-id
+rest actions/delete-actions-cache-by-key
+rest actions/delete-artifact
 rest actions/delete-environment-secret
 rest actions/delete-environment-variable
 rest actions/delete-org-secret
 rest actions/delete-org-variable
 rest actions/delete-repo-secret
 rest actions/delete-repo-variable
+rest actions/delete-workflow-run
+rest actions/disable-workflow
+rest actions/download-artifact
+rest actions/download-workflow-run-logs
+rest actions/enable-workflow
+rest actions/force-cancel-workflow-run
+rest actions/get-actions-cache-list
+rest actions/get-artifact
 rest actions/get-environment-public-key
 rest actions/get-environment-variable
 rest actions/get-github-actions-default-workflow-permissions-repository
 rest actions/get-github-actions-permissions-repository
+rest actions/get-job-for-workflow-run
 rest actions/get-org-public-key
 rest actions/get-org-secret
 rest actions/get-org-variable
 rest actions/get-repo-public-key
 rest actions/get-repo-secret
 rest actions/get-repo-variable
+rest actions/get-workflow
+rest actions/get-workflow-run
+rest actions/get-workflow-run-attempt
+rest actions/list-artifacts-for-repo
 rest actions/list-environment-secrets
 rest actions/list-environment-variables
+rest actions/list-jobs-for-workflow-run
+rest actions/list-jobs-for-workflow-run-attempt
 rest actions/list-org-secrets
 rest actions/list-org-variables
 rest actions/list-repo-secrets
 rest actions/list-repo-variables
+rest actions/list-repo-workflows
 rest actions/list-selected-repos-for-org-secret
 rest actions/list-selected-repos-for-org-variable
+rest actions/list-workflow-run-artifacts
+rest actions/list-workflow-runs
 rest actions/list-workflow-runs-for-repo
+rest actions/re-run-job-for-workflow-run
+rest actions/re-run-workflow
+rest actions/re-run-workflow-failed-jobs
 rest actions/set-github-actions-default-workflow-permissions-repository
 rest actions/set-github-actions-permissions-repository
 rest actions/update-environment-variable
@@ -239,6 +310,7 @@ rest issues/get-label
 rest issues/list-for-repo
 rest issues/list-labels-for-repo
 rest issues/update-label
+rest meta/get
 rest meta/get-zen
 rest meta/root
 rest orgs/get
