@@ -107,7 +107,6 @@ fn label_create_edit_and_delete() {
 }
 
 #[test]
-#[ignore = "not implemented: GraphQL Repository.labels"]
 fn label_list_shows_name_color_and_description() {
     let server = tls_server();
     let config = TempDir::new();

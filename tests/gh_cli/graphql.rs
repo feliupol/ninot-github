@@ -179,7 +179,6 @@ fn auto_merge_mutations() {
 
 /// `CommentCreate` of cli/cli v2.101.0 api/queries_comments.go:55.
 #[test]
-#[ignore = "not implemented: GraphQL IssueComment.url"]
 fn comment_create_mutation() {
     let server = tls_server();
     let config = TempDir::new();

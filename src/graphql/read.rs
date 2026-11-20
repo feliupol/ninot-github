@@ -10,9 +10,9 @@
 use async_graphql::Error;
 use chrono::{DateTime, Utc};
 
-use super::objects::{Actor, Comment, Label, Milestone, StatusContext};
+use super::objects::{Milestone, StatusContext};
 use super::types::{
-    IssueState, MilestoneState, PullRequestReviewDecision, PullRequestReviewState, StatusState,
+    MilestoneState, PullRequestReviewDecision, PullRequestReviewState, StatusState,
 };
 use crate::state::{self, Account, Issue, Repo, ReviewDecision, State};
 use crate::time;
@@ -92,77 +92,6 @@ pub(super) fn can_push(account: &Account, repo: &Repo, login: &str) -> bool {
             .is_some_and(|permission| permission.push || permission.admin)
 }
 
-/// Whether an issue is open.
-pub(super) fn issue_open(issue: &Issue) -> bool {
-    issue.is_open()
-}
-
-/// An issue's state.
-pub(super) fn issue_state(issue: &Issue) -> IssueState {
-    if issue_open(issue) {
-        IssueState::Open
-    } else {
-        IssueState::Closed
-    }
-}
-
-/// An issue's node id.
-pub(super) fn issue_id(issue: &Issue) -> &str {
-    &issue.node_id
-}
-
-/// An issue's title.
-pub(super) fn issue_title(issue: &Issue) -> &str {
-    &issue.title
-}
-
-/// An issue's body.
-pub(super) fn issue_body(issue: &Issue) -> Option<&str> {
-    issue.body.as_deref()
-}
-
-/// An issue's web page.
-pub(super) fn issue_url(urls: &Urls<'_>, owner: &str, repo: &Repo, issue: &Issue) -> String {
-    urls.repo(owner, &repo.name).issue(issue.number).html
-}
-
-/// Whether an issue is locked.
-pub(super) fn issue_locked(issue: &Issue) -> bool {
-    issue.locked
-}
-
-/// Whether `login` opened the issue.
-pub(super) fn issue_authored_by(issue: &Issue, login: &str) -> bool {
-    issue.authored_by(login)
-}
-
-/// An issue's labels.
-pub(super) fn issue_labels(issue: &Issue) -> Vec<Label> {
-    issue
-        .labels
-        .iter()
-        .map(|name| Label {
-            name: name.as_str().to_owned(),
-        })
-        .collect()
-}
-
-/// An issue's comments.
-pub(super) fn issue_comments(issue: &Issue) -> Vec<Comment> {
-    issue
-        .comments
-        .iter()
-        .map(|comment| Comment {
-            body: comment.body.clone(),
-            created_at: comment.created_at.to_rfc3339(),
-            author: comment
-                .author
-                .as_ref()
-                .map(|login| Actor::of_login(login.as_str(), "User")),
-        })
-        .collect()
-}
-
 /// An issue's milestone.
 pub(super) fn issue_milestone(
     urls: &Urls<'_>,
@@ -186,5 +115,6 @@ pub(super) fn issue_milestone(
             .repo(owner, &repo.name)
             .milestone(milestone.number)
             .html,
+        due_on: None,
     })
 }

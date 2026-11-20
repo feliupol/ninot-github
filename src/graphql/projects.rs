@@ -1,70 +1,311 @@
-//! The `Issue` objects of search results and project items.
+//! Project v2 GraphQL objects and the `Issue` of a project item.
 
-use super::objects::{Connection, Issue, RepositoryName};
-use super::types::IssueState;
-use super::{Env, read};
-use crate::state::{ProjectItem, Repo, State};
+use serde::Serialize;
 
-/// The `Issue` of a stored issue.
-pub(super) fn stored_issue_object(
-    env: &Env,
-    owner: &str,
-    repo: &Repo,
-    issue: &crate::state::Issue,
-) -> Issue {
-    let urls = env.urls();
-    Issue {
-        typename: "Issue",
-        id: read::issue_id(issue).to_owned(),
-        number: issue.number,
-        title: read::issue_title(issue).to_owned(),
-        body: read::issue_body(issue).unwrap_or_default().to_owned(),
-        state: read::issue_state(issue),
-        url: read::issue_url(&urls, owner, repo, issue),
-        locked: read::issue_locked(issue),
-        milestone: read::issue_milestone(&urls, owner, repo, issue),
-        repository: repository_name(owner, &repo.name),
-        labels: Connection::complete(read::issue_labels(issue)),
-        comments: Connection::complete(read::issue_comments(issue)),
-        blocked_by: Connection::complete(Vec::new()),
-        closed_by_pull_requests_references: Connection::complete(Vec::new()),
-    }
+use super::issue_view::issue_from_stored;
+use super::objects::{Connection, Issue, NodeRef, SubIssuesSummary};
+use super::query::repository_object;
+use super::types::ProjectV2ItemType;
+use super::{Env, Map, MutationArgs, Output, database_id, not_found};
+use crate::render::node_id;
+use crate::state::{ProjectItem, State, lock};
+
+pub(super) const RESOLVERS: &[(&str, super::Resolver)] = &[(
+    "Mutation.updateProjectV2ItemFieldValue",
+    update_project_item_field_value,
+)];
+
+/// A `ProjectV2` board.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ProjectV2 {
+    #[serde(rename = "__typename")]
+    pub typename: &'static str,
+    pub id: String,
+    pub database_id: u64,
+    pub title: String,
+    pub number: u64,
+    pub closed: bool,
+    pub fields: Connection<ProjectV2SingleSelectField>,
+    pub items: Connection<ProjectV2Item>,
+}
+
+/// A `ProjectV2SingleSelectField`.
+#[derive(Serialize)]
+pub(super) struct ProjectV2SingleSelectField {
+    #[serde(rename = "__typename")]
+    pub typename: &'static str,
+    pub id: String,
+    pub name: String,
+    pub options: Vec<ProjectV2SingleSelectFieldOption>,
+}
+
+/// A `ProjectV2SingleSelectFieldOption`.
+#[derive(Serialize)]
+pub(super) struct ProjectV2SingleSelectFieldOption {
+    pub id: String,
+    pub name: String,
+}
+
+/// A `ProjectV2Item` holding an issue.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ProjectV2Item {
+    #[serde(rename = "__typename")]
+    pub typename: &'static str,
+    pub id: String,
+    #[serde(rename = "type")]
+    pub type_: ProjectV2ItemType,
+    pub content: Issue,
+    pub field_values: Connection<ProjectV2ItemFieldSingleSelectValue>,
+    pub is_archived: bool,
+}
+
+/// A `ProjectV2ItemFieldSingleSelectValue`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ProjectV2ItemFieldSingleSelectValue {
+    #[serde(rename = "__typename")]
+    pub typename: &'static str,
+    pub id: String,
+    pub name: String,
+    pub option_id: String,
+    pub field: FieldName,
+}
+
+/// A project field named only by its name.
+#[derive(Serialize)]
+pub(super) struct FieldName {
+    #[serde(rename = "__typename")]
+    pub typename: &'static str,
+    pub name: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectItemPayload {
+    #[serde(rename = "__typename")]
+    typename: &'static str,
+    project_v2_item: NodeRef,
 }
 
 /// The `Issue` of a project item, a placeholder when the issue no longer exists.
 pub(super) fn issue_object(env: &Env, state: &State, item: &ProjectItem) -> Issue {
     let number = item.issue_number;
-    if let Some(repo) = read::repo(state, &item.owner, &item.repository)
+    if let Some(account) = state.account(&item.owner)
+        && let Some(repo) = account.repo(&item.repository)
         && let Some(issue) = repo.issues.get(&number)
     {
-        return stored_issue_object(env, &item.owner, repo, issue);
+        return issue_from_stored(env, state, account, repo, issue);
     }
+    let account = state.account(&item.owner);
     Issue {
         typename: "Issue",
-        id: crate::render::node_id("Issue", number),
+        id: node_id("Issue", number),
+        database_id: Some(number),
         number,
         title: format!("Issue #{number}"),
         body: String::new(),
-        state: IssueState::Open,
+        state: super::types::IssueState::Open,
+        state_reason: None,
         url: env
             .urls()
             .repo(&item.owner, &item.repository)
             .issue(number)
             .html,
+        closed: false,
         locked: false,
+        active_lock_reason: None,
+        is_pinned: false,
+        created_at: String::new(),
+        updated_at: String::new(),
+        closed_at: None,
+        author: None,
+        author_association: super::types::CommentAuthorAssociation::None,
         milestone: None,
-        repository: repository_name(&item.owner, &item.repository),
+        repository: account
+            .and_then(|account| {
+                account
+                    .repo(&item.repository)
+                    .map(|repo| repository_object(env, account, repo))
+            })
+            .unwrap_or_else(|| empty_repository(&item.owner, &item.repository)),
         labels: Connection::complete(Vec::new()),
         comments: Connection::complete(Vec::new()),
+        assignees: Connection::complete(Vec::new()),
+        assigned_actors: Connection::complete(Vec::new()),
+        reaction_groups: Vec::new(),
+        project_cards: Connection::complete(Vec::new()),
+        project_items: Connection::complete(Vec::new()),
+        issue_type: None,
+        parent: None,
+        sub_issues: Connection::complete(Vec::new()),
+        sub_issues_summary: SubIssuesSummary::empty(),
         blocked_by: Connection::complete(Vec::new()),
+        blocking: Connection::complete(Vec::new()),
         closed_by_pull_requests_references: Connection::complete(Vec::new()),
+        linked_branches: Connection::complete(Vec::new()),
     }
 }
 
-/// A repository named by its owner and name.
-fn repository_name(owner: &str, repository: &str) -> RepositoryName {
-    RepositoryName {
+fn empty_repository(owner: &str, name: &str) -> super::objects::Repository {
+    use super::objects::{Account, Repository};
+    use super::types::RepositoryVisibility;
+    Repository {
         typename: "Repository",
-        name_with_owner: format!("{owner}/{repository}"),
+        id: String::new(),
+        database_id: 0,
+        name: name.to_owned(),
+        name_with_owner: format!("{owner}/{name}"),
+        owner: Account {
+            typename: "User",
+            id: String::new(),
+            database_id: 0,
+            login: owner.to_owned(),
+            name: None,
+            url: String::new(),
+            created_at: String::new(),
+        },
+        description: None,
+        url: String::new(),
+        ssh_url: String::new(),
+        is_private: false,
+        visibility: RepositoryVisibility::Public,
+        is_fork: false,
+        is_archived: false,
+        is_template: false,
+        is_mirror: false,
+        parent: None,
+        created_at: String::new(),
+        updated_at: String::new(),
+        pushed_at: None,
+        has_issues_enabled: true,
+        has_wiki_enabled: true,
+        merge_commit_allowed: true,
+        rebase_merge_allowed: true,
+        squash_merge_allowed: true,
     }
+}
+
+/// A `ProjectV2` board with its single-select fields and issue items.
+pub(super) fn project_object(
+    env: &Env,
+    state: &State,
+    project: &crate::state::Project,
+) -> ProjectV2 {
+    let fields = project
+        .fields
+        .values()
+        .map(|field| ProjectV2SingleSelectField {
+            typename: "ProjectV2SingleSelectField",
+            id: node_id("ProjectV2SingleSelectField", field.id),
+            name: field.name.clone(),
+            options: field
+                .options
+                .iter()
+                .map(|(id, name)| ProjectV2SingleSelectFieldOption {
+                    id: node_id("ProjectV2SingleSelectFieldOption", *id),
+                    name: name.clone(),
+                })
+                .collect(),
+        })
+        .collect();
+    let items = project
+        .items
+        .values()
+        .map(|item| {
+            let field_values = item
+                .single_select_values
+                .iter()
+                .filter_map(|(field_id, option_id)| {
+                    let field = project.fields.get(field_id)?;
+                    let option = field.options.get(option_id)?;
+                    Some(ProjectV2ItemFieldSingleSelectValue {
+                        typename: "ProjectV2ItemFieldSingleSelectValue",
+                        id: node_id(
+                            "ProjectV2ItemFieldSingleSelectValue",
+                            item.id.wrapping_shl(32).wrapping_add(*field_id),
+                        ),
+                        name: option.clone(),
+                        option_id: node_id("ProjectV2SingleSelectFieldOption", *option_id),
+                        field: FieldName {
+                            typename: "ProjectV2SingleSelectField",
+                            name: field.name.clone(),
+                        },
+                    })
+                })
+                .collect();
+            ProjectV2Item {
+                typename: "ProjectV2Item",
+                id: node_id("ProjectV2Item", item.id),
+                type_: ProjectV2ItemType::Issue,
+                content: issue_object(env, state, item),
+                field_values: Connection::complete(field_values),
+                is_archived: false,
+            }
+        })
+        .collect();
+    ProjectV2 {
+        typename: "ProjectV2",
+        id: node_id("ProjectV2", project.id),
+        database_id: project.id,
+        title: project.title.clone(),
+        number: project.number,
+        closed: false,
+        fields: Connection::complete(fields),
+        items: Connection::complete(items),
+    }
+}
+
+fn update_project_item_field_value(
+    env: &Env,
+    _: &Map,
+    args: &Map,
+) -> Result<Output, async_graphql::Error> {
+    let MutationArgs { input } =
+        super::read::<MutationArgs<super::types::UpdateProjectV2ItemFieldValueInput>>(args)?;
+    let option_id = input
+        .value
+        .single_select_option_id
+        .as_deref()
+        .unwrap_or_default();
+    let (Some(project_id), Some(item_id), Some(field_id), Some(option_id)) = (
+        database_id(&input.project_id),
+        database_id(&input.item_id),
+        database_id(&input.field_id),
+        database_id(option_id),
+    ) else {
+        return Err(not_found(
+            "Could not resolve project item field value".to_owned(),
+        ));
+    };
+    let mut state = lock(&env.state);
+    let Some(project) = state.projects.get_mut(&project_id) else {
+        return Err(not_found(format!(
+            "Could not resolve project '{project_id}'"
+        )));
+    };
+    let Some(item) = project.items.get_mut(&item_id) else {
+        return Err(not_found(format!(
+            "Could not resolve project item '{item_id}'"
+        )));
+    };
+    if !project
+        .fields
+        .get(&field_id)
+        .is_some_and(|field| field.options.contains_key(&option_id))
+    {
+        return Err(not_found(format!(
+            "Could not resolve project option '{option_id}'"
+        )));
+    }
+    item.single_select_values.insert(field_id, option_id);
+    let item = NodeRef {
+        typename: "ProjectV2Item",
+        id: node_id("ProjectV2Item", item_id),
+    };
+    Output::of(ProjectItemPayload {
+        typename: "UpdateProjectV2ItemFieldValuePayload",
+        project_v2_item: item,
+    })
 }

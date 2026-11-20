@@ -6,9 +6,26 @@ command auth status
 command auth token
 command cache delete
 command cache list
+command issue close
+command issue comment
+command issue create
+command issue delete
+command issue develop
+command issue edit
+command issue list
+command issue lock
+command issue pin
+command issue reopen
+command issue status
+command issue transfer
+command issue unlock
+command issue unpin
+command issue view
+command label clone
 command label create
 command label delete
 command label edit
+command label list
 command pr diff
 command pr ready
 command pr view
@@ -67,6 +84,45 @@ flag cache list --json
 flag cache list --key
 flag cache list --ref
 flag cache list --repo
+flag issue close --comment
+flag issue close --reason
+flag issue close --repo
+flag issue comment --body
+flag issue comment --repo
+flag issue create --body
+flag issue create --label
+flag issue create --repo
+flag issue create --title
+flag issue delete --repo
+flag issue delete --yes
+flag issue develop --list
+flag issue develop --name
+flag issue develop --repo
+flag issue edit --add-label
+flag issue edit --body
+flag issue edit --remove-label
+flag issue edit --repo
+flag issue edit --title
+flag issue list --assignee
+flag issue list --author
+flag issue list --json
+flag issue list --label
+flag issue list --milestone
+flag issue list --repo
+flag issue list --search
+flag issue list --state
+flag issue lock --reason
+flag issue lock --repo
+flag issue pin --repo
+flag issue reopen --repo
+flag issue status --repo
+flag issue transfer --repo
+flag issue unlock --repo
+flag issue unpin --repo
+flag issue view --comments
+flag issue view --json
+flag issue view --repo
+flag label clone --repo
 flag label create --color
 flag label create --description
 flag label create --force
@@ -77,6 +133,8 @@ flag label edit --color
 flag label edit --description
 flag label edit --name
 flag label edit --repo
+flag label list --json
+flag label list --repo
 flag pr diff --color
 flag pr diff --name-only
 flag pr diff --patch
@@ -196,23 +254,113 @@ flag workflow view --repo
 git git-receive-pack
 git git-upload-pack
 git info/refs
+graphql AddCommentPayload.commentEdge
+graphql CloseIssuePayload.issue
+graphql Commit.oid
 graphql ConvertPullRequestToDraftPayload.pullRequest
+graphql CreateIssuePayload.issue
+graphql CreateLinkedBranchPayload.linkedBranch
 graphql CreateRepositoryPayload.repository
+graphql DeleteIssuePayload.repository
+graphql Issue.activeLockReason
+graphql Issue.assignees
+graphql Issue.author
+graphql Issue.blockedBy
+graphql Issue.blocking
+graphql Issue.body
+graphql Issue.comments
+graphql Issue.createdAt
+graphql Issue.id
+graphql Issue.isPinned
+graphql Issue.issueType
+graphql Issue.labels
+graphql Issue.linkedBranches
+graphql Issue.locked
+graphql Issue.milestone
+graphql Issue.number
+graphql Issue.parent
+graphql Issue.projectItems
+graphql Issue.reactionGroups
+graphql Issue.state
+graphql Issue.stateReason
+graphql Issue.subIssues
+graphql Issue.subIssuesSummary
+graphql Issue.title
+graphql Issue.updatedAt
+graphql Issue.url
+graphql IssueComment.author
+graphql IssueComment.authorAssociation
+graphql IssueComment.body
+graphql IssueComment.createdAt
+graphql IssueComment.id
+graphql IssueComment.includesCreatedEdit
+graphql IssueComment.isMinimized
+graphql IssueComment.minimizedReason
+graphql IssueComment.reactionGroups
+graphql IssueComment.url
+graphql IssueComment.viewerDidAuthor
+graphql IssueCommentConnection.nodes
+graphql IssueCommentConnection.pageInfo
+graphql IssueCommentConnection.totalCount
+graphql IssueCommentEdge.node
+graphql IssueConnection.nodes
+graphql IssueConnection.pageInfo
+graphql IssueConnection.totalCount
+graphql Label.color
+graphql Label.description
+graphql Label.id
+graphql Label.name
+graphql LabelConnection.nodes
+graphql LabelConnection.pageInfo
+graphql LabelConnection.totalCount
+graphql LinkedBranch.id
+graphql LinkedBranch.ref
+graphql LinkedBranchConnection.nodes
+graphql LockLockablePayload.lockedRecord
 graphql MarkPullRequestReadyForReviewPayload.pullRequest
+graphql Milestone.description
+graphql Milestone.dueOn
+graphql Milestone.number
+graphql Milestone.title
+graphql Mutation.addComment
+graphql Mutation.addLabelsToLabelable
+graphql Mutation.closeIssue
 graphql Mutation.convertPullRequestToDraft
+graphql Mutation.createIssue
+graphql Mutation.createLinkedBranch
 graphql Mutation.createRepository
+graphql Mutation.deleteIssue
+graphql Mutation.lockLockable
 graphql Mutation.markPullRequestReadyForReview
+graphql Mutation.pinIssue
+graphql Mutation.removeLabelsFromLabelable
+graphql Mutation.reopenIssue
+graphql Mutation.transferIssue
+graphql Mutation.unlockLockable
+graphql Mutation.unpinIssue
+graphql Mutation.updateIssue
 graphql Organization.login
 graphql PageInfo.endCursor
 graphql PageInfo.hasNextPage
+graphql PinIssuePayload.issue
+graphql ProjectV2ItemConnection.nodes
+graphql ProjectV2ItemConnection.pageInfo
+graphql ProjectV2ItemConnection.totalCount
 graphql PullRequest.id
 graphql PullRequest.isDraft
 graphql PullRequest.number
 graphql PullRequest.state
 graphql Query.repository
 graphql Query.repositoryOwner
+graphql Query.search
 graphql Query.viewer
+graphql ReactingUserConnection.totalCount
+graphql ReactionGroup.content
+graphql ReactionGroup.users
 graphql Ref.name
+graphql Ref.repository
+graphql Ref.target
+graphql ReopenIssuePayload.issue
 graphql Repository.databaseId
 graphql Repository.defaultBranchRef
 graphql Repository.description
@@ -220,6 +368,10 @@ graphql Repository.hasIssuesEnabled
 graphql Repository.hasWikiEnabled
 graphql Repository.id
 graphql Repository.isPrivate
+graphql Repository.issue
+graphql Repository.issueOrPullRequest
+graphql Repository.issues
+graphql Repository.labels
 graphql Repository.mergeCommitAllowed
 graphql Repository.name
 graphql Repository.nameWithOwner
@@ -227,6 +379,7 @@ graphql Repository.owner
 graphql Repository.parent
 graphql Repository.pullRequest
 graphql Repository.rebaseMergeAllowed
+graphql Repository.ref
 graphql Repository.release
 graphql Repository.squashMergeAllowed
 graphql Repository.sshUrl
@@ -236,8 +389,22 @@ graphql Repository.visibility
 graphql RepositoryConnection.nodes
 graphql RepositoryConnection.pageInfo
 graphql RepositoryConnection.totalCount
+graphql SearchResultItemConnection.issueCount
+graphql SearchResultItemConnection.nodes
+graphql SearchResultItemConnection.pageInfo
+graphql SubIssuesSummary.completed
+graphql SubIssuesSummary.percentCompleted
+graphql SubIssuesSummary.total
+graphql TransferIssuePayload.issue
+graphql UnlockLockablePayload.unlockedRecord
+graphql UnpinIssuePayload.issue
+graphql User.databaseId
+graphql User.id
 graphql User.login
+graphql User.name
 graphql User.repositories
+graphql UserConnection.nodes
+graphql UserConnection.totalCount
 rest actions/cancel-workflow-run
 rest actions/create-environment-variable
 rest actions/create-or-update-environment-secret
@@ -305,10 +472,14 @@ rest git/list-matching-refs
 rest issues/create
 rest issues/create-comment
 rest issues/create-label
+rest issues/create-milestone
 rest issues/delete-label
+rest issues/get
 rest issues/get-label
+rest issues/list-comments
 rest issues/list-for-repo
 rest issues/list-labels-for-repo
+rest issues/update
 rest issues/update-label
 rest meta/get
 rest meta/get-zen

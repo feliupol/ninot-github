@@ -111,7 +111,6 @@ issues/add-assignees 201 always-omitted $.closed_by
 issues/add-assignees 201 always-omitted $.pinned_comment
 issues/add-assignees 201 always-omitted $.state_reason
 issues/create 201 always-omitted $.active_lock_reason
-issues/create 201 always-omitted $.assignees
 issues/create 201 always-omitted $.closed_by
 issues/create 201 always-omitted $.pinned_comment
 issues/create 201 always-omitted $.pull_request
@@ -158,7 +157,6 @@ issues/remove-assignees 200 always-omitted $.closed_by
 issues/remove-assignees 200 always-omitted $.labels[].description
 issues/remove-assignees 200 always-omitted $.pinned_comment
 issues/update 200 always-omitted $.active_lock_reason
-issues/update 200 always-omitted $.labels[].description
 issues/update 200 always-omitted $.pinned_comment
 issues/update 200 always-omitted $.pull_request
 issues/update-comment 200 always-omitted $.minimized

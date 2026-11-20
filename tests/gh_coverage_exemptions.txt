@@ -52,16 +52,13 @@ issues/add-assignees: not reached by a gh_cli test yet
 issues/add-labels: not reached by a gh_cli test yet
 issues/check-user-can-be-assigned: not reached by a gh_cli test yet
 issues/check-user-can-be-assigned-to-issue: not reached by a gh_cli test yet
-issues/create-milestone: not reached by a gh_cli test yet
 issues/delete-comment: not reached by a gh_cli test yet
 issues/delete-milestone: not reached by a gh_cli test yet
-issues/get: not reached by a gh_cli test yet
 issues/get-comment: not reached by a gh_cli test yet
 issues/get-event: not reached by a gh_cli test yet
 issues/get-milestone: not reached by a gh_cli test yet
 issues/list: not reached by a gh_cli test yet
 issues/list-assignees: not reached by a gh_cli test yet
-issues/list-comments: not reached by a gh_cli test yet
 issues/list-comments-for-repo: not reached by a gh_cli test yet
 issues/list-events: not reached by a gh_cli test yet
 issues/list-events-for-repo: not reached by a gh_cli test yet
@@ -77,7 +74,6 @@ issues/remove-assignees: not reached by a gh_cli test yet
 issues/remove-label: not reached by a gh_cli test yet
 issues/set-labels: not reached by a gh_cli test yet
 issues/unlock: not reached by a gh_cli test yet
-issues/update: not reached by a gh_cli test yet
 issues/update-comment: not reached by a gh_cli test yet
 issues/update-milestone: not reached by a gh_cli test yet
 orgs/check-membership-for-user: not reached by a gh_cli test yet

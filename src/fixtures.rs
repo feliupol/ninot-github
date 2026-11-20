@@ -1009,6 +1009,8 @@ pub(crate) fn seeded_issue(
         updated_at: now,
         comments: Vec::new(),
         events: Vec::new(),
+        is_pinned: false,
+        linked_branches: Vec::new(),
     };
     apply!(issue.title, seed.title);
     apply!(issue.body, seed.body);

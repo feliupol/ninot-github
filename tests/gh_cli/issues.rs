@@ -39,7 +39,6 @@ fn repo_with_issue(server: &Server, config: &Path) {
 }
 
 #[test]
-#[ignore = "not implemented: GraphQL Repository.labels, which `gh issue create --label` reads, and Mutation.createIssue"]
 fn issue_create_with_labels() {
     let server = tls_server();
     let config = TempDir::new();
@@ -83,7 +82,6 @@ fn issue_create_with_labels() {
 }
 
 #[test]
-#[ignore = "not implemented: GraphQL Repository.issueOrPullRequest"]
 fn issue_view_shows_the_issue() {
     let server = tls_server();
     let config = TempDir::new();
@@ -109,7 +107,6 @@ fn issue_view_shows_the_issue() {
 }
 
 #[test]
-#[ignore = "not implemented: REST meta/get, which gh reads to detect search features of an Enterprise host, and GraphQL Repository.issues"]
 fn issue_list_filters_by_state_and_label() {
     let server = tls_server();
     let config = TempDir::new();
@@ -164,7 +161,6 @@ fn issue_list_filters_by_state_and_label() {
 }
 
 #[test]
-#[ignore = "not implemented: GraphQL Repository.issueOrPullRequest"]
 fn issue_comment_adds_a_comment() {
     let server = tls_server();
     let config = TempDir::new();
@@ -195,7 +191,6 @@ fn issue_comment_adds_a_comment() {
 }
 
 #[test]
-#[ignore = "not implemented: GraphQL Repository.issueOrPullRequest"]
 fn issue_edit_changes_title_body_and_labels() {
     let server = tls_server();
     let config = TempDir::new();
@@ -232,7 +227,6 @@ fn issue_edit_changes_title_body_and_labels() {
 }
 
 #[test]
-#[ignore = "not implemented: GraphQL Repository.issueOrPullRequest"]
 fn issue_close_and_reopen() {
     let server = tls_server();
     let config = TempDir::new();

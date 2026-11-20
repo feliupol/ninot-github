@@ -47,6 +47,19 @@ pub struct Issue {
     pub comments: Vec<Comment>,
     /// Issue events, oldest first, as `GET .../issues/{number}/events` lists them.
     pub events: Vec<IssueEvent>,
+    /// Whether the issue is pinned to the repository.
+    pub is_pinned: bool,
+    /// Branches created with `gh issue develop`, oldest first.
+    pub linked_branches: Vec<LinkedBranch>,
+}
+
+/// A git branch linked to an issue.
+#[derive(Clone, Debug)]
+pub struct LinkedBranch {
+    /// GraphQL database id of the linked-branch node.
+    pub id: u64,
+    /// Branch name without `refs/heads/`.
+    pub name: String,
 }
 
 /// Whether an issue is open or closed.

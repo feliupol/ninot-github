@@ -11,6 +11,7 @@ mod actions;
 #[path = "../common/mod.rs"]
 mod common;
 mod graphql;
+mod issue_commands;
 mod issues;
 mod labels;
 mod pulls;

@@ -32,7 +32,7 @@ pub use checks::{
 pub use comment::Comment;
 pub use gist::Gist;
 pub use hook::{Delivery, Hook};
-pub use issue::{Issue, IssueState, LockReason, StateReason};
+pub use issue::{Issue, IssueState, LinkedBranch, LockReason, StateReason};
 pub use issue_event::{IssueEvent, IssueEventKind, IssueEventLabel};
 pub use key::{InvalidSha, Name, NameMap, Sha, fold};
 pub use org::OrgRole;
