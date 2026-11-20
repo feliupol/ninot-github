@@ -5,21 +5,15 @@ use std::collections::HashMap;
 use async_graphql::Error;
 use serde::Deserialize;
 
-use super::objects::{
-    self, Actor, AutoMergeRequest, Commit, Connection, HeadCommit, IssueComment, Label, Nodes,
-    PullRequestCommit, Review, ReviewComment, ReviewRequest, ReviewThread, Status,
-    StatusCheckRollup, TotalCount,
-};
+use super::objects::{self, Actor, Commit, Connection, Review};
 use super::query::repository_object;
-use super::types::{
-    MergeableState, PullRequestReviewDecision, PullRequestReviewState, PullRequestState,
-    StatusState,
-};
+use super::types::{PullRequestReviewDecision, PullRequestReviewState};
 use super::{AccountKey, Env, Map, NumberArgs, Output, RepositoryKey, database_id};
 use crate::render::node_id;
 use crate::state::{Account, Repo, State, lock};
 use ninot_common::git;
 
+/// `Repository.pullRequest` and review-decision resolvers registered from this module.
 pub(super) const RESOLVERS: &[(&str, super::Resolver)] = &[
     ("Repository.pullRequest", pull_request),
     (
@@ -59,10 +53,11 @@ pub(super) fn pull_request(env: &Env, parent: &Map, args: &Map) -> Result<Output
     let repo = account
         .repo(&name)
         .ok_or_else(|| Error::new("repository does not exist"))?;
-    let pull = repo
-        .pull_requests
-        .get(&number)
-        .ok_or_else(|| Error::new("pull request does not exist"))?;
+    let pull = repo.pull_requests.get(&number).ok_or_else(|| {
+        Error::new(format!(
+            "Could not resolve to a PullRequest with the number of {number}."
+        ))
+    })?;
     Output::of(match pull_object(env, account, repo, number, pull)? {
         Some(full) => FoundPullRequest::Full(Box::new(full)),
         None => FoundPullRequest::Number(Box::new(objects::PullRequestNumber {
@@ -89,7 +84,7 @@ pub(super) fn pull_location(state: &State, encoded: &str) -> Option<(String, Str
 }
 
 /// A review as the review rules see it: author login, whether the author can push, state.
-type Opinion = (Option<String>, bool, PullRequestReviewState);
+pub(super) type Opinion = (Option<String>, bool, PullRequestReviewState);
 
 /// The indices, in submission order, of each pusher's latest approving, changes-requesting or
 /// dismissed review: `PullRequest.latestOpinionatedReviews`.
@@ -138,7 +133,7 @@ fn latest_opinions(reviews: &[Opinion]) -> Vec<usize> {
 /// changes requested to approved;
 /// <https://github.com/cli/cli/pull/8361> reads `REVIEW_REQUIRED` after the same sequence,
 /// because protection required more approvals.
-fn review_decision(reviews: &[Opinion]) -> Option<PullRequestReviewDecision> {
+pub(super) fn review_decision(reviews: &[Opinion]) -> Option<PullRequestReviewDecision> {
     let latest: Vec<PullRequestReviewState> = latest_opinions(reviews)
         .into_iter()
         .map(|index| reviews[index].2)
@@ -153,7 +148,7 @@ fn review_decision(reviews: &[Opinion]) -> Option<PullRequestReviewDecision> {
 }
 
 /// A pull request's reviews, in submission order, with how the review rules see each.
-fn review_objects(
+pub(super) fn review_objects(
     env: &Env,
     account: &Account,
     repo: &Repo,
@@ -183,11 +178,20 @@ fn review_objects(
                     .commit_id
                     .clone()
                     .unwrap_or_else(|| head_sha.to_owned()),
+                message_headline: None,
+                message_body: None,
             },
             author: review
                 .user
                 .as_ref()
                 .map(|user| Actor::of_login(&user.login, &user.type_)),
+            author_association: super::issue_view::association(
+                account,
+                review.user.as_ref().map_or("", |user| user.login.as_str()),
+            ),
+            includes_created_edit: false,
+            url: review.html_url.clone(),
+            reaction_groups: Vec::new(),
             repository: repository_object(env, account, repo),
         });
     }
@@ -257,142 +261,12 @@ pub(super) fn pull_object(
     number: u64,
     pull: &crate::state::PullRequest,
 ) -> Result<Option<objects::PullRequest>, Error> {
-    let Some(data) = pull.data.as_ref() else {
-        return Ok(None);
-    };
-    let (reviews, opinions) = review_objects(env, account, repo, number, pull, &data.head.sha)?;
-    let labels = data
-        .labels
-        .iter()
-        .map(|label| Label::named(label.name.clone()))
-        .collect();
-    let review_requests = data
-        .requested_reviewers
-        .iter()
-        .map(|user| ReviewRequest {
-            requested_reviewer: Actor::of_login(&user.login, &user.type_),
-        })
-        .collect();
-    let threads = pull
-        .review_threads
-        .iter()
-        .map(|thread| ReviewThread {
-            typename: "PullRequestReviewThread",
-            id: thread.id.clone(),
-            is_resolved: thread.is_resolved,
-            path: thread.path.clone(),
-            line: thread.line,
-            comments: Connection::complete(
-                thread
-                    .comments
-                    .iter()
-                    .map(|comment| ReviewComment {
-                        typename: "PullRequestReviewComment",
-                        id: comment.id.clone(),
-                        body: comment.body.clone(),
-                        updated_at: comment.updated_at.clone(),
-                    })
-                    .collect(),
-            ),
-        })
-        .collect();
-    let sha = data.head.sha.as_str();
-    let contexts = super::read::status_contexts(repo, sha);
-    let rollup = if contexts.is_empty() {
-        None
-    } else if contexts
-        .iter()
-        .any(|status| matches!(status.state, StatusState::Failure | StatusState::Error))
-    {
-        Some(StatusState::Failure)
-    } else if contexts
-        .iter()
-        .all(|status| status.state == StatusState::Success)
-    {
-        Some(StatusState::Success)
-    } else {
-        Some(StatusState::Pending)
-    };
-    // Report Git commit metadata when stored, or the seeded PR creation time otherwise.
-    let (committed_date, parent_count) = stored_commit(repo.git_dir.as_deref(), sha)?.map_or_else(
-        || (data.created_at.to_rfc3339(), 1),
-        |commit| (commit.committer.date, commit.parents.len()),
-    );
-    // Source: <https://docs.github.com/en/graphql/reference/pulls#enum-pullrequeststate>
-    let state = match data.state {
-        _ if data.merged => PullRequestState::Merged,
-        crate::types::PullRequestState::Open => PullRequestState::Open,
-        crate::types::PullRequestState::Closed => PullRequestState::Closed,
-    };
-    let comments = pull
-        .issue_comments
-        .iter()
-        .map(|comment| IssueComment {
-            typename: "IssueComment",
-            body: comment.body.clone(),
-            id: Some(comment.node_id.clone()),
-            url: Some(comment.html_url.clone()),
-            created_at: None,
-            author: None,
-            author_association: None,
-            includes_created_edit: None,
-            is_minimized: None,
-            minimized_reason: None,
-            viewer_did_author: None,
-            reaction_groups: None,
-        })
-        .collect();
-    Ok(Some(objects::PullRequest {
-        typename: "PullRequest",
-        // The stored REST `node_id` is this object's GraphQL id.
-        id: data.node_id.clone(),
-        database_id: pull_id(repo.id, number),
-        number,
-        title: data.title.clone(),
-        is_draft: data.draft.unwrap_or(false),
-        state,
-        url: data.html_url.clone(),
-        head_ref_name: data.head.ref_.clone(),
-        base_ref_name: data.base.ref_.clone(),
-        // Source: <https://docs.github.com/en/graphql/reference/pulls#enum-mergeablestate>
-        mergeable: match data.mergeable {
-            Some(true) => MergeableState::Mergeable,
-            Some(false) => MergeableState::Conflicting,
-            None => MergeableState::Unknown,
-        },
-        auto_merge_request: pull
-            .auto_merge_enabled_at
-            .map(|enabled_at| AutoMergeRequest { enabled_at }),
-        author: Actor::of_login(&data.user.login, &data.user.type_),
-        repository: repository_object(env, account, repo),
-        labels: Connection::complete(labels),
-        reviews: Connection::complete(reviews),
-        review_requests: Connection::complete(review_requests),
-        review_threads: Connection::complete(threads),
-        review_decision: super::read::seeded_review_decision(pull)
-            .or_else(|| review_decision(&opinions)),
-        comments: Connection::complete(comments),
-        commits: Nodes {
-            nodes: vec![PullRequestCommit {
-                typename: "PullRequestCommit",
-                commit: HeadCommit {
-                    typename: "Commit",
-                    oid: sha.to_owned(),
-                    committed_date,
-                    parents: TotalCount {
-                        total_count: parent_count,
-                    },
-                    status: Status { contexts },
-                    status_check_rollup: rollup.map(|state| StatusCheckRollup { state }),
-                },
-            }],
-        },
-    }))
+    super::pull_view::pull_object(env, account, repo, number, pull)
 }
 
 /// Commit `sha` from git storage at `git_dir`; `None` without storage or for a seeded sha the
 /// storage does not contain. A failed read is an error.
-fn stored_commit(
+pub(super) fn stored_commit(
     git_dir: Option<&std::path::Path>,
     sha: &str,
 ) -> Result<Option<git::Commit>, Error> {

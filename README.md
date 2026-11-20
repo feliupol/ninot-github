@@ -210,9 +210,9 @@ REST operations: 282 / 1231 (22.9%).
 | teams | 15 | 32 | 46.9% |
 | users | 11 | 47 | 23.4% |
 
-GitHub CLI leaf commands: 64 / 204 (31.4%).
+GitHub CLI leaf commands: 79 / 204 (38.7%).
 
-GraphQL resolvers: 51 / 5577 schema fields (0.9%). The published schema is served. A field without a resolver reads the same-named key of its parent object and returns the error `Not implemented by ninot-github: Type.field` when that key is absent.
+GraphQL resolvers: 75 / 5577 schema fields (1.3%). The published schema is served. A field without a resolver reads the same-named key of its parent object and returns the error `Not implemented by ninot-github: Type.field` when that key is absent.
 
 Python bindings: 68 / 80 public methods.
 

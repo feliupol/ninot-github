@@ -298,6 +298,7 @@ pub(super) fn default_branch_ref(env: &Env, parent: &Map, _: &Map) -> Result<Out
             oid,
         }),
         repository: None,
+        branch_protection_rule: None,
     }))
 }
 

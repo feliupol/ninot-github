@@ -6,12 +6,10 @@ use crate::common::TempDir;
 use crate::{api, gh, gh_as, gh_json, open_pull, repo_with_branches, tls_server};
 
 #[test]
-#[ignore = "not implemented: GraphQL Repository.pullRequests, which `gh pr create` reads to find an open pull request for the head"]
 fn pr_create_opens_ready_and_draft_pull_requests() {
     let server = tls_server();
     let config = TempDir::new();
     repo_with_branches(&server, &config.0, &["feature", "draft"]);
-
     let url = gh(
         &server,
         &config.0,
@@ -110,7 +108,6 @@ fn pr_node_id_matches_the_rest_node_id() {
 }
 
 #[test]
-#[ignore = "not implemented: GraphQL PullRequest.title, state, body, author, headRefName and the other fields `gh pr view` selects"]
 fn pr_view_shows_the_pull_request() {
     let server = tls_server();
     let config = TempDir::new();
@@ -142,7 +139,6 @@ fn pr_view_shows_the_pull_request() {
 }
 
 #[test]
-#[ignore = "not implemented: GraphQL Repository.pullRequests"]
 fn pr_list_filters_by_state() {
     let server = tls_server();
     let config = TempDir::new();
@@ -224,7 +220,6 @@ fn pr_diff_prints_the_diff_and_patch() {
 }
 
 #[test]
-#[ignore = "not implemented: GraphQL PullRequest.headRefName and statusCheckRollup, which `gh pr checks` reads"]
 fn pr_checks_lists_statuses_on_the_head() {
     let server = tls_server();
     let config = TempDir::new();
@@ -263,7 +258,6 @@ fn pr_checks_lists_statuses_on_the_head() {
 }
 
 #[test]
-#[ignore = "not implemented: GraphQL Mutation.addPullRequestReview"]
 fn pr_review_approves_requests_changes_and_comments() {
     let server = tls_server();
     let config = TempDir::new();
@@ -291,7 +285,6 @@ fn pr_review_approves_requests_changes_and_comments() {
 }
 
 #[test]
-#[ignore = "not implemented: GraphQL PullRequest.url, read by `gh pr comment`, and IssueComment.url, read from Mutation.addComment"]
 fn pr_comment_adds_an_issue_comment() {
     let server = tls_server();
     let config = TempDir::new();
@@ -324,7 +317,6 @@ fn pr_comment_adds_an_issue_comment() {
 }
 
 #[test]
-#[ignore = "not implemented: GraphQL PullRequest.title, body, baseRefName and the other fields `gh pr edit` reads first"]
 fn pr_edit_changes_the_title_body_and_base() {
     let server = tls_server();
     let config = TempDir::new();
@@ -387,7 +379,6 @@ fn pr_ready_toggles_draft() {
 }
 
 #[test]
-#[ignore = "not implemented: GraphQL PullRequest.state, title, isCrossRepository and headRefName, which `gh pr close` reads first"]
 fn pr_close_and_reopen() {
     let server = tls_server();
     let config = TempDir::new();
@@ -423,7 +414,6 @@ fn pr_close_and_reopen() {
 }
 
 #[test]
-#[ignore = "not implemented: GraphQL PullRequest.state, mergeStateStatus, headRefOid and the other fields `gh pr merge` reads first"]
 fn pr_merge_with_each_method() {
     let server = tls_server();
     let config = TempDir::new();
@@ -467,7 +457,6 @@ fn pr_merge_with_each_method() {
 }
 
 #[test]
-#[ignore = "not implemented: GraphQL PullRequest.headRefName, headRefOid, headRepositoryOwner and mergeable, which `gh pr update-branch` reads first"]
 fn pr_update_branch_merges_the_base_into_the_head() {
     let server = tls_server();
     let config = TempDir::new();

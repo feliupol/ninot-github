@@ -40,7 +40,9 @@ fn search(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
         .find_map(|part| part.strip_prefix("author:"))
         .filter(|value| *value != "@me");
     let author_me = qualifiers.contains(&"author:@me");
-    let requested_me = qualifiers.contains(&"review-requested:@me");
+    let requested = qualifiers
+        .iter()
+        .find_map(|part| part.strip_prefix("review-requested:"));
     let milestone = qualifiers
         .iter()
         .find_map(|part| part.strip_prefix("milestone:"))
@@ -97,12 +99,42 @@ fn search(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
                     if author_me && !data.user.login.eq_ignore_ascii_case(&env.caller.login) {
                         continue;
                     }
-                    if requested_me
-                        && !crate::handlers::search::review_requested(
-                            account,
-                            data,
-                            &env.caller.login,
-                        )
+                    if let Some(login) = requested {
+                        let login = if login == "@me" {
+                            env.caller.login.as_str()
+                        } else {
+                            login
+                        };
+                        if !crate::handlers::search::review_requested(account, data, login) {
+                            continue;
+                        }
+                    }
+                    if author.is_some_and(|login| !data.user.login.eq_ignore_ascii_case(login)) {
+                        continue;
+                    }
+                    if !labels.iter().all(|name| {
+                        data.labels
+                            .iter()
+                            .any(|label| label.name.eq_ignore_ascii_case(name))
+                    }) {
+                        continue;
+                    }
+                    let draft = data.draft.unwrap_or(false);
+                    if (qualifiers.contains(&"draft:true") || qualifiers.contains(&"is:draft"))
+                        && !draft
+                    {
+                        continue;
+                    }
+                    if qualifiers.contains(&"draft:false") && draft {
+                        continue;
+                    }
+                    if qualifiers.iter().any(|part| part == &"is:merged") && !data.merged {
+                        continue;
+                    }
+                    if let Some(base) = qualifiers
+                        .iter()
+                        .find_map(|part| part.strip_prefix("base:"))
+                        && !data.base.ref_.eq_ignore_ascii_case(base)
                     {
                         continue;
                     }
@@ -113,7 +145,7 @@ fn search(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
                     }
                 }
             }
-            if !want_pr {
+            if !want_pr && requested.is_none() {
                 for issue in repo.issues.values() {
                     if want_open && !issue.is_open() {
                         continue;

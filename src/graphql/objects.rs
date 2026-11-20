@@ -4,9 +4,12 @@
 
 use serde::Serialize;
 
-use super::types::{
-    IssueState, MergeableState, MilestoneState, PullRequestReviewDecision, PullRequestReviewState,
-    PullRequestState, RepositoryVisibility, StatusState,
+use super::types::{IssueState, MilestoneState, RepositoryVisibility};
+
+pub(super) use super::pull_objects::{
+    AutoMergeRequest, Commit, HeadCommit, IssueCommentLink, PullRequest, PullRequestCommit,
+    PullRequestNumber, Review, ReviewComment, ReviewRequest, ReviewThread, Status,
+    StatusCheckRollup, StatusContext,
 };
 
 /// An exhausted connection's pagination metadata.
@@ -51,12 +54,6 @@ impl<T> Connection<T> {
     }
 }
 
-/// Some nodes of a connection, without its size or position.
-#[derive(Serialize)]
-pub(super) struct Nodes<T> {
-    pub nodes: Vec<T>,
-}
-
 /// A connection's size alone.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -77,19 +74,6 @@ pub(super) struct Label {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_default: Option<bool>,
-}
-
-impl Label {
-    /// A label named only by `name`, as pull-request objects historically serialized it.
-    pub fn named(name: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            id: None,
-            color: None,
-            description: None,
-            is_default: None,
-        }
-    }
 }
 
 /// The `User` or `Bot` behind an `Actor`, `Author` or `RequestedReviewer`.
@@ -195,6 +179,9 @@ pub(super) struct Ref {
     pub target: Option<GitObject>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repository: Option<RepositoryName>,
+    /// Null when the ref has no branch protection rule.
+    #[serde(rename = "branchProtectionRule")]
+    pub branch_protection_rule: Option<()>,
 }
 
 /// A `GitObject` identified by its object id, typically a `Commit`.
@@ -203,101 +190,6 @@ pub(super) struct GitObject {
     #[serde(rename = "__typename")]
     pub typename: &'static str,
     pub oid: String,
-}
-
-/// A pull request's auto-merge request.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct AutoMergeRequest {
-    pub enabled_at: chrono::DateTime<chrono::Utc>,
-}
-
-/// A `PullRequest` with the fields read from its stored REST model, reviews, threads and head
-/// commit.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct PullRequest {
-    #[serde(rename = "__typename")]
-    pub typename: &'static str,
-    pub id: String,
-    pub database_id: u64,
-    pub number: u64,
-    pub title: String,
-    pub is_draft: bool,
-    pub state: PullRequestState,
-    pub url: String,
-    pub head_ref_name: String,
-    pub base_ref_name: String,
-    pub mergeable: MergeableState,
-    pub auto_merge_request: Option<AutoMergeRequest>,
-    pub author: Actor,
-    pub repository: Repository,
-    pub labels: Connection<Label>,
-    pub reviews: Connection<Review>,
-    pub review_requests: Connection<ReviewRequest>,
-    pub review_threads: Connection<ReviewThread>,
-    pub review_decision: Option<PullRequestReviewDecision>,
-    pub comments: Connection<IssueComment>,
-    /// Only the head commit.
-    pub commits: Nodes<PullRequestCommit>,
-}
-
-/// A pull request found by `Repository.pullRequest`, before its other fields exist there.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct PullRequestNumber {
-    #[serde(rename = "__typename")]
-    pub typename: &'static str,
-    pub id: String,
-    pub database_id: u64,
-    pub number: u64,
-    pub repository: Repository,
-}
-
-/// A `PullRequestReview`.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct Review {
-    #[serde(rename = "__typename")]
-    pub typename: &'static str,
-    pub id: String,
-    pub state: PullRequestReviewState,
-    pub body: String,
-    pub submitted_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub commit: Commit,
-    pub author: Option<Actor>,
-    pub repository: Repository,
-}
-
-/// A `ReviewRequest`.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct ReviewRequest {
-    pub requested_reviewer: Actor,
-}
-
-/// A `PullRequestReviewThread`.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct ReviewThread {
-    #[serde(rename = "__typename")]
-    pub typename: &'static str,
-    pub id: String,
-    pub is_resolved: bool,
-    pub path: Option<String>,
-    pub line: Option<i64>,
-    pub comments: Connection<ReviewComment>,
-}
-
-/// A `PullRequestReviewComment` in a thread.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct ReviewComment {
-    #[serde(rename = "__typename")]
-    pub typename: &'static str,
-    pub id: String,
-    pub body: String,
-    pub updated_at: String,
 }
 
 /// An `IssueComment` on a pull request or issue.
@@ -327,54 +219,6 @@ pub(super) struct IssueComment {
     pub viewer_did_author: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reaction_groups: Option<Vec<ReactionGroup>>,
-}
-
-/// A `PullRequestCommit`.
-#[derive(Serialize)]
-pub(super) struct PullRequestCommit {
-    #[serde(rename = "__typename")]
-    pub typename: &'static str,
-    pub commit: HeadCommit,
-}
-
-/// A `Commit` named by its object id.
-#[derive(Serialize)]
-pub(super) struct Commit {
-    #[serde(rename = "__typename")]
-    pub typename: &'static str,
-    pub oid: String,
-}
-
-/// A pull request's head `Commit`, with its statuses.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct HeadCommit {
-    #[serde(rename = "__typename")]
-    pub typename: &'static str,
-    pub oid: String,
-    pub committed_date: String,
-    pub parents: TotalCount,
-    pub status: Status,
-    pub status_check_rollup: Option<StatusCheckRollup>,
-}
-
-/// A commit's combined `Status`.
-#[derive(Serialize)]
-pub(super) struct Status {
-    pub contexts: Vec<StatusContext>,
-}
-
-/// A `StatusContext`.
-#[derive(Serialize)]
-pub(super) struct StatusContext {
-    pub context: String,
-    pub state: StatusState,
-}
-
-/// A `StatusCheckRollup`.
-#[derive(Serialize)]
-pub(super) struct StatusCheckRollup {
-    pub state: StatusState,
 }
 
 /// An `Issue`.

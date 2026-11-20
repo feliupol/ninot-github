@@ -300,8 +300,10 @@ fn api_actions_append_their_timeline_events() {
     assert_eq!(entries[0]["sha"], head);
     assert_eq!(entries[3]["requested_reviewer"]["login"], "bob");
     assert_eq!(entries[5]["user"]["login"], "bob");
-    assert_eq!(entries[9]["commit_id"], head);
     let read = admin.get(path);
+    // The `merged` event names the merge commit, as the merge response does.
+    assert_eq!(entries[9]["commit_id"], read.body["merge_commit_sha"]);
+    assert_eq!(entries[9]["commit_id"], merged.body["sha"]);
     assert_eq!(read.body["merged_at"], entries[9]["created_at"]);
     assert_eq!(read.body["closed_at"], entries[10]["created_at"]);
     assert_eq!(read.body["merged_by"]["login"], "admin");

@@ -26,8 +26,23 @@ command label create
 command label delete
 command label edit
 command label list
+command pr checkout
+command pr checks
+command pr close
+command pr comment
+command pr create
 command pr diff
+command pr edit
+command pr list
+command pr lock
+command pr merge
 command pr ready
+command pr reopen
+command pr revert
+command pr review
+command pr status
+command pr unlock
+command pr update-branch
 command pr view
 command release create
 command release delete
@@ -135,12 +150,56 @@ flag label edit --name
 flag label edit --repo
 flag label list --json
 flag label list --repo
+flag pr checks --json
+flag pr checks --repo
+flag pr close --comment
+flag pr close --delete-branch
+flag pr close --repo
+flag pr comment --body
+flag pr comment --repo
+flag pr create --base
+flag pr create --body
+flag pr create --draft
+flag pr create --head
+flag pr create --repo
+flag pr create --title
 flag pr diff --color
 flag pr diff --name-only
 flag pr diff --patch
 flag pr diff --repo
+flag pr edit --base
+flag pr edit --body
+flag pr edit --repo
+flag pr edit --title
+flag pr list --author
+flag pr list --base
+flag pr list --draft
+flag pr list --head
+flag pr list --json
+flag pr list --label
+flag pr list --repo
+flag pr list --search
+flag pr list --state
+flag pr lock --reason
+flag pr lock --repo
+flag pr merge --auto
+flag pr merge --delete-branch
+flag pr merge --merge
+flag pr merge --rebase
+flag pr merge --repo
+flag pr merge --squash
 flag pr ready --repo
 flag pr ready --undo
+flag pr reopen --repo
+flag pr revert --repo
+flag pr review --approve
+flag pr review --body
+flag pr review --comment
+flag pr review --repo
+flag pr review --request-changes
+flag pr unlock --repo
+flag pr update-branch --repo
+flag pr view --comments
 flag pr view --jq
 flag pr view --json
 flag pr view --repo
@@ -175,6 +234,7 @@ flag repo edit --add-topic
 flag repo edit --default-branch
 flag repo edit --delete-branch-on-merge
 flag repo edit --description
+flag repo edit --enable-auto-merge
 flag repo edit --enable-issues
 flag repo edit --enable-rebase-merge
 flag repo edit --enable-squash-merge
@@ -255,13 +315,40 @@ git git-receive-pack
 git git-upload-pack
 git info/refs
 graphql AddCommentPayload.commentEdge
+graphql AddPullRequestReviewPayload.clientMutationId
+graphql CheckRun.checkSuite
+graphql CheckRun.completedAt
+graphql CheckRun.conclusion
+graphql CheckRun.detailsUrl
+graphql CheckRun.isRequired
+graphql CheckRun.name
+graphql CheckRun.startedAt
+graphql CheckRun.status
+graphql CheckSuite.workflowRun
 graphql CloseIssuePayload.issue
+graphql ClosePullRequestPayload.pullRequest
+graphql Commit.authoredDate
+graphql Commit.authors
+graphql Commit.committedDate
+graphql Commit.messageBody
+graphql Commit.messageHeadline
 graphql Commit.oid
+graphql Commit.statusCheckRollup
+graphql Comparison.aheadBy
+graphql Comparison.behindBy
+graphql Comparison.status
 graphql ConvertPullRequestToDraftPayload.pullRequest
 graphql CreateIssuePayload.issue
 graphql CreateLinkedBranchPayload.linkedBranch
+graphql CreatePullRequestPayload.pullRequest
 graphql CreateRepositoryPayload.repository
 graphql DeleteIssuePayload.repository
+graphql DisablePullRequestAutoMergePayload.clientMutationId
+graphql EnablePullRequestAutoMergePayload.clientMutationId
+graphql GitActor.email
+graphql GitActor.name
+graphql GitActor.user
+graphql GitActorConnection.nodes
 graphql Issue.activeLockReason
 graphql Issue.assignees
 graphql Issue.author
@@ -318,27 +405,38 @@ graphql LinkedBranch.ref
 graphql LinkedBranchConnection.nodes
 graphql LockLockablePayload.lockedRecord
 graphql MarkPullRequestReadyForReviewPayload.pullRequest
+graphql MergePullRequestPayload.clientMutationId
 graphql Milestone.description
 graphql Milestone.dueOn
 graphql Milestone.number
 graphql Milestone.title
 graphql Mutation.addComment
 graphql Mutation.addLabelsToLabelable
+graphql Mutation.addPullRequestReview
 graphql Mutation.closeIssue
+graphql Mutation.closePullRequest
 graphql Mutation.convertPullRequestToDraft
 graphql Mutation.createIssue
 graphql Mutation.createLinkedBranch
+graphql Mutation.createPullRequest
 graphql Mutation.createRepository
 graphql Mutation.deleteIssue
+graphql Mutation.disablePullRequestAutoMerge
+graphql Mutation.enablePullRequestAutoMerge
 graphql Mutation.lockLockable
 graphql Mutation.markPullRequestReadyForReview
+graphql Mutation.mergePullRequest
 graphql Mutation.pinIssue
 graphql Mutation.removeLabelsFromLabelable
 graphql Mutation.reopenIssue
+graphql Mutation.reopenPullRequest
+graphql Mutation.revertPullRequest
 graphql Mutation.transferIssue
 graphql Mutation.unlockLockable
 graphql Mutation.unpinIssue
 graphql Mutation.updateIssue
+graphql Mutation.updatePullRequest
+graphql Mutation.updatePullRequestBranch
 graphql Organization.login
 graphql PageInfo.endCursor
 graphql PageInfo.hasNextPage
@@ -346,10 +444,76 @@ graphql PinIssuePayload.issue
 graphql ProjectV2ItemConnection.nodes
 graphql ProjectV2ItemConnection.pageInfo
 graphql ProjectV2ItemConnection.totalCount
+graphql PullRequest.activeLockReason
+graphql PullRequest.additions
+graphql PullRequest.assignees
+graphql PullRequest.author
+graphql PullRequest.autoMergeRequest
+graphql PullRequest.baseRef
+graphql PullRequest.baseRefName
+graphql PullRequest.body
+graphql PullRequest.comments
+graphql PullRequest.commits
+graphql PullRequest.createdAt
+graphql PullRequest.deletions
+graphql PullRequest.files
+graphql PullRequest.headRefName
+graphql PullRequest.headRefOid
+graphql PullRequest.headRepository
+graphql PullRequest.headRepositoryOwner
 graphql PullRequest.id
+graphql PullRequest.isCrossRepository
 graphql PullRequest.isDraft
+graphql PullRequest.isInMergeQueue
+graphql PullRequest.isMergeQueueEnabled
+graphql PullRequest.labels
+graphql PullRequest.latestReviews
+graphql PullRequest.locked
+graphql PullRequest.maintainerCanModify
+graphql PullRequest.mergeStateStatus
+graphql PullRequest.mergeable
+graphql PullRequest.merged
+graphql PullRequest.milestone
 graphql PullRequest.number
+graphql PullRequest.projectItems
+graphql PullRequest.reactionGroups
+graphql PullRequest.reviewDecision
+graphql PullRequest.reviewRequests
+graphql PullRequest.reviews
 graphql PullRequest.state
+graphql PullRequest.statusCheckRollup
+graphql PullRequest.title
+graphql PullRequest.url
+graphql PullRequest.viewerMergeBodyText
+graphql PullRequest.viewerMergeHeadlineText
+graphql PullRequestChangedFile.additions
+graphql PullRequestChangedFile.changeType
+graphql PullRequestChangedFile.deletions
+graphql PullRequestChangedFile.path
+graphql PullRequestChangedFileConnection.nodes
+graphql PullRequestChangedFileConnection.pageInfo
+graphql PullRequestChangedFileConnection.totalCount
+graphql PullRequestCommit.commit
+graphql PullRequestCommitConnection.nodes
+graphql PullRequestCommitConnection.totalCount
+graphql PullRequestConnection.edges
+graphql PullRequestConnection.nodes
+graphql PullRequestConnection.pageInfo
+graphql PullRequestConnection.totalCount
+graphql PullRequestEdge.cursor
+graphql PullRequestEdge.node
+graphql PullRequestReview.author
+graphql PullRequestReview.authorAssociation
+graphql PullRequestReview.body
+graphql PullRequestReview.commit
+graphql PullRequestReview.id
+graphql PullRequestReview.reactionGroups
+graphql PullRequestReview.state
+graphql PullRequestReview.submittedAt
+graphql PullRequestReviewConnection.nodes
+graphql PullRequestReviewConnection.pageInfo
+graphql PullRequestReviewConnection.totalCount
+graphql Query.node
 graphql Query.repository
 graphql Query.repositoryOwner
 graphql Query.search
@@ -357,10 +521,13 @@ graphql Query.viewer
 graphql ReactingUserConnection.totalCount
 graphql ReactionGroup.content
 graphql ReactionGroup.users
+graphql Ref.branchProtectionRule
+graphql Ref.compare
 graphql Ref.name
 graphql Ref.repository
 graphql Ref.target
 graphql ReopenIssuePayload.issue
+graphql ReopenPullRequestPayload.pullRequest
 graphql Repository.databaseId
 graphql Repository.defaultBranchRef
 graphql Repository.description
@@ -378,6 +545,7 @@ graphql Repository.nameWithOwner
 graphql Repository.owner
 graphql Repository.parent
 graphql Repository.pullRequest
+graphql Repository.pullRequests
 graphql Repository.rebaseMergeAllowed
 graphql Repository.ref
 graphql Repository.release
@@ -389,15 +557,32 @@ graphql Repository.visibility
 graphql RepositoryConnection.nodes
 graphql RepositoryConnection.pageInfo
 graphql RepositoryConnection.totalCount
+graphql RevertPullRequestPayload.pullRequest
+graphql RevertPullRequestPayload.revertPullRequest
+graphql ReviewRequestConnection.nodes
+graphql SearchResultItemConnection.edges
 graphql SearchResultItemConnection.issueCount
 graphql SearchResultItemConnection.nodes
 graphql SearchResultItemConnection.pageInfo
+graphql SearchResultItemEdge.node
+graphql StatusCheckRollup.contexts
+graphql StatusCheckRollup.state
+graphql StatusCheckRollupContextConnection.nodes
+graphql StatusCheckRollupContextConnection.pageInfo
+graphql StatusCheckRollupContextConnection.totalCount
+graphql StatusContext.context
+graphql StatusContext.createdAt
+graphql StatusContext.description
+graphql StatusContext.isRequired
+graphql StatusContext.state
+graphql StatusContext.targetUrl
 graphql SubIssuesSummary.completed
 graphql SubIssuesSummary.percentCompleted
 graphql SubIssuesSummary.total
 graphql TransferIssuePayload.issue
 graphql UnlockLockablePayload.unlockedRecord
 graphql UnpinIssuePayload.issue
+graphql UpdatePullRequestBranchPayload.pullRequest
 graphql User.databaseId
 graphql User.id
 graphql User.login
@@ -467,8 +652,10 @@ rest actions/set-github-actions-permissions-repository
 rest actions/update-environment-variable
 rest actions/update-org-variable
 rest actions/update-repo-variable
+rest git/delete-ref
 rest git/get-ref
 rest git/list-matching-refs
+rest issues/add-labels
 rest issues/create
 rest issues/create-comment
 rest issues/create-label
@@ -489,6 +676,8 @@ rest orgs/set-membership-for-user
 rest pulls/create
 rest pulls/get
 rest pulls/list-review-comments-for-repo
+rest pulls/list-reviews
+rest pulls/update
 rest rate-limit/get
 rest reactions/create-for-issue
 rest reactions/create-for-issue-comment
@@ -502,6 +691,7 @@ rest reactions/list-for-issue
 rest reactions/list-for-issue-comment
 rest reactions/list-for-pull-request-review-comment
 rest reactions/list-for-release
+rest repos/compare-commits
 rest repos/create-deployment-branch-policy
 rest repos/create-for-authenticated-user
 rest repos/create-in-org

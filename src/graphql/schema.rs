@@ -88,10 +88,17 @@ fn resolve(
                 .collect();
             resolver(ctx.data_unchecked::<Env>(), parent, &args)?.0
         }
-        None => parent
-            .get(name)
-            .cloned()
-            .ok_or_else(|| Error::new(format!("Not implemented by ninot-github: {key}")))?,
+        None => match parent.get(name).cloned() {
+            Some(value) => value,
+            // Connections store `nodes`. `edges` is the same page with cursors.
+            None if name == "edges" => super::edges::from_nodes(parent)
+                .ok_or_else(|| Error::new(format!("Not implemented by ninot-github: {key}")))?,
+            None => {
+                return Err(Error::new(format!(
+                    "Not implemented by ninot-github: {key}"
+                )));
+            }
+        },
     };
     Ok(field_value(value, shape))
 }

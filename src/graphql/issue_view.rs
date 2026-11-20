@@ -227,6 +227,7 @@ pub(super) fn linked_branch_object(
                 name_with_owner: format!("{}/{}", account.login, repo.name),
                 url: Some(env.urls().repo(&account.login, &repo.name).html),
             }),
+            branch_protection_rule: None,
         },
     }
 }

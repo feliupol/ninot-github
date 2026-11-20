@@ -480,9 +480,14 @@ impl Handler for ops::ReposGetContent {
             .ok_or_else(|| {
                 ApiResponse::error(404, &format!("No commit found for the ref {reference}"))
             })?;
-        let content = git::path_content(&located.git_dir, &sha, request.param("path"))
-            .map_err(ApiResponse::internal)?
-            .ok_or_else(ApiResponse::not_found)?;
+        let rel = request.param("path");
+        let content = if rel == "." {
+            super::content_root::at_root(&located.git_dir, &sha)?
+        } else {
+            git::path_content(&located.git_dir, &sha, rel)
+                .map_err(ApiResponse::internal)?
+                .ok_or_else(ApiResponse::not_found)?
+        };
         match content {
             PathContent::Directory(entries) => Ok(ApiResponse::typed(
                 200,

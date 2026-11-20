@@ -126,7 +126,6 @@ fn ready_for_review_and_convert_to_draft_mutations() {
 /// `PullRequestAutoMerge` and `PullRequestAutoMergeDisable` of cli/cli v2.101.0
 /// pkg/cmd/pr/merge/http.go:89 and :106.
 #[test]
-#[ignore = "not implemented: GraphQL EnablePullRequestAutoMergePayload.clientMutationId"]
 fn auto_merge_mutations() {
     let server = tls_server();
     let config = TempDir::new();
@@ -166,6 +165,7 @@ fn auto_merge_mutations() {
          {disablePullRequestAutoMerge(input: {pullRequestId: $prID}){clientMutationId}}",
         &[&format!("prID={id}")],
     );
+    // gh 2.104 `--jq` prints a blank line for a JSON null (`jsonScalarToString`).
     assert_eq!(
         api(
             &server,
@@ -173,7 +173,10 @@ fn auto_merge_mutations() {
             "repos/admin/tool/pulls/1",
             ".auto_merge"
         ),
-        "null"
+        ""
+    );
+    assert!(
+        gh_json(&server, &config.0, &["api", "repos/admin/tool/pulls/1"])["auto_merge"].is_null()
     );
 }
 

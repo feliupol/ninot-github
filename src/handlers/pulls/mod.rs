@@ -1,5 +1,6 @@
 //! Pull requests and their review/comment read models.
 
+pub(crate) mod merge;
 mod open;
 mod read;
 mod review;

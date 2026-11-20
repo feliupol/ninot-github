@@ -48,22 +48,32 @@ fn schema_enum<T: serde::de::DeserializeOwned>(text: &str, what: &str) -> Result
         .map_err(|_| Error::new(format!("{what} has the unknown state {text:?}")))
 }
 
-/// The commit statuses on `sha`.
+/// The commit statuses on `sha`, latest record of each context.
 pub(super) fn status_contexts(repo: &Repo, sha: &str) -> Vec<StatusContext> {
-    repo.commit_statuses
-        .get(sha)
-        .map_or(&[][..], Vec::as_slice)
-        .iter()
+    let statuses = repo.commit_statuses.get(sha).map_or(&[][..], Vec::as_slice);
+    crate::state::latest_per_context(statuses)
+        .into_iter()
         .map(|status| StatusContext {
+            typename: "StatusContext",
+            id: crate::render::node_id("StatusContext", u64::try_from(status.id).unwrap_or(0)),
             context: status.context.clone(),
-            state: match status.state {
-                state::StatusState::Error => StatusState::Error,
-                state::StatusState::Failure => StatusState::Failure,
-                state::StatusState::Pending => StatusState::Pending,
-                state::StatusState::Success => StatusState::Success,
-            },
+            state: gql_status(status.state),
+            target_url: status.target_url.clone(),
+            created_at: time::format(&status.created_at),
+            updated_at: time::format(&status.updated_at),
+            description: status.description.clone(),
         })
         .collect()
+}
+
+/// A REST commit status as the GraphQL `StatusState`.
+pub(super) fn gql_status(state: state::StatusState) -> StatusState {
+    match state {
+        state::StatusState::Error => StatusState::Error,
+        state::StatusState::Failure => StatusState::Failure,
+        state::StatusState::Pending => StatusState::Pending,
+        state::StatusState::Success => StatusState::Success,
+    }
 }
 
 /// A stored review's state, which REST and the schema spell alike.

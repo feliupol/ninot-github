@@ -298,6 +298,7 @@ fn repository_ref_field(env: &Env, parent: &Map, args: &Map) -> Result<Output, E
             oid: found.sha,
         }),
         repository: None,
+        branch_protection_rule: None,
     }))
 }
 

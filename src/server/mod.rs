@@ -33,6 +33,7 @@ mod app;
 mod auth;
 #[cfg(feature = "response-log")]
 mod response_log;
+mod route_alias;
 mod seed;
 
 use app::dispatch;

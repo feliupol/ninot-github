@@ -448,12 +448,14 @@ impl App {
             return into_response(ApiResponse::not_found(), caller.as_ref());
         };
         let listed_refs = list_refs_alias(method, path);
+        let contents_root = super::route_alias::contents_root(method, path);
+        let route_path = contents_root.as_deref().unwrap_or(path);
         let found = match &listed_refs {
             Some((routed, prefix)) => self.router.find(method, routed).map(|mut found| {
                 found.params.insert("ref".to_owned(), prefix.clone());
                 found
             }),
-            None => self.router.find(method, path),
+            None => self.router.find(method, route_path),
         };
         let Some(found) = found else {
             self.record(Hit::Unrouted {

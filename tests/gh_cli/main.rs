@@ -14,6 +14,7 @@ mod graphql;
 mod issue_commands;
 mod issues;
 mod labels;
+mod pr_commands;
 mod pulls;
 mod reactions_search_users;
 mod repo_setup;

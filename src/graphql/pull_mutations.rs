@@ -10,6 +10,7 @@ use super::{Env, Map, MutationArgs, Output, not_found, read, typed_error};
 use crate::render::node_id;
 use crate::state::lock;
 
+/// Auto-merge, draft and review-thread resolvers registered from this module.
 pub(super) const RESOLVERS: &[(&str, super::Resolver)] = &[
     (
         "Mutation.markPullRequestReadyForReview",
@@ -41,6 +42,9 @@ pub(super) const RESOLVERS: &[(&str, super::Resolver)] = &[
 struct AutoMergeInput {
     pull_request_id: String,
     merge_method: Option<PullRequestMergeMethod>,
+    commit_headline: Option<String>,
+    commit_body: Option<String>,
+    client_mutation_id: Option<String>,
 }
 
 /// The payload of the auto-merge mutations.
@@ -49,6 +53,7 @@ struct AutoMergeInput {
 struct AutoMergePayload {
     #[serde(rename = "__typename")]
     typename: &'static str,
+    client_mutation_id: Option<String>,
     pull_request: AutoMergePullRequest,
 }
 
@@ -67,33 +72,48 @@ fn set_pull_request_auto_merge(env: &Env, args: &Map, enabled: bool) -> Result<O
     let mut state = lock(&env.state);
     let (owner, repo, number) = pull_location(&state, &input.pull_request_id)
         .ok_or_else(|| not_found("pull request does not exist".to_owned()))?;
+    let allowed = state
+        .account(&owner)
+        .and_then(|account| account.repo(&repo))
+        .is_some_and(|repository| repository.settings.allow_auto_merge);
+    if enabled && !allowed {
+        return Err(typed_error(
+            "auto merge is not allowed for this repository",
+            "UNPROCESSABLE",
+        ));
+    }
+    let enabled_by = state.account(&env.caller.login).map(|account| {
+        crate::render::simple_user(
+            &crate::api::ApiRequest::for_urls(&env.web_url, None),
+            account,
+        )
+    });
     let pull = state
         .account_mut(&owner)
         .and_then(|account| account.repo_mut(&repo))
         .and_then(|repository| repository.pull_requests.get_mut(&number))
         .expect("pull location exists");
+    let enabled_at = crate::time::now_utc();
+    pull.auto_merge_enabled_at = enabled.then_some(enabled_at);
     let data = pull
         .data
         .as_mut()
         .ok_or_else(|| not_found("pull request REST model does not exist".to_owned()))?;
-    let enabled_at = if enabled {
+    let auto_merge_request = if enabled {
         let method = match input.merge_method.unwrap_or(PullRequestMergeMethod::Squash) {
             PullRequestMergeMethod::Merge => crate::types::AutoMergeMergeMethod::Merge,
             PullRequestMergeMethod::Rebase => crate::types::AutoMergeMergeMethod::Rebase,
             PullRequestMergeMethod::Squash => crate::types::AutoMergeMergeMethod::Squash,
         };
-        let enabled_at = crate::time::now_utc();
         data.auto_merge = Some(crate::types::AutoMerge {
-            commit_message: String::new(),
-            commit_title: String::new(),
-            enabled_by: data.user.clone(),
+            commit_message: input.commit_body.clone().unwrap_or_default(),
+            commit_title: input.commit_headline.clone().unwrap_or_default(),
+            enabled_by: enabled_by.unwrap_or_else(|| data.user.clone()),
             merge_method: method,
         });
-        pull.auto_merge_enabled_at = Some(enabled_at);
-        Some(enabled_at)
+        Some(super::pull_view::auto_merge(data, enabled_at))
     } else {
         data.auto_merge = None;
-        pull.auto_merge_enabled_at = None;
         None
     };
     Output::of(AutoMergePayload {
@@ -102,9 +122,10 @@ fn set_pull_request_auto_merge(env: &Env, args: &Map, enabled: bool) -> Result<O
         } else {
             "DisablePullRequestAutoMergePayload"
         },
+        client_mutation_id: input.client_mutation_id,
         pull_request: AutoMergePullRequest {
             typename: "PullRequest",
-            auto_merge_request: enabled_at.map(|enabled_at| AutoMergeRequest { enabled_at }),
+            auto_merge_request,
         },
     })
 }

@@ -8,7 +8,7 @@ use super::super::repos::find_repo;
 use super::caller_user;
 use crate::api::{ApiRequest, ApiResponse, ApiResult};
 use crate::operation::ops;
-use crate::state::{Name, NewTimelineEvent, State, TimelineEventKind, lock};
+use crate::state::{Name, State, lock};
 use crate::types;
 use crate::webhooks::events::{self, Ctx};
 
@@ -406,80 +406,5 @@ impl Handler for ops::IssuesCreateComment {
         let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
         events::issue_comment::created(&mut ctx, number, &comment)?;
         Ok(ApiResponse::typed(201, &comment))
-    }
-}
-
-impl Handler for ops::PullsMerge {
-    fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
-        let caller = request.require_scope(&["repo", "public_repo"])?;
-        let body: Option<types::PullsMergeRequestBody> = request.json_as()?;
-        let body = body.unwrap_or_default();
-        let mut state = lock(state);
-        let found = find_repo(&state, request)?;
-        // The status only. Source: OpenAPI pulls/merge 403
-        if !found.permission.push {
-            return Err(ApiResponse::error(
-                403,
-                "Resource not accessible by personal access token",
-            ));
-        }
-        let number = request
-            .param("pull_number")
-            .parse::<u64>()
-            .map_err(|_| ApiResponse::not_found())?;
-        let actor = caller_user(&state, request, &caller.login)?;
-        let (merged_id, closed_id) = (state.next_id(), state.next_id());
-        let pull = state
-            .account_mut(&found.owner)
-            .and_then(|account| account.repo_mut(&found.name))
-            .and_then(|repo| repo.pull_requests.get_mut(&number))
-            .ok_or_else(ApiResponse::not_found)?;
-        let data = pull
-            .data
-            .as_ref()
-            .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?;
-        let expected = body.sha.as_deref();
-        // Source: OpenAPI pulls/merge 409
-        if expected.is_some_and(|sha| data.head.sha != sha) {
-            return Err(ApiResponse::error(409, "head SHA does not match"));
-        }
-        // Source: OpenAPI pulls/merge 405
-        if data.state != types::PullRequestState::Open
-            || data.mergeable == Some(false)
-            || data.draft == Some(true)
-        {
-            return Err(ApiResponse::error(405, "pull request is not mergeable"));
-        }
-        let sha = data.head.sha.clone();
-        let now = crate::time::now_utc();
-        for (id, kind, commit_id) in [
-            (merged_id, TimelineEventKind::Merged, Some(sha.clone())),
-            (closed_id, TimelineEventKind::Closed, None),
-        ] {
-            pull.apply_event(NewTimelineEvent {
-                id,
-                kind,
-                actor: actor.clone(),
-                created_at: now,
-                commit_id,
-                requested_reviewer: None,
-                requested_team: None,
-            })
-            .map_err(|message| ApiResponse::error(405, &message))?;
-        }
-        let data = pull
-            .data
-            .clone()
-            .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?;
-        let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
-        events::pull_request::closed(&mut ctx, &data)?;
-        Ok(ApiResponse::typed(
-            200,
-            &types::PullRequestMergeResult {
-                merged: true,
-                message: "Pull Request successfully merged".to_owned(),
-                sha,
-            },
-        ))
     }
 }
