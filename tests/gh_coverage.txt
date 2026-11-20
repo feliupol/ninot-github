@@ -7,6 +7,7 @@ command auth token
 command label create
 command label delete
 command label edit
+command pr diff
 command pr ready
 command pr view
 command release create
@@ -58,6 +59,10 @@ flag label edit --color
 flag label edit --description
 flag label edit --name
 flag label edit --repo
+flag pr diff --color
+flag pr diff --name-only
+flag pr diff --patch
+flag pr diff --repo
 flag pr ready --repo
 flag pr ready --undo
 flag pr view --jq
@@ -231,6 +236,7 @@ rest issues/create-comment
 rest issues/create-label
 rest issues/delete-label
 rest issues/get-label
+rest issues/list-for-repo
 rest issues/list-labels-for-repo
 rest issues/update-label
 rest meta/get-zen

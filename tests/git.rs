@@ -223,3 +223,93 @@ fn a_first_push_of_several_branches_prefers_master_over_others() {
         "master"
     );
 }
+
+#[test]
+fn commit_and_compare_honor_diff_and_patch_media_types() {
+    let server = Server::start().unwrap();
+    let admin = Api::admin(&server);
+    assert_eq!(
+        admin
+            .post("/user/repos", json!({ "name": "tool", "auto_init": true }))
+            .status,
+        201
+    );
+    let url = clone_url(&server, "admin", "tool", Some(server.admin_token()));
+    let work = TempDir::new();
+    git_ok(&work.0, &["clone", "-q", &url, "c"]);
+    let clone = work.join("c");
+    git_ok(&clone, &["checkout", "-q", "-b", "feature"]);
+    commit_file(&clone, "feature.txt", "feature\n");
+    git_ok(&clone, &["push", "-q", "origin", "feature"]);
+
+    let sha = admin.get("/repos/admin/tool/commits/feature").body["sha"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let diff = admin.get_accept(
+        &format!("/repos/admin/tool/commits/{sha}"),
+        "application/vnd.github.diff",
+    );
+    assert_eq!(diff.status, 200, "{:?}", diff.body);
+    let text = diff.body.as_str().unwrap();
+    assert!(
+        text.contains("diff --git a/feature.txt b/feature.txt"),
+        "{text}"
+    );
+    assert!(text.contains("+feature"), "{text}");
+    let patch = admin.get_accept(
+        &format!("/repos/admin/tool/commits/{sha}"),
+        "application/vnd.github.v3.patch",
+    );
+    assert!(
+        patch
+            .body
+            .as_str()
+            .unwrap()
+            .contains("Subject: [PATCH] Add feature.txt"),
+        "{:?}",
+        patch.body
+    );
+    let compare = admin.get_accept(
+        "/repos/admin/tool/compare/main...feature",
+        "application/vnd.github.v3.diff",
+    );
+    assert_eq!(compare.status, 200, "{:?}", compare.body);
+    assert!(
+        compare.body.as_str().unwrap().contains("feature.txt"),
+        "{:?}",
+        compare.body
+    );
+    let compare_patch = admin.get_accept(
+        "/repos/admin/tool/compare/main...feature",
+        "application/vnd.github.patch",
+    );
+    assert!(
+        compare_patch
+            .body
+            .as_str()
+            .unwrap()
+            .contains("Subject: [PATCH] Add feature.txt"),
+        "{:?}",
+        compare_patch.body
+    );
+    assert_eq!(
+        admin
+            .get_accept(
+                "/repos/admin/tool/commits/deadbeef",
+                "application/vnd.github.diff"
+            )
+            .status,
+        422
+    );
+    assert_eq!(
+        admin
+            .get_accept(
+                "/repos/admin/tool/compare/main...no-such-branch",
+                "application/vnd.github.diff"
+            )
+            .status,
+        404
+    );
+    assert!(admin.get("/repos/admin/tool/commits/feature").body["sha"].is_string());
+}

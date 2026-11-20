@@ -274,7 +274,6 @@ fn issue_close_and_reopen() {
 /// Issues and pull requests share one number sequence, and every pull request is an issue:
 /// <https://docs.github.com/en/rest/issues/issues#list-repository-issues>.
 #[test]
-#[ignore = "fake bug: a pull request opened after an issue reuses the issue's number"]
 fn pull_requests_and_issues_share_numbers() {
     let server = tls_server();
     let config = TempDir::new();

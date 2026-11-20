@@ -262,6 +262,9 @@ impl Handler for ops::ReposGetCommit {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let located = locate(state, request)?;
         let commit = read_commit(&located, request.param("ref"))?;
+        if let Some(response) = super::diff_media::commit(request, &located.git_dir, &commit.sha)? {
+            return Ok(response);
+        }
         Ok(ApiResponse::typed(
             200,
             &render_commit(&located.urls(request), &commit),
@@ -855,6 +858,11 @@ impl Handler for ops::ReposCompareCommits {
             git::resolve_commit(&located.git_dir, head_branch).map_err(ApiResponse::internal)?
         }
         .ok_or_else(|| ApiResponse::error(404, "head commit not found"))?;
+        if let Some(response) =
+            super::diff_media::compare(request, &located.git_dir, &base_sha, &head_sha)?
+        {
+            return Ok(response);
+        }
         let ahead = git::new_commits(&located.git_dir, &head_sha, &[&base_sha])
             .map_err(ApiResponse::internal)?;
         let behind = git::new_commits(&located.git_dir, &base_sha, &[&head_sha])

@@ -134,7 +134,6 @@ issues/list-for-repo 200 always-omitted $[].active_lock_reason
 issues/list-for-repo 200 always-omitted $[].assignees
 issues/list-for-repo 200 always-omitted $[].closed_by
 issues/list-for-repo 200 always-omitted $[].pinned_comment
-issues/list-for-repo 200 always-omitted $[].pull_request
 issues/list-for-repo 200 always-omitted $[].state_reason
 issues/remove-assignees 200 always-omitted $.active_lock_reason
 issues/remove-assignees 200 always-omitted $.body

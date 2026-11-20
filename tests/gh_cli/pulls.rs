@@ -84,7 +84,6 @@ fn pr_view_reads_the_number_and_node_id() {
 /// GitHub's REST `node_id` is the GraphQL `id` of the same object:
 /// <https://docs.github.com/en/graphql/guides/using-global-node-ids>.
 #[test]
-#[ignore = "fake bug: REST node_id `PR_admin_tool_1` differs from the GraphQL id of the same pull request"]
 fn pr_node_id_matches_the_rest_node_id() {
     let server = tls_server();
     let config = TempDir::new();
@@ -194,7 +193,6 @@ fn pr_list_filters_by_state() {
 /// (cli/cli v2.101.0 pkg/cmd/pr/diff/diff.go:217), which GitHub answers with the diff text:
 /// <https://docs.github.com/en/rest/pulls/pulls#get-a-pull-request>.
 #[test]
-#[ignore = "fake bug: GET /repos/{owner}/{repo}/pulls/{number} ignores the diff and patch media types and answers JSON"]
 fn pr_diff_prints_the_diff_and_patch() {
     let server = tls_server();
     let config = TempDir::new();

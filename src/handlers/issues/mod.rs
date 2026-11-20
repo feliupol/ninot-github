@@ -20,6 +20,8 @@ mod milestones;
 pub(crate) mod record;
 mod update;
 
+pub(crate) use lists::{for_repository, next_subject_number};
+
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};

@@ -956,3 +956,96 @@ fn repeated_repo_qualifiers_search_any_of_the_repositories() {
     numbers.sort_unstable();
     assert_eq!(numbers, [1, 2]);
 }
+
+fn feature_pull(server: &Server) -> common::Api<'_> {
+    let repository = server
+        .create_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+    repository
+        .commit_file("main", std::path::Path::new("base.txt"), b"base\n", "Base")
+        .unwrap();
+    repository
+        .commit_file(
+            "feature",
+            std::path::Path::new("feature.txt"),
+            b"feature\n",
+            "Add feature",
+        )
+        .unwrap();
+    let api = common::Api::admin(server);
+    let pull = api.post(
+        "/repos/admin/project/pulls",
+        json!({"title": "Add feature", "head": "feature", "base": "main"}),
+    );
+    assert_eq!(pull.status, 201, "{:?}", pull.body);
+    assert_eq!(pull.body["number"], 1);
+    api
+}
+
+#[test]
+fn pull_request_node_id_is_the_graphql_id_and_resolves() {
+    let server = Server::start().unwrap();
+    let api = feature_pull(&server);
+    let pull = api.get("/repos/admin/project/pulls/1");
+    let node_id = pull.body["node_id"].as_str().unwrap();
+    assert!(!node_id.is_empty());
+    let graphql = api.post(
+        "/api/graphql",
+        json!({
+            "query": "query($id: ID!) { repository(owner: \"admin\", name: \"project\") { pullRequest(number: 1) { id } } node(id: $id) { ... on PullRequest { number } } }",
+            "variables": { "id": node_id }
+        }),
+    );
+    assert_eq!(graphql.status, 200, "{}", graphql.body);
+    assert!(graphql.body.get("errors").is_none(), "{}", graphql.body);
+    assert_eq!(
+        graphql.body["data"]["repository"]["pullRequest"]["id"],
+        node_id
+    );
+    assert_eq!(graphql.body["data"]["node"]["number"], 1);
+}
+
+#[test]
+fn pull_request_diff_and_patch_media_types_return_the_commits() {
+    let server = Server::start().unwrap();
+    let api = feature_pull(&server);
+    let diff = api.get_accept(
+        "/repos/admin/project/pulls/1",
+        "application/vnd.github.v3.diff",
+    );
+    assert_eq!(diff.status, 200, "{:?}", diff.body);
+    assert_eq!(
+        diff.header("content-type"),
+        Some("text/plain; charset=utf-8")
+    );
+    let text = diff.body.as_str().unwrap();
+    assert!(
+        text.starts_with("diff --git a/feature.txt b/feature.txt"),
+        "{text}"
+    );
+    assert!(text.contains("+feature"), "{text}");
+    let patch = api.get_accept(
+        "/repos/admin/project/pulls/1",
+        "application/vnd.github.patch",
+    );
+    assert_eq!(patch.status, 200, "{:?}", patch.body);
+    assert!(
+        patch
+            .body
+            .as_str()
+            .unwrap()
+            .contains("Subject: [PATCH] Add feature"),
+        "{:?}",
+        patch.body
+    );
+    let json_body = api.get("/repos/admin/project/pulls/1");
+    assert_eq!(json_body.body["number"], 1);
+    assert_eq!(
+        api.get_accept(
+            "/repos/admin/project/pulls/9",
+            "application/vnd.github.diff"
+        )
+        .status,
+        404
+    );
+}

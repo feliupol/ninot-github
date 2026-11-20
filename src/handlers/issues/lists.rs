@@ -12,7 +12,7 @@ use super::super::Handler;
 use crate::api::{ApiRequest, ApiResponse, ApiResult, Caller, paginate};
 use crate::operation::ops;
 use crate::render;
-use crate::state::{AccountKind, State, lock};
+use crate::state::{AccountKind, Repo, State, lock};
 use crate::types;
 
 const FILTERS: [&str; 6] = [
@@ -337,6 +337,70 @@ fn participates(issue: &types::Issue, participation: Participation, login: &str)
         Participation::Subscribed => false,
         Participation::All => true,
     }
+}
+
+/// Next number in the repository's shared issue and pull request sequence.
+pub(crate) fn next_subject_number(repo: &Repo) -> u64 {
+    repo.issues
+        .keys()
+        .chain(repo.pull_requests.keys())
+        .copied()
+        .max()
+        .unwrap_or(0)
+        + 1
+}
+
+/// Issues of one repository, including its pull requests.
+///
+/// `state` defaults to `open`. `sort` defaults to `created` and `direction` to `desc`.
+/// Source: <https://docs.github.com/en/rest/issues/issues#list-repository-issues>
+pub(crate) fn for_repository(
+    context: render::IssueContext<'_>,
+) -> Result<Vec<types::Issue>, ApiResponse> {
+    let request = context.request;
+    let state = super::query_choice(
+        request,
+        "Issue",
+        "state",
+        &["open", "closed", "all"],
+        "open",
+    )?;
+    let sort = super::query_choice(
+        request,
+        "Issue",
+        "sort",
+        &["created", "updated", "comments"],
+        "created",
+    )?;
+    let ascending =
+        super::query_choice(request, "Issue", "direction", &["asc", "desc"], "desc")? == "asc";
+    let since = match request.query("since") {
+        Some(value) => Some(super::parse_timestamp(value, "Issue", "since")?),
+        None => None,
+    };
+    let labels = request
+        .query("labels")
+        .map(split_labels)
+        .unwrap_or_default();
+    let mut rows = Vec::new();
+    for issue in context.repo.issues.values() {
+        rows.push(render::issue(context, issue));
+    }
+    for pull in context
+        .repo
+        .pull_requests
+        .values()
+        .filter_map(|pull| pull.data.as_ref())
+    {
+        rows.push(render::issue_from_pull(pull));
+    }
+    rows.retain(|issue| {
+        (state == "all" || issue.state == state)
+            && since.is_none_or(|since| issue.updated_at > since)
+            && has_labels(issue, &labels)
+    });
+    sort_rows(&mut rows, sort, ascending);
+    Ok(rows)
 }
 
 fn sort_rows(rows: &mut [types::Issue], sort: &str, ascending: bool) {

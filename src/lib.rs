@@ -22,6 +22,7 @@ mod fixture_git;
 pub mod fixtures;
 pub(crate) mod graphql;
 pub(crate) mod handlers;
+pub(crate) mod ids;
 pub(crate) mod operation;
 pub(crate) mod permissions;
 pub mod rate_limit;

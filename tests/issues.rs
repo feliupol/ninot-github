@@ -2348,3 +2348,58 @@ fn issue_users_follow_their_accounts() {
     let comments = admin.get("/repos/admin/project/issues/1/comments").body;
     assert_eq!(comments[0]["user"]["name"], "Bob Builder");
 }
+
+#[test]
+fn pull_requests_share_issue_numbers_and_read_back_as_issues() {
+    let server = Server::start().unwrap();
+    let repository = server
+        .create_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+    repository
+        .commit_file("main", std::path::Path::new("base.txt"), b"base\n", "Base")
+        .unwrap();
+    repository
+        .commit_file(
+            "feature",
+            std::path::Path::new("feature.txt"),
+            b"feature\n",
+            "Add feature",
+        )
+        .unwrap();
+    let admin = common::Api::admin(&server);
+    let issue = admin.post("/repos/admin/project/issues", json!({"title": "First"}));
+    assert_eq!(issue.status, 201, "{:?}", issue.body);
+    assert_eq!(issue.body["number"], 1);
+    let pull = admin.post(
+        "/repos/admin/project/pulls",
+        json!({"title": "Add feature", "head": "feature", "base": "main"}),
+    );
+    assert_eq!(pull.status, 201, "{:?}", pull.body);
+    assert_eq!(pull.body["number"], 2);
+
+    let as_issue = admin.get("/repos/admin/project/issues/2");
+    assert_eq!(as_issue.status, 200, "{:?}", as_issue.body);
+    assert!(
+        as_issue.body["pull_request"].is_object(),
+        "{:?}",
+        as_issue.body
+    );
+    assert_eq!(as_issue.body["title"], "Add feature");
+    let plain = admin.get("/repos/admin/project/issues/1");
+    assert!(plain.body["pull_request"].is_null(), "{:?}", plain.body);
+    assert_eq!(admin.get("/repos/admin/project/issues/9").status, 404);
+    assert_eq!(
+        admin.get("/repos/admin/project/issues?state=nope").status,
+        422
+    );
+
+    let listed = admin.get("/repos/admin/project/issues?state=all");
+    let marks: Vec<String> = listed
+        .body
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| format!("{}:{}", item["number"], item["pull_request"].is_object()))
+        .collect();
+    assert_eq!(marks, ["2:true", "1:false"]);
+}

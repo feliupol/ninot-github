@@ -24,6 +24,7 @@ mod apps;
 mod check_suites;
 mod checks;
 pub(crate) mod checks_model;
+mod diff_media;
 mod environments;
 mod gists;
 mod git_blobs;

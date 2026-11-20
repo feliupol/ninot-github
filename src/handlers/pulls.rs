@@ -127,6 +127,9 @@ impl Handler for ops::PullsGet {
             .data
             .as_ref()
             .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?;
+        if let Some(response) = super::diff_media::pull(request, repo.git_dir.as_deref(), data)? {
+            return Ok(response);
+        }
         let commits = super::timeline::pull_commits(repo.git_dir.as_deref(), data)
             .map_err(ApiResponse::internal)?;
         if commits.is_empty() {
@@ -373,18 +376,7 @@ impl Handler for ops::IssuesCreate {
                 "Resource not accessible by personal access token",
             ));
         }
-        let number = state
-            .account(&found.owner)
-            .and_then(|account| account.repo(&found.name))
-            .and_then(|repo| {
-                repo.issues
-                    .keys()
-                    .chain(repo.pull_requests.keys())
-                    .max()
-                    .copied()
-            })
-            .unwrap_or(0)
-            + 1;
+        let number = super::issues::next_subject_number(found.repo(&state));
         let user = state
             .account(&caller.login)
             .ok_or_else(ApiResponse::not_found)?;
@@ -474,12 +466,7 @@ impl Handler for ops::IssuesListForRepo {
         let state = lock(state);
         let found = find_repo(&state, request)?;
         let context = super::issues::context(&state, request, &found);
-        let rows = context
-            .repo
-            .issues
-            .values()
-            .map(|issue| crate::render::issue(context, issue))
-            .collect::<Vec<_>>();
+        let rows = super::issues::for_repository(context)?;
         Ok(paginate(request, &request.path, rows))
     }
 }
@@ -534,9 +521,23 @@ impl Handler for ops::IssuesGet {
             .param("issue_number")
             .parse::<u64>()
             .map_err(|_| ApiResponse::not_found())?;
-        let issue = super::issues::rendered_issue(&state, request, &found, number)
+        // A stored issue wins when a pull request was seeded with the same number.
+        if let Some(issue) = super::issues::rendered_issue(&state, request, &found, number) {
+            return Ok(ApiResponse::typed(200, &issue));
+        }
+        let pull = found
+            .repo(&state)
+            .pull_requests
+            .get(&number)
             .ok_or_else(ApiResponse::not_found)?;
-        Ok(ApiResponse::typed(200, &issue))
+        let data = pull
+            .data
+            .as_ref()
+            .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?;
+        Ok(ApiResponse::typed(
+            200,
+            &crate::render::issue_from_pull(data),
+        ))
     }
 }
 
@@ -558,13 +559,8 @@ impl Handler for ops::PullsCreate {
             .account(&found.owner)
             .expect("repository owner exists");
         let repository = account.repo(&found.name).expect("repository exists");
-        let number = repository
-            .pull_requests
-            .keys()
-            .next_back()
-            .copied()
-            .unwrap_or(0)
-            + 1;
+        let number = super::issues::next_subject_number(repository);
+        let repository_id = repository.id;
         let user = crate::render::simple_user(
             request,
             state
@@ -693,7 +689,7 @@ impl Handler for ops::PullsCreate {
             merged_at: None,
             merged_by: None,
             milestone: None,
-            node_id: format!("PR_{}_{}_{}", found.owner, found.name, number),
+            node_id: crate::ids::pull_request_node_id(repository_id, number),
             number: crate::render::id(number),
             patch_url: urls.patch(),
             rebaseable: Some(true),

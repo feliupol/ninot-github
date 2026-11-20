@@ -1133,6 +1133,11 @@ pub(crate) fn seeded_pull_request(
     seed: PullRequestSeed,
 ) -> io::Result<SeededPullRequest> {
     let (owner, repo_name) = repository_name;
+    let repository_id = state
+        .account(owner)
+        .and_then(|account| account.repo(repo_name))
+        .map(|repo| repo.id)
+        .unwrap_or(0);
     let repo_urls = request.urls().repo(owner, repo_name);
     let urls = repo_urls.pull(number);
     let signed_number = model_id_or_input(number, "pull request number")?;
@@ -1215,7 +1220,7 @@ pub(crate) fn seeded_pull_request(
         merged_at: None,
         merged_by: None,
         milestone: None,
-        node_id: format!("PR_{owner}_{repo_name}_{number}"),
+        node_id: crate::ids::pull_request_node_id(repository_id, number),
         number: signed_number,
         patch_url: urls.patch(),
         rebaseable: None,

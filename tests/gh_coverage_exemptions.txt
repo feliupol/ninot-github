@@ -74,7 +74,6 @@ issues/list-events-for-repo: not reached by a gh_cli test yet
 issues/list-events-for-timeline: not reached by a gh_cli test yet
 issues/list-for-authenticated-user: not reached by a gh_cli test yet
 issues/list-for-org: not reached by a gh_cli test yet
-issues/list-for-repo: not reached by a gh_cli test yet
 issues/list-labels-for-milestone: not reached by a gh_cli test yet
 issues/list-labels-on-issue: not reached by a gh_cli test yet
 issues/list-milestones: not reached by a gh_cli test yet

@@ -525,7 +525,7 @@ fn auto_merge_allowed(env: &Env, parent: &Map, _: &Map) -> Result<Output, Error>
 
 /// Global id for a pull request, combining its repository id and number.
 fn pull_id(repository_id: u64, number: u64) -> u64 {
-    (repository_id << 32) | (number & u32::MAX as u64)
+    crate::ids::pull_database_id(repository_id, number)
 }
 
 /// The result of `Repository.pullRequest`.
@@ -1466,7 +1466,8 @@ fn pull_object(
         .collect();
     Ok(Some(objects::PullRequest {
         typename: "PullRequest",
-        id: node_id("PullRequest", pull_id(repo.id, number)),
+        // The stored REST `node_id` is this object's GraphQL id.
+        id: data.node_id.clone(),
         database_id: pull_id(repo.id, number),
         number,
         title: data.title.clone(),

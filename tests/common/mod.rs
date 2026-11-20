@@ -77,6 +77,11 @@ impl<'a> Api<'a> {
         self.send(self.client.get(self.url(path)))
     }
 
+    /// GET with an explicit `Accept` header. A non-JSON body comes back as a string.
+    pub fn get_accept(&self, path: &str, accept: &str) -> Reply {
+        self.send(self.client.get(self.url(path)).header("accept", accept))
+    }
+
     pub fn delete(&self, path: &str) -> Reply {
         self.send(self.client.delete(self.url(path)))
     }
