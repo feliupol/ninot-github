@@ -4,25 +4,20 @@
 # Seeded with the gaps at the time the rule was introduced; shrink it by adding gh_cli tests.
 
 actions/add-custom-labels-to-self-hosted-runner-for-org: not reached by a gh_cli test yet
-actions/create-or-update-repo-secret: not reached by a gh_cli test yet
 actions/create-registration-token-for-org: not reached by a gh_cli test yet
 actions/create-remove-token-for-org: not reached by a gh_cli test yet
 actions/create-self-hosted-runner-group-for-org: not reached by a gh_cli test yet
-actions/delete-repo-secret: not reached by a gh_cli test yet
 actions/delete-self-hosted-runner-from-org: not reached by a gh_cli test yet
 actions/delete-self-hosted-runner-group-from-org: not reached by a gh_cli test yet
 actions/download-job-logs-for-workflow-run: not reached by a gh_cli test yet
 actions/download-workflow-run-logs: not reached by a gh_cli test yet
 actions/generate-runner-jitconfig-for-org: not reached by a gh_cli test yet
 actions/get-job-for-workflow-run: not reached by a gh_cli test yet
-actions/get-repo-public-key: not reached by a gh_cli test yet
-actions/get-repo-secret: not reached by a gh_cli test yet
 actions/get-self-hosted-runner-for-org: not reached by a gh_cli test yet
 actions/get-self-hosted-runner-group-for-org: not reached by a gh_cli test yet
 actions/get-workflow-run: not reached by a gh_cli test yet
 actions/list-jobs-for-workflow-run: not reached by a gh_cli test yet
 actions/list-labels-for-self-hosted-runner-for-org: not reached by a gh_cli test yet
-actions/list-repo-secrets: not reached by a gh_cli test yet
 actions/list-self-hosted-runner-groups-for-org: not reached by a gh_cli test yet
 actions/list-self-hosted-runners-for-org: not reached by a gh_cli test yet
 actions/re-run-workflow: not reached by a gh_cli test yet
@@ -100,7 +95,6 @@ orgs/list-members: not reached by a gh_cli test yet
 orgs/list-outside-collaborators: not reached by a gh_cli test yet
 orgs/remove-member: not reached by a gh_cli test yet
 orgs/remove-membership-for-user: not reached by a gh_cli test yet
-orgs/set-membership-for-user: not reached by a gh_cli test yet
 orgs/update: not reached by a gh_cli test yet
 pulls/check-if-merged: not reached by a gh_cli test yet
 pulls/create-reply-for-review-comment: not reached by a gh_cli test yet

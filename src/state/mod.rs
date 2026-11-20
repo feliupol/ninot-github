@@ -45,7 +45,8 @@ pub use repo::{
     StoredActionsSecret, TimelineEvent, TimelineEventKind,
 };
 pub use repo_setup::{
-    ActionsPermissions, DeploymentPolicy, Environment, EnvironmentSecret, Plan, RepoSetup, Ruleset,
+    ActionsPermissions, ActionsVariable, ActionsVisibility, DeploymentPolicy, Environment,
+    EnvironmentSecret, OrgActionsSecret, OrgActionsVariable, Plan, RepoSetup, Ruleset,
 };
 pub(crate) use runner::RunnerTokenKind;
 pub(crate) use runner::{CreateRunnerError, RunnerSpec, valid_label_name, valid_runner_name};

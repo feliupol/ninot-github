@@ -28,7 +28,7 @@ const MAX_REVIEWERS: usize = 6;
 const REVIEWERS_PLAN_LIMIT: &str = "Failed to create the environment protection rule. Please ensure the billing plan supports the required reviewers protection rule.";
 
 /// The administered repository of the request and its environment `environment_name`.
-fn environment<'a>(
+pub(super) fn environment<'a>(
     state: &'a State,
     request: &ApiRequest,
 ) -> Result<(Found, &'a Environment), ApiResponse> {
@@ -173,6 +173,7 @@ impl Handler for ops::ReposCreateOrUpdateEnvironment {
                 branch_policy: None,
                 policies: BTreeMap::new(),
                 secrets: BTreeMap::new(),
+                variables: BTreeMap::new(),
             }
         });
         env.reviewers = reviewer_ids;
@@ -372,5 +373,23 @@ impl Handler for ops::ActionsCreateOrUpdateEnvironmentSecret {
         } else {
             Ok(ApiResponse::typed(201, &types::EmptyObject {}))
         }
+    }
+}
+
+impl Handler for ops::ActionsDeleteEnvironmentSecret {
+    fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
+        let mut state = lock(state);
+        let (found, _) = environment(&state, request)?;
+        let env_name = request.param("environment_name").to_owned();
+        let env = found
+            .repo_mut(&mut state)
+            .setup
+            .environments
+            .get_mut(&env_name)
+            .expect("environment found above");
+        env.secrets
+            .remove(request.param("secret_name"))
+            .ok_or_else(ApiResponse::not_found)?;
+        Ok(ApiResponse::no_content())
     }
 }

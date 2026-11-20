@@ -66,6 +66,11 @@ impl App {
             .filter(|rest| rest.is_empty() || rest.starts_with('/'))
             .map_or(full_path, |rest| if rest.is_empty() { "/" } else { rest })
             .to_owned();
+        let rewritten = {
+            let state = lock(&self.state);
+            environment_variable_alias(&state, &path)
+        };
+        let route_path = rewritten.as_deref().unwrap_or(path.as_str());
         let git_path = git::parse_path(full_path);
         let git_service = git_path.as_ref().map(|git_path| {
             if git::is_push(git_path.service_path, parts.uri.query().unwrap_or("")) {
@@ -77,7 +82,7 @@ impl App {
         let operation = match git_path {
             Some(_) => None,
             None => method(&parts.method)
-                .and_then(|method| self.router.find(method, &path))
+                .and_then(|method| self.router.find(method, route_path))
                 .map(|found| found.info.id),
         };
         let graphql = parts.method == http::Method::POST
@@ -108,7 +113,8 @@ impl App {
                 }
             }
         };
-        let mut response = self.apply_faults(parts, body, &path, operation, git_service, &client);
+        let mut response =
+            self.apply_faults(parts, body, route_path, operation, git_service, &client);
         let mut state = lock(&self.state);
         let headers = match admitted {
             Some((resource, window)) => {
@@ -343,6 +349,11 @@ impl App {
             ),
             _ => (web_url.clone(), full_path),
         };
+        let rewritten = {
+            let state = lock(&self.state);
+            environment_variable_alias(&state, path)
+        };
+        let path = rewritten.as_deref().unwrap_or(path);
         if let Some(response) = handlers::actions_service::serve(
             &self.state,
             &parts.method,
@@ -648,6 +659,40 @@ impl App {
         // Source: <https://docs.github.com/en/rest/authentication/authenticating-to-the-rest-api#failed-login-limit>
         Err(ApiResponse::error(401, "Bad credentials"))
     }
+}
+
+/// `gh variable` addresses an environment by repository id
+/// (`/repositories/{id}/environments/{name}/variables[/{variable}]`). The pinned spec only
+/// describes `/repos/{owner}/{repo}/environments/...`, which serves the same operations.
+// Source: cli/cli v2.104.0 `gh variable set --env` (`HTTP 404` on
+// `/repositories/{id}/environments/{name}/variables`).
+fn environment_variable_alias(state: &State, path: &str) -> Option<String> {
+    let rest = path.strip_prefix("/repositories/")?;
+    let mut parts = rest.split('/');
+    let id = parts.next()?.parse::<u64>().ok()?;
+    if parts.next()? != "environments" {
+        return None;
+    }
+    let environment = parts.next()?;
+    if environment.is_empty() || parts.next()? != "variables" {
+        return None;
+    }
+    let variable = parts.next();
+    if parts.next().is_some() || variable.is_some_and(str::is_empty) {
+        return None;
+    }
+    let (owner, repo) = state.accounts().find_map(|account| {
+        account
+            .repos
+            .values()
+            .find_map(|repo| (repo.id == id).then(|| (account.login.clone(), repo.name.clone())))
+    })?;
+    let mut routed = format!("/repos/{owner}/{repo}/environments/{environment}/variables");
+    if let Some(name) = variable {
+        routed.push('/');
+        routed.push_str(name);
+    }
+    Some(routed)
 }
 
 /// `GET /repos/{owner}/{repo}/git/refs[/{prefix}]`, which GitHub still serves although the

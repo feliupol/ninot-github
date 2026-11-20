@@ -2,7 +2,6 @@
 actions/create-self-hosted-runner-group-for-org 201 always-omitted $.hosted_runners_url
 actions/get-github-actions-permissions-repository 200 always-omitted $.selected_actions_url
 actions/get-github-actions-permissions-repository 200 always-omitted $.sha_pinning_required
-actions/get-repo-secret 200 uncovered
 actions/get-self-hosted-runner-for-org 200 always-omitted $.version
 actions/get-self-hosted-runner-group-for-org 200 always-omitted $.hosted_runners_url
 actions/get-self-hosted-runner-group-for-org 200 always-omitted $.network_configuration_id

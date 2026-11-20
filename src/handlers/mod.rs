@@ -15,8 +15,11 @@ pub(crate) const BOT: git::Bot = git::Bot {
 };
 
 mod actions;
+mod actions_config;
+mod actions_org;
 mod actions_secrets;
 pub(crate) mod actions_service;
+mod actions_variables;
 mod apps;
 mod check_suites;
 mod checks;
@@ -141,6 +144,29 @@ registry![
     ops::ActionsGetRepoSecret,
     ops::ActionsCreateOrUpdateRepoSecret,
     ops::ActionsDeleteRepoSecret,
+    ops::ActionsDeleteEnvironmentSecret,
+    ops::ActionsListRepoVariables,
+    ops::ActionsCreateRepoVariable,
+    ops::ActionsGetRepoVariable,
+    ops::ActionsUpdateRepoVariable,
+    ops::ActionsDeleteRepoVariable,
+    ops::ActionsListEnvironmentVariables,
+    ops::ActionsCreateEnvironmentVariable,
+    ops::ActionsGetEnvironmentVariable,
+    ops::ActionsUpdateEnvironmentVariable,
+    ops::ActionsDeleteEnvironmentVariable,
+    ops::ActionsGetOrgPublicKey,
+    ops::ActionsListOrgSecrets,
+    ops::ActionsGetOrgSecret,
+    ops::ActionsCreateOrUpdateOrgSecret,
+    ops::ActionsDeleteOrgSecret,
+    ops::ActionsListSelectedReposForOrgSecret,
+    ops::ActionsListOrgVariables,
+    ops::ActionsCreateOrgVariable,
+    ops::ActionsGetOrgVariable,
+    ops::ActionsUpdateOrgVariable,
+    ops::ActionsDeleteOrgVariable,
+    ops::ActionsListSelectedReposForOrgVariable,
     ops::ActionsListJobsForWorkflowRun,
     ops::ActionsGetJobForWorkflowRun,
     ops::ActionsDownloadJobLogsForWorkflowRun,

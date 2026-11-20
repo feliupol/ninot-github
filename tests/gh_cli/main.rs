@@ -16,6 +16,7 @@ mod labels;
 mod pulls;
 mod reactions_search_users;
 mod repo_setup;
+mod secrets_variables;
 
 use std::fs::File;
 use std::io::Write as _;
@@ -147,6 +148,10 @@ fn isolated(mut command: Command, server: &Server, config: &Path) -> Command {
         .env("GIT_SSL_CAINFO", &ca)
         .env("GH_PROMPT_DISABLED", "1")
         .env("NO_COLOR", "1")
+        // CLICOLOR_FORCE and FORCE_COLOR colorize `--json` even when NO_COLOR is set.
+        .env_remove("CLICOLOR")
+        .env_remove("CLICOLOR_FORCE")
+        .env_remove("FORCE_COLOR")
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", config.join(".gitconfig"))
         .env("GIT_TERMINAL_PROMPT", "0")

@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::repo_setup::{OrgActionsSecret, OrgActionsVariable};
 use super::{Name, NameMap, Repo, Runner, RunnerGroup, SshKey, UserProfile};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -75,6 +76,10 @@ pub struct OrgProfile {
     pub has_repository_projects: Option<bool>,
     /// `read`, `write`, `admin` or `none`; `read` when unset.
     pub default_repository_permission: Option<String>,
+    /// Actions secrets by name. Empty for a user.
+    pub actions_secrets: BTreeMap<String, OrgActionsSecret>,
+    /// Actions variables by uppercase name. Empty for a user.
+    pub actions_variables: BTreeMap<String, OrgActionsVariable>,
 }
 
 /// A team of an organization, which can be asked to review pull requests.

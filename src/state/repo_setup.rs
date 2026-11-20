@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 use crate::types;
 
@@ -65,6 +66,8 @@ pub struct RepoSetup {
     pub environments: BTreeMap<String, Environment>,
     /// Rulesets by id.
     pub rulesets: BTreeMap<i64, Ruleset>,
+    /// Actions variables by uppercase name.
+    pub variables: BTreeMap<String, ActionsVariable>,
 }
 
 /// The repository's GitHub Actions policy.
@@ -108,6 +111,49 @@ pub struct Environment {
     pub policies: BTreeMap<u64, DeploymentPolicy>,
     /// Encrypted secrets by name.
     pub secrets: BTreeMap<String, EnvironmentSecret>,
+    /// Actions variables by uppercase name.
+    pub variables: BTreeMap<String, ActionsVariable>,
+}
+
+/// An Actions variable. The name is stored uppercase; lookup ignores case.
+#[derive(Clone, Debug)]
+pub struct ActionsVariable {
+    pub name: String,
+    pub value: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Which organization repositories may use an Actions secret or variable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ActionsVisibility {
+    All,
+    Private,
+    Selected,
+}
+
+/// An organization Actions secret. The ciphertext is kept and never returned.
+#[derive(Clone, Debug)]
+pub struct OrgActionsSecret {
+    pub name: String,
+    pub encrypted_value: String,
+    pub key_id: String,
+    pub visibility: ActionsVisibility,
+    pub selected_repository_ids: Vec<u64>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// An organization Actions variable. The name is stored uppercase.
+#[derive(Clone, Debug)]
+pub struct OrgActionsVariable {
+    pub name: String,
+    pub value: String,
+    pub visibility: ActionsVisibility,
+    pub selected_repository_ids: Vec<u64>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 /// A name pattern that a branch or tag must match to deploy to an environment.

@@ -26,7 +26,13 @@ command repo view
 command run list
 command search code
 command search commits
+command secret delete
+command secret list
 command secret set
+command variable delete
+command variable get
+command variable list
+command variable set
 flag api --field
 flag api --header
 flag api --include
@@ -107,9 +113,36 @@ flag search code --json
 flag search code --repo
 flag search commits --json
 flag search commits --repo
+flag secret delete --env
+flag secret delete --org
+flag secret delete --repo
+flag secret list --env
+flag secret list --json
+flag secret list --org
+flag secret list --repo
 flag secret set --body
 flag secret set --env
+flag secret set --org
 flag secret set --repo
+flag secret set --repos
+flag secret set --visibility
+flag variable delete --env
+flag variable delete --org
+flag variable delete --repo
+flag variable get --env
+flag variable get --json
+flag variable get --org
+flag variable get --repo
+flag variable list --env
+flag variable list --json
+flag variable list --org
+flag variable list --repo
+flag variable set --body
+flag variable set --env
+flag variable set --org
+flag variable set --repo
+flag variable set --repos
+flag variable set --visibility
 git git-receive-pack
 git git-upload-pack
 git info/refs
@@ -155,14 +188,42 @@ graphql RepositoryConnection.pageInfo
 graphql RepositoryConnection.totalCount
 graphql User.login
 graphql User.repositories
+rest actions/create-environment-variable
 rest actions/create-or-update-environment-secret
+rest actions/create-or-update-org-secret
+rest actions/create-or-update-repo-secret
+rest actions/create-org-variable
+rest actions/create-repo-variable
+rest actions/delete-environment-secret
+rest actions/delete-environment-variable
+rest actions/delete-org-secret
+rest actions/delete-org-variable
+rest actions/delete-repo-secret
+rest actions/delete-repo-variable
 rest actions/get-environment-public-key
+rest actions/get-environment-variable
 rest actions/get-github-actions-default-workflow-permissions-repository
 rest actions/get-github-actions-permissions-repository
+rest actions/get-org-public-key
+rest actions/get-org-secret
+rest actions/get-org-variable
+rest actions/get-repo-public-key
+rest actions/get-repo-secret
+rest actions/get-repo-variable
 rest actions/list-environment-secrets
+rest actions/list-environment-variables
+rest actions/list-org-secrets
+rest actions/list-org-variables
+rest actions/list-repo-secrets
+rest actions/list-repo-variables
+rest actions/list-selected-repos-for-org-secret
+rest actions/list-selected-repos-for-org-variable
 rest actions/list-workflow-runs-for-repo
 rest actions/set-github-actions-default-workflow-permissions-repository
 rest actions/set-github-actions-permissions-repository
+rest actions/update-environment-variable
+rest actions/update-org-variable
+rest actions/update-repo-variable
 rest git/get-ref
 rest git/list-matching-refs
 rest issues/create
@@ -175,6 +236,7 @@ rest issues/update-label
 rest meta/get-zen
 rest meta/root
 rest orgs/get
+rest orgs/set-membership-for-user
 rest pulls/create
 rest pulls/get
 rest pulls/list-review-comments-for-repo
