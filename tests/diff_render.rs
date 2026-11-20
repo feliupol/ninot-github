@@ -202,4 +202,23 @@ fn diff_and_patch_text_matches_git() {
     ));
     assert!(range_patch.contains("Subject: [PATCH "));
     assert!(range_patch.contains("Binary files "));
+
+    assert_eq!(
+        admin
+            .delete("/repos/admin/tool/git/refs/heads/missing")
+            .status,
+        404
+    );
+    assert_eq!(
+        admin
+            .delete("/repos/admin/tool/git/refs/heads/foo..bar")
+            .status,
+        422
+    );
+    assert_eq!(
+        admin
+            .delete("/repos/admin/tool/git/refs/heads/feature")
+            .status,
+        204
+    );
 }

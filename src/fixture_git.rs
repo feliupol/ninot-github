@@ -1,12 +1,13 @@
-//! Git commits made by fixture setup, against the same repository clients fetch.
+//! Git commits made by fixture setup, written straight into the bare repository.
+//!
+//! Hooks stay disabled because nothing here runs `git` or an isolated worktree.
 
-use std::fs;
+use std::collections::HashSet;
 use std::io;
 use std::path::{Component, Path};
-use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
 
-static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
+use gix::objs::Write;
+use gix::objs::tree::EntryKind;
 
 /// Who authored or committed a commit, and when, as git accepts it in `GIT_*_DATE`.
 pub(crate) struct Identity<'a> {
@@ -65,40 +66,88 @@ pub(crate) fn commit_file(
 /// Returns invalid paths, missing repositories, and Git failures without changing the target ref.
 pub(crate) fn commit(commit: Commit<'_>) -> io::Result<String> {
     validate_path(commit.path)?;
-    let root = std::env::temp_dir().join(format!(
-        "ninot-github-fixture-{}-{}",
-        std::process::id(),
-        NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed)
-    ));
-    fs::create_dir(&root)?;
-    let isolation = root.with_extension("git-isolation");
-    prepare_git_isolation(&isolation)?;
-    let result = commit_in_worktree(commit, &root, &isolation);
-    let _ = fs::remove_dir_all(root);
-    let _ = fs::remove_dir_all(isolation);
-    result
+    let path = commit.path.to_str().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "fixture path must stay inside the repository",
+        )
+    })?;
+    let repo = open(commit.git_dir)?;
+    let branch_tip = tip(&repo, commit.branch)?;
+    let parent = match branch_tip {
+        Some(tip) => Some(tip),
+        None => tip(&repo, commit.default_branch)?,
+    };
+    let tree_id = match parent {
+        Some(parent) => repo
+            .find_commit(parent)
+            .map_err(other)?
+            .tree_id()
+            .map_err(other)?
+            .detach(),
+        None => repo.empty_tree().id().detach(),
+    };
+    if parent.is_some() && contains_symlink(&repo, tree_id, path)? {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "fixture path contains a symlink",
+        ));
+    }
+    let blob = repo.write_blob(commit.bytes).map_err(other)?.detach();
+    let mut editor = repo
+        .find_tree(tree_id)
+        .map_err(other)?
+        .edit()
+        .map_err(other)?;
+    editor.upsert(path, EntryKind::Blob, blob).map_err(other)?;
+    let tree = editor.write().map_err(other)?.detach();
+    let author = signature(commit.author)?;
+    let committer = signature(commit.committer)?;
+    let mut author_time = gix::date::parse::TimeBuf::default();
+    let mut committer_time = gix::date::parse::TimeBuf::default();
+    let parents = parent.into_iter().collect::<Vec<_>>();
+    let id = repo
+        .commit_as(
+            committer.to_ref(&mut committer_time),
+            author.to_ref(&mut author_time),
+            format!("refs/heads/{}", commit.branch).as_str(),
+            complete_line(commit.message).as_str(),
+            tree,
+            parents,
+        )
+        .map_err(other)?;
+    Ok(id.detach().to_string())
 }
 
-/// Copies branch refs and their objects from an upstream repo into a fork fixture.
+/// Copies branch refs and the objects they reach from `source` into `target`.
+///
+/// Tags and `HEAD` stay where they are. Existing target branches are overwritten.
 pub(crate) fn copy_refs(target: &Path, source: &Path) -> io::Result<()> {
-    let root = target
-        .parent()
-        .ok_or_else(|| io::Error::other("fixture repository has no parent"))?;
-    prepare_git_isolation(root)?;
-    let output = isolated_git(root)
-        .args(["--git-dir"])
-        .arg(target)
-        .arg("fetch")
-        .arg("--no-tags")
-        .arg("--")
-        .arg(source)
-        .args(["+refs/heads/*:refs/heads/*"])
-        .output()?;
-    if !output.status.success() {
-        return Err(io::Error::other(format!(
-            "copying fixture fork refs failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
+    let src = open(source)?;
+    let dst = open(target)?;
+    let mut refs = Vec::new();
+    for reference in src
+        .references()
+        .map_err(other)?
+        .local_branches()
+        .map_err(other)?
+    {
+        let reference = reference.map_err(other)?;
+        let Some(id) = reference.try_id() else {
+            continue;
+        };
+        refs.push((reference.name().as_bstr().to_string(), id.detach()));
+    }
+    let roots: Vec<gix::ObjectId> = refs.iter().map(|(_, id)| *id).collect();
+    copy_reachable(&src, &dst, &roots)?;
+    for (name, id) in refs {
+        dst.reference(
+            name.as_str(),
+            id,
+            gix::refs::transaction::PreviousValue::Any,
+            "fixture copy",
+        )
+        .map_err(other)?;
     }
     Ok(())
 }
@@ -120,125 +169,246 @@ fn validate_path(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn commit_in_worktree(commit: Commit<'_>, worktree: &Path, isolation: &Path) -> io::Result<String> {
-    run(isolated_git(isolation)
-        .args(["clone", "--quiet", "--no-hardlinks"])
-        .arg(commit.git_dir)
-        .arg(worktree))?;
-    let existing_branch = run(isolated_git(isolation).current_dir(worktree).args([
-        "show-ref",
-        "--verify",
-        &format!("refs/remotes/origin/{}", commit.branch),
-    ]));
-    let source_branch = if existing_branch.is_ok() {
-        commit.branch
-    } else {
-        commit.default_branch
-    };
-    let source_exists = run(isolated_git(isolation).current_dir(worktree).args([
-        "show-ref",
-        "--verify",
-        &format!("refs/remotes/origin/{source_branch}"),
-    ]));
-    if source_exists.is_ok() {
-        run(isolated_git(isolation).current_dir(worktree).args([
-            "checkout",
-            "--quiet",
-            "-B",
-            commit.branch,
-            &format!("origin/{source_branch}"),
-        ]))?;
-    } else {
-        run(isolated_git(isolation).current_dir(worktree).args([
-            "checkout",
-            "--quiet",
-            "--orphan",
-            commit.branch,
-        ]))?;
+fn open(git_dir: &Path) -> io::Result<gix::Repository> {
+    gix::open_opts(git_dir, gix::open::Options::isolated()).map_err(other)
+}
+
+fn tip(repo: &gix::Repository, branch: &str) -> io::Result<Option<gix::ObjectId>> {
+    Ok(repo
+        .rev_parse_single(format!("refs/heads/{branch}").as_str())
+        .ok()
+        .map(|id| id.detach()))
+}
+
+fn contains_symlink(
+    repo: &gix::Repository,
+    mut tree_id: gix::ObjectId,
+    path: &str,
+) -> io::Result<bool> {
+    let parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
+    for (index, part) in parts.iter().enumerate() {
+        let tree = repo.find_tree(tree_id).map_err(other)?;
+        let Some(entry) = tree.find_entry(*part) else {
+            return Ok(false);
+        };
+        if entry.mode().is_link() {
+            return Ok(true);
+        }
+        if index + 1 == parts.len() {
+            return Ok(false);
+        }
+        if !entry.mode().is_tree() {
+            return Err(io::Error::other(format!(
+                "fixture path passes through a non-directory: {part}"
+            )));
+        }
+        tree_id = entry.id().detach();
     }
-    let target = worktree.join(commit.path);
-    let mut parent = worktree.to_owned();
-    for component in commit.path.components() {
-        parent.push(component);
-        if fs::symlink_metadata(&parent).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "fixture path contains a symlink",
-            ));
+    Ok(false)
+}
+
+fn signature(identity: &Identity<'_>) -> io::Result<gix::actor::Signature> {
+    let time = gix::date::parse(identity.date, None)
+        .or_else(|_| {
+            chrono::DateTime::parse_from_rfc3339(identity.date).map(|parsed| {
+                gix::date::Time::new(parsed.timestamp(), parsed.offset().local_minus_utc())
+            })
+        })
+        .map_err(|error| io::Error::other(error.to_string()))?;
+    Ok(gix::actor::Signature {
+        name: identity.name.into(),
+        email: identity.email.into(),
+        time,
+    })
+}
+
+/// Git stores a trailing newline on the message.
+fn complete_line(message: &str) -> String {
+    if message.ends_with('\n') {
+        message.to_owned()
+    } else {
+        format!("{message}\n")
+    }
+}
+
+fn copy_reachable(
+    src: &gix::Repository,
+    dst: &gix::Repository,
+    roots: &[gix::ObjectId],
+) -> io::Result<()> {
+    let mut pending = roots.to_vec();
+    let mut seen = HashSet::new();
+    while let Some(id) = pending.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let object = src.find_object(id).map_err(other)?.detach();
+        match object.kind {
+            gix::objs::Kind::Commit => {
+                let commit = gix::objs::CommitRef::from_bytes(&object.data, src.object_hash())
+                    .map_err(other)?;
+                pending.push(commit.tree());
+                pending.extend(commit.parents());
+            }
+            gix::objs::Kind::Tree => {
+                for entry in gix::objs::TreeRefIter::from_bytes(&object.data, src.object_hash()) {
+                    pending.push(entry.map_err(other)?.oid.to_owned());
+                }
+            }
+            gix::objs::Kind::Tag => {
+                pending.push(
+                    gix::objs::TagRef::from_bytes(&object.data, src.object_hash())
+                        .map_err(other)?
+                        .target(),
+                );
+            }
+            gix::objs::Kind::Blob => {}
+        }
+        if !dst.has_object(id) {
+            dst.objects
+                .write_buf(object.kind, &object.data)
+                .map_err(other)?;
         }
     }
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent)?;
+    Ok(())
+}
+
+fn other(error: impl std::fmt::Display) -> io::Error {
+    io::Error::other(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use gix::bstr::ByteSlice;
+
+    use super::*;
+
+    fn bare(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("ninot-fixture-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        ninot_common::git::init_bare(&dir, "main").unwrap();
+        dir
     }
-    fs::write(&target, commit.bytes)?;
-    run(isolated_git(isolation)
-        .current_dir(worktree)
-        .args(["add", "--"])
-        .arg(commit.path))?;
-    let mut command = isolated_git(isolation);
-    command
-        .current_dir(worktree)
-        .env("GIT_AUTHOR_NAME", commit.author.name)
-        .env("GIT_AUTHOR_EMAIL", commit.author.email)
-        .env("GIT_AUTHOR_DATE", commit.author.date)
-        .env("GIT_COMMITTER_NAME", commit.committer.name)
-        .env("GIT_COMMITTER_EMAIL", commit.committer.email)
-        .env("GIT_COMMITTER_DATE", commit.committer.date)
-        .args(["commit", "--quiet", "--allow-empty", "-m", commit.message]);
-    run(&mut command)?;
-    let sha = output(
-        isolated_git(isolation)
-            .current_dir(worktree)
-            .args(["rev-parse", "HEAD"]),
-    )?;
-    run(isolated_git(isolation).current_dir(worktree).args([
-        "push",
-        "--quiet",
-        "origin",
-        &format!("HEAD:refs/heads/{}", commit.branch),
-    ]))?;
-    Ok(sha.trim().to_owned())
-}
 
-fn prepare_git_isolation(root: &Path) -> io::Result<()> {
-    fs::create_dir_all(root.join("disabled-hooks"))?;
-    fs::write(root.join("empty.gitconfig"), b"")
-}
+    #[test]
+    fn commits_files_branches_and_copies_refs_without_git() {
+        let dir = bare("commit");
+        let sha = commit_file(
+            &dir,
+            "main",
+            "main",
+            Path::new("dir/a.txt"),
+            b"hello\n",
+            "hello",
+        )
+        .unwrap();
+        let feature = commit_file(
+            &dir,
+            "feature",
+            "main",
+            Path::new("b.txt"),
+            b"b\n",
+            "feature",
+        )
+        .unwrap();
+        let repo = open(&dir).unwrap();
+        let main = repo
+            .find_commit(gix::ObjectId::from_hex(sha.as_bytes()).unwrap())
+            .unwrap();
+        assert_eq!(main.message_raw_sloppy().as_bytes(), b"hello\n");
+        assert_eq!(main.author().unwrap().name, "ninot-github");
+        assert_eq!(main.author().unwrap().seconds(), 946_684_800);
+        let blob = repo
+            .find_blob(
+                main.tree()
+                    .unwrap()
+                    .lookup_entry_by_path("dir/a.txt")
+                    .unwrap()
+                    .unwrap()
+                    .id(),
+            )
+            .unwrap();
+        assert_eq!(blob.data.as_slice(), b"hello\n");
+        let feature_commit = repo
+            .find_commit(gix::ObjectId::from_hex(feature.as_bytes()).unwrap())
+            .unwrap();
+        assert_eq!(feature_commit.parent_ids().next().unwrap().to_string(), sha);
 
-fn isolated_git(root: &Path) -> Command {
-    let mut command = Command::new("git");
-    command
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", root.join("empty.gitconfig"))
-        .arg("-c")
-        .arg(format!(
-            "core.hooksPath={}",
-            root.join("disabled-hooks").display()
-        ));
-    command
-}
+        let again = commit(Commit {
+            git_dir: &dir,
+            branch: "main",
+            default_branch: "main",
+            path: Path::new("dir/a.txt"),
+            bytes: b"hello\n",
+            message: "empty change",
+            author: &Identity {
+                name: "A",
+                email: "a@b",
+                date: "2026-09-29T20:38:27Z",
+            },
+            committer: &Identity {
+                name: "C",
+                email: "c@b",
+                date: "2026-09-29T22:38:27+02:00",
+            },
+        })
+        .unwrap();
+        let again_commit = repo
+            .find_commit(gix::ObjectId::from_hex(again.as_bytes()).unwrap())
+            .unwrap();
+        assert_eq!(
+            again_commit.author().unwrap().time().unwrap().seconds,
+            1_790_714_307
+        );
+        assert_eq!(
+            again_commit.committer().unwrap().time().unwrap().offset,
+            7_200
+        );
 
-fn run(command: &mut Command) -> io::Result<()> {
-    let output = command
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .output()?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(io::Error::other(
-            String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-        ))
+        let fork = bare("fork");
+        copy_refs(&fork, &dir).unwrap();
+        let copied = open(&fork).unwrap();
+        assert!(copied.rev_parse_single("refs/heads/feature").is_ok());
+        assert_eq!(
+            copied
+                .rev_parse_single("refs/heads/main")
+                .unwrap()
+                .detach()
+                .to_string(),
+            again
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&fork);
     }
-}
 
-fn output(command: &mut Command) -> io::Result<String> {
-    let output = command.stderr(Stdio::piped()).output()?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-    } else {
-        Err(io::Error::other(
-            String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-        ))
+    #[test]
+    fn rejects_paths_that_escape_or_follow_a_symlink() {
+        let dir = bare("paths");
+        for path in ["", "..", ".git/config", "a/../../b", "foo/.GIT/x"] {
+            let error = commit_file(&dir, "main", "main", Path::new(path), b"x", "no").unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput, "{path}: {error}");
+        }
+        let repo = open(&dir).unwrap();
+        let blob = repo.write_blob(b"target").unwrap().detach();
+        let mut editor = repo.empty_tree().edit().unwrap();
+        editor.upsert("link", EntryKind::Link, blob).unwrap();
+        let tree = editor.write().unwrap().detach();
+        let author = signature(&FIXTURE_IDENTITY).unwrap();
+        let mut author_time = gix::date::parse::TimeBuf::default();
+        let mut committer_time = gix::date::parse::TimeBuf::default();
+        repo.commit_as(
+            author.to_ref(&mut committer_time),
+            author.to_ref(&mut author_time),
+            "refs/heads/main",
+            "link\n",
+            tree,
+            Vec::<gix::ObjectId>::new(),
+        )
+        .unwrap();
+        let error =
+            commit_file(&dir, "main", "main", Path::new("link/file"), b"x", "no").unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("symlink"), "{error}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

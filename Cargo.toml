@@ -29,7 +29,7 @@ base64 = "0.22"
 bytes = "1"
 clap = { version = "4", features = ["derive"] }
 headers = "0.4"
-gix = { version = "0.87", default-features = false, features = ["sha1", "revision", "attributes", "blob-diff"] }
+gix = { version = "0.87", default-features = false, features = ["sha1", "revision", "attributes", "blob-diff", "merge"] }
 hmac = "0.12"
 http = "1"
 http-body-util = "0.1"

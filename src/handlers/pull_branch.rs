@@ -7,7 +7,6 @@
     reason = "untyped JSON; remove when this module is typed"
 )]
 
-use std::process::Command;
 use std::sync::Mutex;
 
 use serde_json::{Map, Value, json};
@@ -44,20 +43,75 @@ impl Handler for ops::PullsCheckIfMerged {
     }
 }
 
-/// Runs `git` against `git_dir` with the user's and system's configuration ignored.
-fn run(git_dir: &std::path::Path, args: &[&str]) -> std::io::Result<std::process::Output> {
-    Command::new("git")
-        .arg("--git-dir")
-        .arg(git_dir)
-        .args(args)
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_AUTHOR_NAME", super::BOT.name)
-        .env("GIT_AUTHOR_EMAIL", super::BOT.email)
-        .env("GIT_COMMITTER_NAME", super::BOT.name)
-        .env("GIT_COMMITTER_EMAIL", super::BOT.email)
-        .stdin(std::process::Stdio::null())
-        .output()
+/// Merges `base` into `head` and returns the merge commit sha.
+///
+/// A content or tree conflict answers 422, matching `git merge-tree --write-tree` failing.
+fn merge_into_head(
+    git_dir: &std::path::Path,
+    head: &str,
+    base: &str,
+    head_ref: &str,
+    base_ref: &str,
+) -> Result<String, ApiResponse> {
+    use gix::bstr::ByteSlice;
+    let repo = super::git_store::open_repo(git_dir)?;
+    let head_id = gix::ObjectId::from_hex(head.as_bytes()).map_err(ApiResponse::internal)?;
+    let base_id = gix::ObjectId::from_hex(base.as_bytes()).map_err(ApiResponse::internal)?;
+    let labels = gix::merge::blob::builtin_driver::text::Labels {
+        ancestor: Some("merge-base".as_bytes().as_bstr()),
+        current: Some(head_ref.as_bytes().as_bstr()),
+        other: Some(base_ref.as_bytes().as_bstr()),
+    };
+    let options = repo
+        .tree_merge_options()
+        .map_err(ApiResponse::internal)?
+        .into();
+    let mut outcome = repo
+        .merge_commits(head_id, base_id, labels, options)
+        .map_err(|_| ApiResponse::unprocessable("merge conflict between base and head"))?;
+    if outcome.tree_merge.failed_on_first_unresolved_conflict
+        || outcome
+            .tree_merge
+            .has_unresolved_conflicts(gix::merge::tree::TreatAsUnresolved::default())
+    {
+        return Err(ApiResponse::unprocessable(
+            "merge conflict between base and head",
+        ));
+    }
+    let tree = outcome
+        .tree_merge
+        .tree
+        .write()
+        .map_err(ApiResponse::internal)?
+        .detach();
+    let signature = gix::actor::Signature {
+        name: super::BOT.name.into(),
+        email: super::BOT.email.into(),
+        time: gix::date::Time::now_local_or_utc(),
+    };
+    let commit = gix::objs::Commit {
+        tree,
+        parents: vec![head_id, base_id].into(),
+        author: signature.clone(),
+        committer: signature,
+        encoding: None,
+        message: format!("Merge branch '{base_ref}' into {head_ref}\n").into(),
+        extra_headers: Vec::new(),
+    };
+    let sha = repo
+        .write_object(&commit)
+        .map_err(ApiResponse::internal)?
+        .detach()
+        .to_string();
+    drop(repo);
+    git::create_ref(
+        git_dir,
+        &format!("refs/heads/{head_ref}"),
+        &sha,
+        &super::BOT,
+    )
+    .map_err(ApiResponse::internal)?;
+    Ok(sha)
 }
 
 impl Handler for ops::PullsUpdateBranch {
@@ -130,43 +184,7 @@ impl Handler for ops::PullsUpdateBranch {
                 "There are no new commits on the base branch.",
             ));
         }
-        let merged = run(&git_dir, &["merge-tree", "--write-tree", &head, &base])
-            .map_err(ApiResponse::internal)?;
-        if !merged.status.success() {
-            return Err(ApiResponse::unprocessable(
-                "merge conflict between base and head",
-            ));
-        }
-        let output = String::from_utf8_lossy(&merged.stdout);
-        let tree = output.lines().next().unwrap_or_default().trim().to_owned();
-        let message = format!("Merge branch '{base_ref}' into {head_ref}");
-        let commit = run(
-            &git_dir,
-            &[
-                "commit-tree",
-                &tree,
-                "-p",
-                &head,
-                "-p",
-                &base,
-                "-m",
-                &message,
-            ],
-        )
-        .map_err(ApiResponse::internal)?;
-        if !commit.status.success() {
-            return Err(ApiResponse::internal(
-                String::from_utf8_lossy(&commit.stderr).trim(),
-            ));
-        }
-        let sha = String::from_utf8_lossy(&commit.stdout).trim().to_owned();
-        git::create_ref(
-            &git_dir,
-            &format!("refs/heads/{head_ref}"),
-            &sha,
-            &super::BOT,
-        )
-        .map_err(ApiResponse::internal)?;
+        let sha = merge_into_head(&git_dir, &head, &base, &head_ref, &base_ref)?;
         let actor = state
             .account(&caller.login)
             .map(|account| crate::render::simple_user(request, account))

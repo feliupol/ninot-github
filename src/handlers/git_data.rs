@@ -928,22 +928,19 @@ impl Handler for ops::GitDeleteRef {
             ));
         }
         let reference = format!("refs/{}", request.param("ref"));
-        let check = std::process::Command::new("git")
-            .args(["--git-dir"])
-            .arg(&located.git_dir)
-            .args(["check-ref-format", &reference])
-            .output()
-            .map_err(ApiResponse::internal)?;
-        if !check.status.success() {
+        let Ok(name) = gix::refs::FullName::try_from(reference.clone()) else {
             return Err(ApiResponse::error(422, "invalid ref"));
-        }
-        let deleted = std::process::Command::new("git")
-            .args(["--git-dir"])
-            .arg(&located.git_dir)
-            .args(["update-ref", "-d", &reference])
-            .output()
-            .map_err(ApiResponse::internal)?;
-        if !deleted.status.success() {
+        };
+        let repo = super::git_store::open_repo(&located.git_dir)?;
+        let deleted = repo.edit_reference(gix::refs::transaction::RefEdit {
+            change: gix::refs::transaction::Change::Delete {
+                expected: gix::refs::transaction::PreviousValue::MustExist,
+                log: gix::refs::transaction::RefLog::AndReference,
+            },
+            name,
+            deref: false,
+        });
+        if deleted.is_err() {
             return Err(ApiResponse::not_found());
         }
         if let Some((short, kind)) = crate::webhooks::events::create::ref_kind(&reference) {
