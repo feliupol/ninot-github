@@ -147,6 +147,11 @@ impl Server {
         })
     }
 
+    /// Returns a handle for an existing user, or `None` when it is absent.
+    fn user(&self, login: &str) -> PyResult<Option<User>> {
+        Ok(self.server()?.user(login).map(|inner| User { inner }))
+    }
+
     /// Adds an organization whose members administer its repositories, and returns a handle.
     fn add_org(&self, login: &str, members: Vec<String>) -> PyResult<Org> {
         let member_refs = members.iter().map(String::as_str).collect::<Vec<_>>();
@@ -162,7 +167,7 @@ impl Server {
 
     /// Creates an empty repository and returns the handle that owns its fixtures.
     #[pyo3(signature = (owner, name, private = false, *, description = None, language = None, default_branch = "main"))]
-    fn create_repository(
+    fn add_repository(
         &self,
         owner: &str,
         name: &str,
@@ -173,7 +178,7 @@ impl Server {
     ) -> PyResult<Repository> {
         let inner = self
             .server()?
-            .create_repository(owner, name, private, description, language, default_branch)
+            .add_repository(owner, name, private, description, language, default_branch)
             .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
         Ok(Repository { inner })
     }
@@ -393,7 +398,7 @@ impl Repository {
 
     /// Seeds the GitHub App installation associated with this repository.
     #[pyo3(signature = (installation_id, secrets_permission = None))]
-    fn create_installation(
+    fn add_installation(
         &self,
         installation_id: u64,
         secrets_permission: Option<&str>,
@@ -409,7 +414,7 @@ impl Repository {
             }
         };
         self.inner
-            .create_installation_with_secrets_permission(installation_id, permission)
+            .add_installation_with_secrets_permission(installation_id, permission)
             .map_err(|error| PyRuntimeError::new_err(error.to_string()))
     }
 
@@ -422,7 +427,7 @@ impl Repository {
     }
 
     /// Seeds an existing encrypted secret using this repository's public key.
-    fn create_actions_secret(
+    fn add_actions_secret(
         &self,
         py: Python<'_>,
         seed: &Bound<'_, PyAny>,
@@ -430,7 +435,7 @@ impl Repository {
         let seed: fixtures::ActionsSecretSeed = extract_seed(py, seed)?;
         let inner = self
             .inner
-            .create_actions_secret(seed)
+            .add_actions_secret(seed)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         Ok(ActionsSecret { inner })
     }
@@ -452,22 +457,17 @@ impl Repository {
     }
 
     /// Creates an issue from a sparse typed seed.
-    fn create_issue(
-        &self,
-        py: Python<'_>,
-        number: u64,
-        seed: &Bound<'_, PyAny>,
-    ) -> PyResult<Issue> {
+    fn add_issue(&self, py: Python<'_>, number: u64, seed: &Bound<'_, PyAny>) -> PyResult<Issue> {
         let seed: fixtures::IssueSeed = extract_seed(py, seed)?;
         let inner = self
             .inner
-            .create_issue(number, seed)
+            .add_issue(number, seed)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         Ok(Issue { inner })
     }
 
     /// Creates a pull request from a sparse typed seed.
-    fn create_pull_request(
+    fn add_pull_request(
         &self,
         py: Python<'_>,
         number: u64,
@@ -476,13 +476,13 @@ impl Repository {
         let seed: fixtures::PullRequestSeed = extract_seed(py, seed)?;
         let inner = self
             .inner
-            .create_pull_request(number, seed)
+            .add_pull_request(number, seed)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         Ok(PullRequest { inner })
     }
 
     /// Creates an Actions workflow run and its jobs from typed sparse seeds.
-    fn create_workflow_run(
+    fn add_workflow_run(
         &self,
         py: Python<'_>,
         seed: &Bound<'_, PyAny>,
@@ -492,16 +492,16 @@ impl Repository {
         let jobs: Vec<fixtures::JobSeed> = extract_seed(py, jobs)?;
         let inner = self
             .inner
-            .create_workflow_run(seed, jobs)
+            .add_workflow_run(seed, jobs)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         Ok(WorkflowRun { inner })
     }
 
     /// Creates a Projects v2 board owned by this repository.
-    fn create_project(&self, title: &str) -> PyResult<Project> {
+    fn add_project(&self, title: &str) -> PyResult<Project> {
         let inner = self
             .inner
-            .create_project(title)
+            .add_project(title)
             .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
         Ok(Project { inner })
     }
@@ -516,10 +516,10 @@ impl Issue {
     }
 
     /// Adds a comment to this issue.
-    fn create_comment(&self, py: Python<'_>, seed: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn add_comment(&self, py: Python<'_>, seed: &Bound<'_, PyAny>) -> PyResult<()> {
         let seed = extract_seed::<fixtures::IssueCommentSeed>(py, seed)?;
         self.inner
-            .create_comment(seed)
+            .add_comment(seed)
             .map_err(|error| PyValueError::new_err(error.to_string()))
     }
 }
@@ -533,36 +533,36 @@ impl PullRequest {
     }
 
     /// Adds a review to this pull request.
-    fn create_review(&self, py: Python<'_>, seed: &Bound<'_, PyAny>) -> PyResult<Review> {
+    fn add_review(&self, py: Python<'_>, seed: &Bound<'_, PyAny>) -> PyResult<Review> {
         let seed = extract_seed::<fixtures::ReviewSeed>(py, seed)?;
         let inner = self
             .inner
-            .create_review(seed)
+            .add_review(seed)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         Ok(Review { inner })
     }
 
     /// Adds an issue comment to this pull request.
-    fn create_issue_comment(&self, py: Python<'_>, seed: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn add_issue_comment(&self, py: Python<'_>, seed: &Bound<'_, PyAny>) -> PyResult<()> {
         let seed = extract_seed::<fixtures::IssueCommentSeed>(py, seed)?;
         self.inner
-            .create_issue_comment(seed)
+            .add_issue_comment(seed)
             .map_err(|error| PyValueError::new_err(error.to_string()))
     }
 
     /// Adds a review comment to this pull request.
-    fn create_review_comment(&self, py: Python<'_>, seed: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn add_review_comment(&self, py: Python<'_>, seed: &Bound<'_, PyAny>) -> PyResult<()> {
         let seed = extract_seed::<fixtures::ReviewCommentSeed>(py, seed)?;
         self.inner
-            .create_review_comment(seed)
+            .add_review_comment(seed)
             .map_err(|error| PyValueError::new_err(error.to_string()))
     }
 
     /// Adds a GraphQL review thread and returns its node id.
-    fn create_review_thread(&self, py: Python<'_>, seed: &Bound<'_, PyAny>) -> PyResult<String> {
+    fn add_review_thread(&self, py: Python<'_>, seed: &Bound<'_, PyAny>) -> PyResult<String> {
         let seed = extract_seed::<fixtures::ReviewThreadSeed>(py, seed)?;
         self.inner
-            .create_review_thread(seed)
+            .add_review_thread(seed)
             .map_err(|error| PyValueError::new_err(error.to_string()))
     }
 
@@ -575,10 +575,10 @@ impl PullRequest {
     }
 
     /// Records a timeline event and applies it to the pull request.
-    fn create_timeline_event(&self, py: Python<'_>, seed: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn add_timeline_event(&self, py: Python<'_>, seed: &Bound<'_, PyAny>) -> PyResult<()> {
         let seed = extract_seed::<fixtures::TimelineEventSeed>(py, seed)?;
         self.inner
-            .create_timeline_event(seed)
+            .add_timeline_event(seed)
             .map_err(|error| PyValueError::new_err(error.to_string()))
     }
 
@@ -669,18 +669,18 @@ impl Commit {
     }
 
     /// Adds a check run associated with this commit.
-    fn create_check_run(&self, py: Python<'_>, seed: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn add_check_run(&self, py: Python<'_>, seed: &Bound<'_, PyAny>) -> PyResult<()> {
         let seed = extract_seed::<fixtures::CheckRunSeed>(py, seed)?;
         self.inner
-            .create_check_run(seed)
+            .add_check_run(seed)
             .map_err(|error| PyValueError::new_err(error.to_string()))
     }
 
     /// Adds a commit status associated with this commit.
-    fn create_status(&self, py: Python<'_>, seed: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn add_status(&self, py: Python<'_>, seed: &Bound<'_, PyAny>) -> PyResult<()> {
         let seed = extract_seed::<fixtures::CommitStatusSeed>(py, seed)?;
         self.inner
-            .create_status(seed)
+            .add_status(seed)
             .map_err(|error| PyValueError::new_err(error.to_string()))
     }
 }
@@ -694,20 +694,20 @@ impl Project {
     }
 
     /// Adds a single-select field with its available option names.
-    fn create_field(&self, name: &str, options: Vec<String>) -> PyResult<()> {
+    fn add_field(&self, name: &str, options: Vec<String>) -> PyResult<()> {
         self.inner
-            .create_field(name, options)
+            .add_field(name, options)
             .map_err(|error| PyRuntimeError::new_err(error.to_string()))
     }
 
     /// Adds an issue-backed item, with field names mapped to selected option names.
-    fn create_issue_item(
+    fn add_issue_item(
         &self,
         issue: &Issue,
         field_values: BTreeMap<String, String>,
     ) -> PyResult<String> {
         self.inner
-            .create_issue_item(&issue.inner, field_values)
+            .add_issue_item(&issue.inner, field_values)
             .map_err(|error| PyRuntimeError::new_err(error.to_string()))
     }
 }
@@ -781,6 +781,11 @@ impl Org {
             .register_runner(registration_token, name, &label_refs, os)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         Ok(Runner { inner })
+    }
+
+    /// Returns a handle for a runner registered in this organization, or `None` when it is absent.
+    fn runner(&self, runner_id: u64) -> Option<Runner> {
+        self.inner.runner(runner_id).map(|inner| Runner { inner })
     }
 }
 

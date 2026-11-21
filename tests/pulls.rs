@@ -14,10 +14,10 @@ use serde_json::json;
 fn pull_requests_reviews_and_comments_are_seeded_in_server_state() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let pull = repository
-        .create_pull_request(
+        .add_pull_request(
             9,
             PullRequestSeed {
                 title: SeedField::present("Adopt Ninot".to_owned()),
@@ -41,7 +41,7 @@ fn pull_requests_reviews_and_comments_are_seeded_in_server_state() {
             },
         )
         .expect("pull-request fixture matches the API model");
-    pull.create_review(ReviewSeed {
+    pull.add_review(ReviewSeed {
         state: SeedField::present("CHANGES_REQUESTED".to_owned()),
         user: SeedField::present(Some(UserSeed {
             login: SeedField::present("reviewer".to_owned()),
@@ -52,7 +52,7 @@ fn pull_requests_reviews_and_comments_are_seeded_in_server_state() {
         ..Default::default()
     })
     .expect("review fixture matches the API model");
-    pull.create_issue_comment(IssueCommentSeed {
+    pull.add_issue_comment(IssueCommentSeed {
         body: SeedField::present("Please update this.".to_owned()),
         user: SeedField::present(Some(UserSeed {
             login: SeedField::present("reviewer".to_owned()),
@@ -63,7 +63,7 @@ fn pull_requests_reviews_and_comments_are_seeded_in_server_state() {
         ..Default::default()
     })
     .expect("issue-comment fixture matches the API model");
-    pull.create_review_comment(ReviewCommentSeed {
+    pull.add_review_comment(ReviewCommentSeed {
         path: SeedField::present("src/main.rs".to_owned()),
         line: SeedField::present(Some(7)),
         body: SeedField::present("This line needs a guard.".to_owned()),
@@ -112,10 +112,10 @@ fn pull_requests_reviews_and_comments_are_seeded_in_server_state() {
 fn seeded_label_and_review_comment_urls_follow_github_shapes() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let pull = repository
-        .create_pull_request(
+        .add_pull_request(
             9,
             PullRequestSeed {
                 labels: SeedField::present(vec![LabelSeed {
@@ -127,7 +127,7 @@ fn seeded_label_and_review_comment_urls_follow_github_shapes() {
             },
         )
         .unwrap();
-    pull.create_review_comment(ReviewCommentSeed {
+    pull.add_review_comment(ReviewCommentSeed {
         body: SeedField::present("Guard this.".to_owned()),
         ..Default::default()
     })
@@ -154,10 +154,10 @@ fn seeded_label_and_review_comment_urls_follow_github_shapes() {
 fn issue_comments_on_a_pull_request_link_to_the_pull_request() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     repository
-        .create_pull_request(9, PullRequestSeed::default())
+        .add_pull_request(9, PullRequestSeed::default())
         .unwrap();
     let api = common::Api::admin(&server);
 
@@ -177,10 +177,10 @@ fn issue_comments_on_a_pull_request_link_to_the_pull_request() {
 fn review_decisions_are_graphql_enum_values() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let pull = repository
-        .create_pull_request(9, PullRequestSeed::default())
+        .add_pull_request(9, PullRequestSeed::default())
         .unwrap();
     pull.set_review_decision(Some("APPROVED".to_owned()))
         .unwrap();
@@ -201,7 +201,7 @@ fn sync_routes_read_git_state_and_mutate_the_same_pull_request_world() {
         .add_user("alice")
         .set_name(Some("Alice Example".to_owned()));
     let repository = server
-        .create_repository(
+        .add_repository(
             "alice",
             "project",
             false,
@@ -287,11 +287,11 @@ fn sync_routes_read_git_state_and_mutate_the_same_pull_request_world() {
 fn workflow_runs_jobs_and_commit_checks_share_repository_state() {
     let server = Server::start().unwrap();
     let repo_handle = server
-        .create_repository("admin", "ci", false, None, None, "main")
+        .add_repository("admin", "ci", false, None, None, "main")
         .unwrap();
     let api = common::Api::admin(&server);
     let run = repo_handle
-        .create_workflow_run(
+        .add_workflow_run(
             WorkflowRunSeed {
                 id: SeedField::present(42),
                 head_branch: SeedField::present(Some("main".to_owned())),
@@ -313,7 +313,7 @@ fn workflow_runs_jobs_and_commit_checks_share_repository_state() {
         .expect("workflow-run and job fixtures match the API models");
     let commit = repo_handle.commit("abc").expect("server is still running");
     commit
-        .create_check_run(CheckRunSeed {
+        .add_check_run(CheckRunSeed {
             id: SeedField::present(100),
             name: SeedField::present("tests".to_owned()),
             status: SeedField::present("completed".to_owned()),
@@ -328,7 +328,7 @@ fn workflow_runs_jobs_and_commit_checks_share_repository_state() {
         })
         .expect("check-run fixture matches the API model");
     commit
-        .create_status(CommitStatusSeed {
+        .add_status(CommitStatusSeed {
             id: SeedField::present(1),
             state: SeedField::present("success".to_owned()),
             context: SeedField::present("ci/build".to_owned()),
@@ -359,11 +359,11 @@ fn workflow_runs_jobs_and_commit_checks_share_repository_state() {
 fn workflow_runs_render_the_current_repository() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "ci", false, None, None, "main")
+        .add_repository("admin", "ci", false, None, None, "main")
         .unwrap();
     let api = common::Api::admin(&server);
     repository
-        .create_workflow_run(
+        .add_workflow_run(
             WorkflowRunSeed {
                 id: SeedField::present(42),
                 ..Default::default()
@@ -400,7 +400,7 @@ fn workflow_runs_render_the_current_repository() {
 fn issue_creation_persists_labels_and_comments_for_later_reads() {
     let server = Server::start().unwrap();
     server
-        .create_repository("admin", "suggestions", false, None, None, "main")
+        .add_repository("admin", "suggestions", false, None, None, "main")
         .unwrap();
     let api = common::Api::admin(&server);
     server.start_profile();
@@ -429,7 +429,7 @@ fn fork_comparison_and_pull_creation_resolve_owner_branch_heads() {
     server.add_user("alice");
     let alice_token = server.add_user("alice").add_token(&["repo", "public_repo"]);
     let upstream = server
-        .create_repository("upstream", "project", false, None, None, "main")
+        .add_repository("upstream", "project", false, None, None, "main")
         .unwrap();
     let base = upstream
         .commit_file("main", std::path::Path::new("README.md"), b"base\n", "base")
@@ -447,7 +447,7 @@ fn fork_comparison_and_pull_creation_resolve_owner_branch_heads() {
         .sha()
         .to_owned();
     let fork = server
-        .create_repository("alice", "project-fork", false, None, None, "main")
+        .add_repository("alice", "project-fork", false, None, None, "main")
         .unwrap();
     fork.fork_from(&upstream).unwrap();
     let api = common::Api::new(&server, Some(&alice_token));
@@ -480,7 +480,7 @@ fn fixture_commits_are_reproducible_across_server_instances() {
         let server = Server::start().unwrap();
         server.add_user("alice");
         let repository = server
-            .create_repository("alice", "project", false, None, None, "main")
+            .add_repository("alice", "project", false, None, None, "main")
             .unwrap();
         repository
             .commit_file(
@@ -524,13 +524,13 @@ fn combined_commit_status_uses_latest_status_per_context() {
     let server = Server::start().unwrap();
     server.add_user("alice");
     let repository = server
-        .create_repository("alice", "status", false, None, None, "main")
+        .add_repository("alice", "status", false, None, None, "main")
         .unwrap();
     let api = common::Api::admin(&server);
     let sha = "0123456789012345678901234567890123456789";
     let commit = repository.commit(sha).expect("server is still running");
     commit
-        .create_status(CommitStatusSeed {
+        .add_status(CommitStatusSeed {
             id: SeedField::present(1),
             state: SeedField::present("failure".to_owned()),
             context: SeedField::present("ci/build".to_owned()),
@@ -542,7 +542,7 @@ fn combined_commit_status_uses_latest_status_per_context() {
         })
         .expect("commit-status fixture matches the API model");
     commit
-        .create_status(CommitStatusSeed {
+        .add_status(CommitStatusSeed {
             id: SeedField::present(2),
             state: SeedField::present("success".to_owned()),
             context: SeedField::present("ci/build".to_owned()),
@@ -554,7 +554,7 @@ fn combined_commit_status_uses_latest_status_per_context() {
         })
         .expect("commit-status fixture matches the API model");
     commit
-        .create_status(CommitStatusSeed {
+        .add_status(CommitStatusSeed {
             id: SeedField::present(3),
             state: SeedField::present("pending".to_owned()),
             context: SeedField::present("ci/lint".to_owned()),
@@ -578,7 +578,7 @@ fn combined_commit_status_uses_latest_status_per_context() {
 fn combined_status_of_a_commit_without_statuses_is_pending() {
     let server = Server::start().unwrap();
     server
-        .create_repository("admin", "status", false, None, None, "main")
+        .add_repository("admin", "status", false, None, None, "main")
         .unwrap();
     let api = common::Api::admin(&server);
     let sha = "0123456789012345678901234567890123456789";
@@ -594,22 +594,22 @@ fn combined_status_of_a_commit_without_statuses_is_pending() {
 fn seeded_status_states_and_timestamps_are_checked_when_seeded() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "status", false, None, None, "main")
+        .add_repository("admin", "status", false, None, None, "main")
         .unwrap();
     let api = common::Api::admin(&server);
     let sha = "0123456789012345678901234567890123456789";
     let commit = repository.commit(sha).unwrap();
 
-    let bad_state = commit.create_status(CommitStatusSeed {
+    let bad_state = commit.add_status(CommitStatusSeed {
         state: SeedField::present("SUCCESS".to_owned()),
         ..Default::default()
     });
-    let bad_time = commit.create_status(CommitStatusSeed {
+    let bad_time = commit.add_status(CommitStatusSeed {
         created_at: SeedField::present("yesterday".to_owned()),
         ..Default::default()
     });
     commit
-        .create_status(CommitStatusSeed {
+        .add_status(CommitStatusSeed {
             created_at: SeedField::present("2026-01-02T03:04:05+01:00".to_owned()),
             ..Default::default()
         })
@@ -637,7 +637,7 @@ fn pull_request_updates_edit_metadata_and_close_then_reopen() {
 
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     for branch in ["main", "release", "feature"] {
         repository
@@ -698,7 +698,7 @@ fn merged_pull_requests_cannot_be_reopened() {
 
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     for branch in ["main", "feature"] {
         repository
@@ -734,7 +734,7 @@ fn requesting_reviewers_answers_with_the_pull_request() {
     let server = Server::start().unwrap();
     server.add_user("alice");
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     for branch in ["main", "feature"] {
         repository
@@ -792,7 +792,7 @@ fn review_requested_search_matches_requests_through_teams() {
     let org = server.add_org("org", &["me", "alice"]);
     org.add_team("reviewers", &["me"]).unwrap();
     let repository = server
-        .create_repository("org", "project", false, None, None, "main")
+        .add_repository("org", "project", false, None, None, "main")
         .unwrap();
     let user = |login: &str| UserSeed {
         login: SeedField::present(login.to_owned()),
@@ -813,10 +813,10 @@ fn review_requested_search_matches_requests_through_teams() {
         ..Default::default()
     };
     for (number, seed) in [(1, team), (2, direct), (3, other)] {
-        repository.create_pull_request(number, seed).unwrap();
+        repository.add_pull_request(number, seed).unwrap();
     }
     repository
-        .create_issue(
+        .add_issue(
             4,
             IssueSeed {
                 title: SeedField::present("Not a pull request".to_owned()),
@@ -864,10 +864,10 @@ fn requesting_team_reviewers_resolves_the_organization_team() {
     let org = server.add_org("org", &["admin"]);
     org.add_team("reviewers", &["admin"]).unwrap();
     let repository = server
-        .create_repository("org", "project", false, None, None, "main")
+        .add_repository("org", "project", false, None, None, "main")
         .unwrap();
     repository
-        .create_pull_request(4, PullRequestSeed::default())
+        .add_pull_request(4, PullRequestSeed::default())
         .unwrap();
     let api = common::Api::admin(&server);
 
@@ -901,10 +901,10 @@ fn teams_belong_to_organizations() {
 fn labels_added_to_issues_and_pull_requests_are_listed_on_them() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     repository
-        .create_pull_request(2, PullRequestSeed::default())
+        .add_pull_request(2, PullRequestSeed::default())
         .unwrap();
     let api = common::Api::admin(&server);
     let issue = api.post("/repos/admin/project/issues", json!({ "title": "Bug" }));
@@ -931,9 +931,9 @@ fn repeated_repo_qualifiers_search_any_of_the_repositories() {
     let server = Server::start().unwrap();
     for (number, name) in [(1, "api"), (2, "web"), (3, "docs")] {
         server
-            .create_repository("admin", name, false, None, None, "main")
+            .add_repository("admin", name, false, None, None, "main")
             .unwrap()
-            .create_pull_request(number, PullRequestSeed::default())
+            .add_pull_request(number, PullRequestSeed::default())
             .unwrap();
     }
     let api = common::Api::admin(&server);
@@ -959,7 +959,7 @@ fn repeated_repo_qualifiers_search_any_of_the_repositories() {
 
 fn feature_pull(server: &Server) -> common::Api<'_> {
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     repository
         .commit_file("main", std::path::Path::new("base.txt"), b"base\n", "Base")

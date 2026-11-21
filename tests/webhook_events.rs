@@ -58,7 +58,7 @@ fn owned_action(deliveries: &[Delivery], event: &str, name: &str) -> Value {
 
 fn branches(server: &Server) -> ninot_github::Repository {
     let repository = server
-        .create_repository("admin", "tool", false, None, None, "main")
+        .add_repository("admin", "tool", false, None, None, "main")
         .unwrap();
     for branch in ["main", "feature"] {
         repository
@@ -182,15 +182,15 @@ fn pull_request_review_submitted_is_delivered() {
 fn pull_request_review_comment_created_is_delivered() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "tool", false, None, None, "main")
+        .add_repository("admin", "tool", false, None, None, "main")
         .unwrap();
     let pull = repository
-        .create_pull_request(1, ninot_github::fixtures::PullRequestSeed::default())
+        .add_pull_request(1, ninot_github::fixtures::PullRequestSeed::default())
         .unwrap();
     let admin = Api::admin(&server);
     let receiver = Receiver::start(200);
     subscribe(&admin, &receiver, &["pull_request_review_comment"]);
-    pull.create_review_comment(ninot_github::fixtures::ReviewCommentSeed::default())
+    pull.add_review_comment(ninot_github::fixtures::ReviewCommentSeed::default())
         .unwrap();
     let deliveries = finished(&server, 2);
     assert_eq!(deliveries[1].event, "pull_request_review_comment");
@@ -202,7 +202,7 @@ fn pull_request_review_comment_created_is_delivered() {
 fn issues_opened_labeled_and_issue_comment_are_delivered() {
     let server = Server::start().unwrap();
     server
-        .create_repository("admin", "tool", false, None, None, "main")
+        .add_repository("admin", "tool", false, None, None, "main")
         .unwrap();
     let admin = Api::admin(&server);
     let receiver = Receiver::start(200);
@@ -258,7 +258,7 @@ fn issues_opened_labeled_and_issue_comment_are_delivered() {
 fn check_run_and_check_suite_are_delivered_from_the_commit_fixture() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "tool", false, None, None, "main")
+        .add_repository("admin", "tool", false, None, None, "main")
         .unwrap();
     let commit = repository
         .commit_file("main", Path::new("file.txt"), b"one\n", "Add file")
@@ -267,10 +267,10 @@ fn check_run_and_check_suite_are_delivered_from_the_commit_fixture() {
     let receiver = Receiver::start(200);
     subscribe(&admin, &receiver, &["check_run", "check_suite"]);
     commit
-        .create_check_run(ninot_github::fixtures::CheckRunSeed::default())
+        .add_check_run(ninot_github::fixtures::CheckRunSeed::default())
         .unwrap();
     commit
-        .create_check_run(ninot_github::fixtures::CheckRunSeed::default())
+        .add_check_run(ninot_github::fixtures::CheckRunSeed::default())
         .unwrap();
     let deliveries = finished(&server, 4);
     let suites = deliveries
@@ -297,13 +297,13 @@ fn check_run_and_check_suite_are_delivered_from_the_commit_fixture() {
 fn workflow_run_and_workflow_job_follow_the_run() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "tool", false, None, None, "main")
+        .add_repository("admin", "tool", false, None, None, "main")
         .unwrap();
     let admin = Api::admin(&server);
     let receiver = Receiver::start(200);
     subscribe(&admin, &receiver, &["workflow_run", "workflow_job"]);
     let run = repository
-        .create_workflow_run(
+        .add_workflow_run(
             ninot_github::fixtures::WorkflowRunSeed::default(),
             vec![ninot_github::fixtures::JobSeed::default()],
         )
@@ -449,7 +449,7 @@ fn create_and_delete_are_delivered_for_branches_and_tags() {
 fn status_is_delivered_from_the_commit_fixture() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "tool", false, None, None, "main")
+        .add_repository("admin", "tool", false, None, None, "main")
         .unwrap();
     let commit = repository
         .commit_file("main", Path::new("file.txt"), b"one\n", "Add file")
@@ -458,7 +458,7 @@ fn status_is_delivered_from_the_commit_fixture() {
     let receiver = Receiver::start(200);
     subscribe(&admin, &receiver, &["status"]);
     commit
-        .create_status(ninot_github::fixtures::CommitStatusSeed::default())
+        .add_status(ninot_github::fixtures::CommitStatusSeed::default())
         .unwrap();
     let deliveries = finished(&server, 2);
     assert_eq!(deliveries[1].event, "status");

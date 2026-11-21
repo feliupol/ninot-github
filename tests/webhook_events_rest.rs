@@ -76,7 +76,7 @@ fn app_token(server: &Server, installation: u64) -> String {
 fn issues_update_fires_closed_reopened_edited_assigned_labeled_and_locked() {
     let server = Server::start().unwrap();
     server
-        .create_repository("admin", "tool", false, None, None, "main")
+        .add_repository("admin", "tool", false, None, None, "main")
         .unwrap();
     let admin = Api::admin(&server);
     let receiver = Receiver::start(200);
@@ -177,7 +177,7 @@ fn issues_update_fires_closed_reopened_edited_assigned_labeled_and_locked() {
 fn issues_label_and_assignee_operations_fire() {
     let server = Server::start().unwrap();
     server
-        .create_repository("admin", "tool", false, None, None, "main")
+        .add_repository("admin", "tool", false, None, None, "main")
         .unwrap();
     let admin = Api::admin(&server);
     let receiver = Receiver::start(200);
@@ -252,7 +252,7 @@ fn issues_label_and_assignee_operations_fire() {
 fn issue_comment_edited_and_deleted_are_delivered() {
     let server = Server::start().unwrap();
     server
-        .create_repository("admin", "tool", false, None, None, "main")
+        .add_repository("admin", "tool", false, None, None, "main")
         .unwrap();
     let admin = Api::admin(&server);
     let receiver = Receiver::start(200);
@@ -286,9 +286,9 @@ fn issue_comment_edited_and_deleted_are_delivered() {
 fn checks_create_update_suite_and_rerequest_fire() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "tool", false, None, None, "main")
+        .add_repository("admin", "tool", false, None, None, "main")
         .unwrap();
-    repository.create_installation(7).unwrap();
+    repository.add_installation(7).unwrap();
     let token = app_token(&server, 7);
     let commit = repository
         .commit_file("main", Path::new("file.txt"), b"one\n", "Add file")
@@ -361,7 +361,7 @@ fn checks_create_update_suite_and_rerequest_fire() {
 fn git_create_tag_and_update_ref_fire_create_and_push() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "tool", false, None, None, "main")
+        .add_repository("admin", "tool", false, None, None, "main")
         .unwrap();
     let first = repository
         .commit_file("main", Path::new("file.txt"), b"one\n", "one")

@@ -493,7 +493,7 @@ pub struct IssueSeed {
     #[serde(default, skip_serializing_if = "SeedField::is_missing")]
     pub labels: SeedField<Vec<LabelSeed>>,
     /// Number of issue comments. Only `0` is accepted: the count is derived from the comments
-    /// seeded with `Issue::create_comment`.
+    /// seeded with `Issue::add_comment`.
     #[serde(default, skip_serializing_if = "SeedField::is_missing")]
     pub comments: SeedField<i64>,
     /// Whether the issue is locked.
@@ -1027,7 +1027,7 @@ pub(crate) fn seeded_issue(
     {
         return Err(invalid_seed(
             "an issue's comment count is derived from its comments; seed them with \
-             Issue::create_comment",
+             Issue::add_comment",
         ));
     }
     if let SeedField::Present(labels) = seed.labels {

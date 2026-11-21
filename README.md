@@ -214,20 +214,20 @@ GitHub CLI leaf commands: 79 / 204 (38.7%).
 
 GraphQL resolvers: 75 / 5577 schema fields (1.3%). The published schema is served. A field without a resolver reads the same-named key of its parent object and returns the error `Not implemented by ninot-github: Type.field` when that key is absent.
 
-Python bindings: 68 / 80 public methods.
+Python bindings: 70 / 80 public methods.
 
 | Type | Exposed | Total | Missing |
 | --- | ---: | ---: | --- |
 | ActionsSecret | 3 | 3 | none |
 | Commit | 3 | 3 | none |
 | Issue | 2 | 2 | none |
-| Org | 4 | 4 | none |
+| Org | 5 | 5 | none |
 | Project | 3 | 3 | none |
 | PullRequest | 8 | 8 | none |
-| Repository | 16 | 22 | `commit_file_by`, `create_actions_cache`, `create_app_installation`, `create_artifact`, `create_installation_with_secrets_permission`, `queue_script_job` |
+| Repository | 16 | 22 | `add_actions_cache`, `add_app_installation`, `add_artifact`, `add_installation_with_secrets_permission`, `commit_file_by`, `queue_script_job` |
 | Review | 2 | 2 | none |
 | Runner | 2 | 2 | none |
-| Server | 18 | 24 | `deliveries`, `hits`, `runner`, `user`, `wait`, `wait_for_deliveries` |
+| Server | 19 | 23 | `deliveries`, `hits`, `wait`, `wait_for_deliveries` |
 | Team | 2 | 2 | none |
 | User | 3 | 3 | none |
 | WorkflowRun | 2 | 2 | none |

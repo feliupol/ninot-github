@@ -27,9 +27,9 @@ fn subjects(server: &Server, admin: &Api<'_>) -> Vec<String> {
     let pull = server
         .repository("admin", "tool")
         .unwrap()
-        .create_pull_request(2, PullRequestSeed::default())
+        .add_pull_request(2, PullRequestSeed::default())
         .unwrap();
-    pull.create_review_comment(ReviewCommentSeed::default())
+    pull.add_review_comment(ReviewCommentSeed::default())
         .unwrap();
     let review_comments = admin.get("/repos/admin/tool/pulls/comments");
     let release = admin.post("/repos/admin/tool/releases", json!({ "tag_name": "v1" }));

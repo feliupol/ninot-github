@@ -17,7 +17,7 @@ fn setup() -> (Server, String) {
     let alice = server.add_user("alice");
     server.add_org("acme", &["alice"]);
     server
-        .create_repository("acme", "tool", true, None, None, "main")
+        .add_repository("acme", "tool", true, None, None, "main")
         .unwrap();
     let token = alice.add_token(&["repo"]);
     (server, token)
@@ -286,7 +286,7 @@ fn free_plan_refuses_rulesets_and_reviewers_on_private_repositories() {
         .set_plan(Some(Plan::Free))
         .unwrap();
     server
-        .create_repository("acme", "open", false, None, None, "main")
+        .add_repository("acme", "open", false, None, None, "main")
         .unwrap();
     let api = Api::new(&server, Some(&token));
     assert_eq!(api.get("/orgs/acme").body["plan"]["name"], "free");

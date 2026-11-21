@@ -104,9 +104,9 @@ fn installations_and_outside_collaborators_are_for_owners() {
     let alice_api = Api::new(&server, Some(&alice));
     let bob = Api::new(&server, Some(&bob));
     server
-        .create_repository("acme", "app", true, None, None, "main")
+        .add_repository("acme", "app", true, None, None, "main")
         .unwrap()
-        .create_app_installation(77, 5)
+        .add_app_installation(77, 5)
         .unwrap();
 
     let installs = alice_api.get("/orgs/acme/installations");

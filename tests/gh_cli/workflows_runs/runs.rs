@@ -30,7 +30,7 @@ struct RunSpec {
 }
 
 fn seed(repo: &Repository, spec: RunSpec) -> ninot_github::server::WorkflowRun {
-    repo.create_workflow_run(
+    repo.add_workflow_run(
         WorkflowRunSeed {
             id: SeedField::present(spec.id),
             workflow_id: SeedField::present(spec.workflow_id),
@@ -52,7 +52,7 @@ fn run_filters_logs_watch_cancel_rerun_download_and_delete() {
     let server = tls_server();
     let config = TempDir::new();
     let repo = server
-        .create_repository("admin", "tool", false, None, None, "main")
+        .add_repository("admin", "tool", false, None, None, "main")
         .unwrap();
     let ci = ".github/workflows/ci.yml";
     let nightly = ".github/workflows/nightly.yml";
@@ -321,10 +321,8 @@ fn run_filters_logs_watch_cancel_rerun_download_and_delete() {
         "queued"
     );
 
-    let artifact = repo
-        .create_artifact(42, "report", b"artifact-bytes")
-        .unwrap();
-    let extra = repo.create_artifact(42, "extra", b"extra-bytes").unwrap();
+    let artifact = repo.add_artifact(42, "report", b"artifact-bytes").unwrap();
+    let extra = repo.add_artifact(42, "extra", b"extra-bytes").unwrap();
     assert_eq!(
         api(
             &server,
@@ -414,7 +412,7 @@ fn run_cancel_is_not_found_or_forbidden() {
     let server = tls_server();
     let config = TempDir::new();
     let repo = server
-        .create_repository("admin", "tool", false, None, None, "main")
+        .add_repository("admin", "tool", false, None, None, "main")
         .unwrap();
     seed(
         &repo,

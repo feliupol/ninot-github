@@ -9,9 +9,9 @@ use crate::{gh, gh_json, tls_server};
 /// Creates `admin/tool` with the completed run 42 of `CI` and its job 91.
 fn repo_with_run(server: &Server) {
     let repo = server
-        .create_repository("admin", "tool", false, None, None, "main")
+        .add_repository("admin", "tool", false, None, None, "main")
         .unwrap();
-    repo.create_workflow_run(
+    repo.add_workflow_run(
         WorkflowRunSeed {
             id: SeedField::present(42),
             name: SeedField::present(Some("CI".to_owned())),

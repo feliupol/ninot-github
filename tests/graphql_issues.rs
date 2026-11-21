@@ -17,7 +17,7 @@ fn query(api: &Api, query: &str, variables: Value) -> Value {
 
 fn repo(server: &Server) -> ninot_github::server::Repository {
     server
-        .create_repository("admin", "tool", false, None, None, "main")
+        .add_repository("admin", "tool", false, None, None, "main")
         .unwrap()
 }
 

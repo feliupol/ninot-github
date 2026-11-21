@@ -9,10 +9,10 @@ fn app_jwt_discovers_installation_and_mints_a_repository_scoped_token() {
     let server = Server::start().unwrap();
     server.add_user("alice");
     let repository = server
-        .create_repository("alice", "private", true, None, None, "main")
+        .add_repository("alice", "private", true, None, None, "main")
         .unwrap();
     repository
-        .create_installation(73)
+        .add_installation(73)
         .expect("server is still running");
 
     let app_jwt = "eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiIxIn0.signature";
@@ -49,7 +49,7 @@ fn app_jwt_discovers_installation_and_mints_a_repository_scoped_token() {
     assert_eq!(repository_response.status(), 200);
 
     repository
-        .create_issue(
+        .add_issue(
             1,
             ninot_github::fixtures::IssueSeed {
                 title: ninot_github::fixtures::SeedField::present("Issue".to_owned()),
@@ -111,9 +111,9 @@ fn installation_tokens_show_and_grant_the_installation_permissions() {
     let server = Server::start().unwrap();
     server.add_user("alice");
     let repository = server
-        .create_repository("alice", "tool", true, None, None, "main")
+        .add_repository("alice", "tool", true, None, None, "main")
         .unwrap();
-    repository.create_installation(5).unwrap();
+    repository.add_installation(5).unwrap();
     let response: serde_json::Value = Client::new()
         .post(format!(
             "{}/app/installations/5/access_tokens",
@@ -155,9 +155,9 @@ fn installation_tokens_need_the_permission_the_github_apps_data_lists() {
     let server = Server::start().unwrap();
     server.add_user("alice");
     let repository = server
-        .create_repository("alice", "tool", true, None, None, "main")
+        .add_repository("alice", "tool", true, None, None, "main")
         .unwrap();
-    repository.create_installation(5).unwrap();
+    repository.add_installation(5).unwrap();
     let token = installation_token(&server, 5);
     let integration = json!("Resource not accessible by integration");
 
@@ -199,9 +199,9 @@ fn installation_tokens_reach_org_operations_only_with_org_permissions() {
     server.add_user("alice");
     server.add_org("acme", &["alice"]);
     server
-        .create_repository("acme", "tool", true, None, None, "main")
+        .add_repository("acme", "tool", true, None, None, "main")
         .unwrap()
-        .create_installation(5)
+        .add_installation(5)
         .unwrap();
     let token = installation_token(&server, 5);
     // orgs/list-members needs members, which the installation lacks.
@@ -223,16 +223,16 @@ fn a_secrets_read_grant_reads_but_does_not_write_secrets() {
     let server = Server::start().unwrap();
     server.add_user("alice");
     let repository = server
-        .create_repository("alice", "tool", true, None, None, "main")
+        .add_repository("alice", "tool", true, None, None, "main")
         .unwrap();
     repository
-        .create_installation_with_secrets_permission(
+        .add_installation_with_secrets_permission(
             5,
             Some(ninot_github::fixtures::ActionsSecretsPermission::Read),
         )
         .unwrap();
     repository
-        .create_installation_with_secrets_permission(
+        .add_installation_with_secrets_permission(
             6,
             Some(ninot_github::fixtures::ActionsSecretsPermission::Write),
         )
@@ -240,7 +240,7 @@ fn a_secrets_read_grant_reads_but_does_not_write_secrets() {
     let reader = installation_token(&server, 5);
     let writer = installation_token(&server, 6);
     let none = {
-        repository.create_installation(7).unwrap();
+        repository.add_installation(7).unwrap();
         installation_token(&server, 7)
     };
     let list = "/repos/alice/tool/actions/secrets";
@@ -269,7 +269,7 @@ fn classic_tokens_need_the_repo_scope_for_secrets() {
     let server = Server::start().unwrap();
     let alice = server.add_user("alice");
     server
-        .create_repository("alice", "tool", true, None, None, "main")
+        .add_repository("alice", "tool", true, None, None, "main")
         .unwrap();
     let list = "/repos/alice/tool/actions/secrets";
     let secrets_only = alice.add_token(&["actions:secrets:read"]);
@@ -291,10 +291,10 @@ fn installation_secrets_permission_bounds_and_scopes_its_tokens() {
     let server = Server::start().unwrap();
     server.add_user("alice");
     let repository = server
-        .create_repository("alice", "app", true, None, None, "main")
+        .add_repository("alice", "app", true, None, None, "main")
         .unwrap();
     repository
-        .create_installation_with_secrets_permission(74, Some(ActionsSecretsPermission::Read))
+        .add_installation_with_secrets_permission(74, Some(ActionsSecretsPermission::Read))
         .unwrap();
     repository
         .set_actions_public_key(ActionsPublicKeySeed {

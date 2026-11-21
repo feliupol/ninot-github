@@ -19,7 +19,7 @@ fn pr_fields_paginate_and_agree_with_rest() {
         .unwrap()
         .commit(&head)
         .unwrap()
-        .create_status(CommitStatusSeed {
+        .add_status(CommitStatusSeed {
             state: SeedField::present("success".to_owned()),
             context: SeedField::present("tests".to_owned()),
             ..Default::default()
@@ -30,7 +30,7 @@ fn pr_fields_paginate_and_agree_with_rest() {
         .unwrap()
         .commit(&head)
         .unwrap()
-        .create_check_run(CheckRunSeed {
+        .add_check_run(CheckRunSeed {
             name: SeedField::present("lint".to_owned()),
             status: SeedField::present("completed".to_owned()),
             conclusion: SeedField::present(Some("failure".to_owned())),

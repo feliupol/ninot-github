@@ -79,7 +79,7 @@ fn link(server: &Server, header: &str, rel: &str) -> Option<String> {
 fn seeded_history_reads_back_through_the_timeline_in_order() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let base = commit(
         &repository,
@@ -90,7 +90,7 @@ fn seeded_history_reads_back_through_the_timeline_in_order() {
     );
     let first = commit(&repository, "feature", "a.txt", "1", "2026-01-02T09:00:00Z");
     let pull = repository
-        .create_pull_request(
+        .add_pull_request(
             1,
             PullRequestSeed {
                 draft: SeedField::present(true),
@@ -110,47 +110,47 @@ fn seeded_history_reads_back_through_the_timeline_in_order() {
             },
         )
         .unwrap();
-    pull.create_review(ReviewSeed {
+    pull.add_review(ReviewSeed {
         state: SeedField::present("COMMENTED".to_owned()),
         user: SeedField::present(Some(user("bob"))),
         submitted_at: SeedField::present(Some("2026-01-02T11:00:00Z".to_owned())),
         ..Default::default()
     })
     .unwrap();
-    pull.create_timeline_event(event("ready_for_review", "2026-01-02T12:00:00Z"))
+    pull.add_timeline_event(event("ready_for_review", "2026-01-02T12:00:00Z"))
         .unwrap();
-    pull.create_timeline_event(TimelineEventSeed {
+    pull.add_timeline_event(TimelineEventSeed {
         requested_reviewer: SeedField::present(user("carol")),
         ..event("review_requested", "2026-01-02T12:00:30Z")
     })
     .unwrap();
-    pull.create_issue_comment(IssueCommentSeed {
+    pull.add_issue_comment(IssueCommentSeed {
         body: SeedField::present("Looks close.".to_owned()),
         user: SeedField::present(Some(user("carol"))),
         created_at: SeedField::present("2026-01-02T13:00:00Z".to_owned()),
         ..Default::default()
     })
     .unwrap();
-    pull.create_timeline_event(event("convert_to_draft", "2026-01-02T14:00:00Z"))
+    pull.add_timeline_event(event("convert_to_draft", "2026-01-02T14:00:00Z"))
         .unwrap();
     let rewritten = commit(&repository, "rewrite", "a.txt", "2", "2026-01-02T15:00:00Z");
     pull.push_head(&rewritten, Some("2026-01-02T15:05:00Z"), None)
         .unwrap();
-    pull.create_timeline_event(event("ready_for_review", "2026-01-02T16:00:00Z"))
+    pull.add_timeline_event(event("ready_for_review", "2026-01-02T16:00:00Z"))
         .unwrap();
-    pull.create_review(ReviewSeed {
+    pull.add_review(ReviewSeed {
         state: SeedField::present("APPROVED".to_owned()),
         user: SeedField::present(Some(user("carol"))),
         submitted_at: SeedField::present(Some("2026-01-02T17:00:00Z".to_owned())),
         ..Default::default()
     })
     .unwrap();
-    pull.create_timeline_event(TimelineEventSeed {
+    pull.add_timeline_event(TimelineEventSeed {
         actor: SeedField::present(user("admin")),
         ..event("merged", "2026-01-02T18:00:00Z")
     })
     .unwrap();
-    pull.create_timeline_event(TimelineEventSeed {
+    pull.add_timeline_event(TimelineEventSeed {
         actor: SeedField::present(user("admin")),
         ..event("closed", "2026-01-02T18:00:00Z")
     })
@@ -226,7 +226,7 @@ fn api_actions_append_their_timeline_events() {
     server.add_user("bob");
     let bob = server.add_user("bob").add_token(&["repo"]);
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     commit(
         &repository,
@@ -314,10 +314,10 @@ fn api_actions_append_their_timeline_events() {
 fn merged_and_closed_seeds_write_their_events() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     repository
-        .create_pull_request(
+        .add_pull_request(
             1,
             PullRequestSeed {
                 user: SeedField::present(user("alice")),
@@ -329,7 +329,7 @@ fn merged_and_closed_seeds_write_their_events() {
         )
         .unwrap();
     repository
-        .create_pull_request(
+        .add_pull_request(
             2,
             PullRequestSeed {
                 user: SeedField::present(user("alice")),
@@ -372,7 +372,7 @@ fn merged_and_closed_seeds_write_their_events() {
 fn contradictory_history_seeds_are_refused() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let refused = [
         PullRequestSeed {
@@ -411,7 +411,7 @@ fn contradictory_history_seeds_are_refused() {
         },
     ];
     for (number, seed) in (1..).zip(refused) {
-        let Err(error) = repository.create_pull_request(number, seed) else {
+        let Err(error) = repository.add_pull_request(number, seed) else {
             panic!("seed {number} was accepted");
         };
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput, "{error}");
@@ -419,7 +419,7 @@ fn contradictory_history_seeds_are_refused() {
     }
 
     let pull = repository
-        .create_pull_request(
+        .add_pull_request(
             10,
             PullRequestSeed {
                 created_at: SeedField::present("2026-02-01T00:00:00Z".to_owned()),
@@ -436,13 +436,13 @@ fn contradictory_history_seeds_are_refused() {
         event("labeled", "2026-02-02T00:00:00Z"),
     ] {
         let name = refused.event.clone();
-        let error = pull.create_timeline_event(refused).unwrap_err();
+        let error = pull.add_timeline_event(refused).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput, "{name}");
     }
-    pull.create_timeline_event(event("convert_to_draft", "2026-02-03T00:00:00Z"))
+    pull.add_timeline_event(event("convert_to_draft", "2026-02-03T00:00:00Z"))
         .unwrap();
     let error = pull
-        .create_timeline_event(event("ready_for_review", "2026-02-02T00:00:00Z"))
+        .add_timeline_event(event("ready_for_review", "2026-02-02T00:00:00Z"))
         .unwrap_err();
     assert!(error.to_string().contains("earlier"), "{error}");
 }
@@ -451,10 +451,10 @@ fn contradictory_history_seeds_are_refused() {
 fn long_histories_page_with_links_that_keep_the_query() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let pull = repository
-        .create_pull_request(
+        .add_pull_request(
             1,
             PullRequestSeed {
                 created_at: SeedField::present("2026-03-01T00:00:00Z".to_owned()),
@@ -463,7 +463,7 @@ fn long_histories_page_with_links_that_keep_the_query() {
         )
         .unwrap();
     for minute in 0..130 {
-        pull.create_issue_comment(IssueCommentSeed {
+        pull.add_issue_comment(IssueCommentSeed {
             body: SeedField::present(format!("comment {minute}")),
             created_at: SeedField::present(format!(
                 "2026-03-01T{:02}:{:02}:00Z",
@@ -505,7 +505,7 @@ fn long_histories_page_with_links_that_keep_the_query() {
         (3, "2026-03-03T00:00:00Z", "2026-03-04T00:00:00Z"),
     ] {
         repository
-            .create_pull_request(
+            .add_pull_request(
                 number,
                 PullRequestSeed {
                     created_at: SeedField::present(created.to_owned()),
@@ -548,7 +548,7 @@ fn long_histories_page_with_links_that_keep_the_query() {
 fn workflow_runs_filter_by_head_sha_newest_first() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     for (id, sha, event, created_at) in [
         (1, "a".repeat(40), "pull_request", "2026-04-01T10:00:00Z"),
@@ -557,7 +557,7 @@ fn workflow_runs_filter_by_head_sha_newest_first() {
         (4, "a".repeat(40), "pull_request", "2026-04-01T08:00:00Z"),
     ] {
         repository
-            .create_workflow_run(
+            .add_workflow_run(
                 WorkflowRunSeed {
                     id: SeedField::present(id),
                     head_sha: SeedField::present(sha),
@@ -592,10 +592,10 @@ fn workflow_runs_filter_by_head_sha_newest_first() {
 fn seeded_files_list_and_size_the_pull_request() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     repository
-        .create_pull_request(
+        .add_pull_request(
             1,
             PullRequestSeed {
                 files: SeedField::present(vec![
@@ -637,7 +637,7 @@ fn seeded_files_list_and_size_the_pull_request() {
 fn git_pushes_move_the_head_and_record_force_pushes() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     commit(
         &repository,
@@ -648,7 +648,7 @@ fn git_pushes_move_the_head_and_record_force_pushes() {
     );
     let first = commit(&repository, "feature", "a.txt", "1", "2026-01-02T00:00:00Z");
     repository
-        .create_pull_request(
+        .add_pull_request(
             1,
             PullRequestSeed {
                 head: SeedField::present(PullRequestBranchSeed {
@@ -696,10 +696,10 @@ fn git_pushes_move_the_head_and_record_force_pushes() {
 fn untimed_closed_seeds_keep_their_updated_at() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     repository
-        .create_pull_request(
+        .add_pull_request(
             1,
             PullRequestSeed {
                 state: SeedField::present("closed".to_owned()),
@@ -725,10 +725,10 @@ fn team_review_requests_appear_in_the_timeline() {
     let server = Server::start().unwrap();
     server.add_org("acme", &["admin"]);
     let repository = server
-        .create_repository("acme", "project", false, None, None, "main")
+        .add_repository("acme", "project", false, None, None, "main")
         .unwrap();
     let pull = repository
-        .create_pull_request(
+        .add_pull_request(
             1,
             PullRequestSeed {
                 created_at: SeedField::present("2026-05-01T00:00:00Z".to_owned()),
@@ -736,14 +736,14 @@ fn team_review_requests_appear_in_the_timeline() {
             },
         )
         .unwrap();
-    pull.create_timeline_event(TimelineEventSeed {
+    pull.add_timeline_event(TimelineEventSeed {
         requested_team: SeedField::present(ninot_github::fixtures::TeamSeed {
             slug: "reviewers".to_owned(),
         }),
         ..event("review_requested", "2026-05-01T01:00:00Z")
     })
     .unwrap();
-    pull.create_timeline_event(TimelineEventSeed {
+    pull.add_timeline_event(TimelineEventSeed {
         requested_team: SeedField::present(ninot_github::fixtures::TeamSeed {
             slug: "reviewers".to_owned(),
         }),
@@ -764,14 +764,14 @@ fn team_review_requests_appear_in_the_timeline() {
 fn review_comments_belong_to_the_seeded_review() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let pull = repository
-        .create_pull_request(1, PullRequestSeed::default())
+        .add_pull_request(1, PullRequestSeed::default())
         .unwrap();
-    let review = pull.create_review(ReviewSeed::default()).unwrap();
+    let review = pull.add_review(ReviewSeed::default()).unwrap();
     for _ in 0..2 {
-        pull.create_review_comment(ninot_github::fixtures::ReviewCommentSeed {
+        pull.add_review_comment(ninot_github::fixtures::ReviewCommentSeed {
             pull_request_review_id: SeedField::present(review.id().unwrap()),
             ..Default::default()
         })
@@ -792,10 +792,10 @@ fn review_comments_belong_to_the_seeded_review() {
 fn thread_replies_are_reviews_but_not_timeline_entries() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let pull = repository
-        .create_pull_request(1, PullRequestSeed::default())
+        .add_pull_request(1, PullRequestSeed::default())
         .unwrap();
     let mut review_ids = Vec::new();
     for (login, at) in [
@@ -803,7 +803,7 @@ fn thread_replies_are_reviews_but_not_timeline_entries() {
         ("carol", "2026-01-02T12:00:00Z"),
     ] {
         let review = pull
-            .create_review(ReviewSeed {
+            .add_review(ReviewSeed {
                 state: SeedField::present("COMMENTED".to_owned()),
                 user: SeedField::present(Some(user(login))),
                 submitted_at: SeedField::present(Some(at.to_owned())),
@@ -812,7 +812,7 @@ fn thread_replies_are_reviews_but_not_timeline_entries() {
             .unwrap();
         review_ids.push(review.id().unwrap());
     }
-    pull.create_review_comment(ninot_github::fixtures::ReviewCommentSeed {
+    pull.add_review_comment(ninot_github::fixtures::ReviewCommentSeed {
         pull_request_review_id: SeedField::present(review_ids[0]),
         ..Default::default()
     })
@@ -821,7 +821,7 @@ fn thread_replies_are_reviews_but_not_timeline_entries() {
     let first = api.get("/repos/admin/project/pulls/1/comments").body[0]["id"]
         .as_i64()
         .unwrap();
-    pull.create_review_comment(ninot_github::fixtures::ReviewCommentSeed {
+    pull.add_review_comment(ninot_github::fixtures::ReviewCommentSeed {
         pull_request_review_id: SeedField::present(review_ids[1]),
         in_reply_to_id: SeedField::present(first),
         ..Default::default()
@@ -847,7 +847,7 @@ fn thread_replies_are_reviews_but_not_timeline_entries() {
 fn files_of_an_api_created_pull_request_come_from_git() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     commit(
         &repository,

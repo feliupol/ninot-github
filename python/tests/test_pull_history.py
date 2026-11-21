@@ -33,14 +33,14 @@ def _alice(date: str) -> GitIdentitySeed:
 def test_seeded_draft_history_and_force_push_read_back_in_order() -> None:
     """Draft changes, a force-push, a review and the merge come back in time order."""
     with Server() as server:
-        repository = server.create_repository("admin", "project")
+        repository = server.add_repository("admin", "project")
         base = repository.commit_file(
             "main", "base.txt", b"base", "Base", author=_alice("2026-01-01T00:00:00Z")
         )
         first = repository.commit_file(
             "feature", "a.txt", b"1", "First", author=_alice("2026-01-02T09:00:00Z")
         )
-        pull = repository.create_pull_request(
+        pull = repository.add_pull_request(
             1,
             PullRequestSeed(
                 draft=True,
@@ -51,10 +51,10 @@ def test_seeded_draft_history_and_force_push_read_back_in_order() -> None:
                 files=[PullRequestFileSeed(filename="a.txt", additions=1)],
             ),
         )
-        pull.create_timeline_event(
+        pull.add_timeline_event(
             TimelineEventSeed(event="ready_for_review", created_at="2026-01-02T11:00:00Z")
         )
-        pull.create_timeline_event(
+        pull.add_timeline_event(
             TimelineEventSeed(
                 event="review_requested",
                 created_at="2026-01-02T11:00:00Z",
@@ -65,17 +65,17 @@ def test_seeded_draft_history_and_force_push_read_back_in_order() -> None:
             "rewrite", "a.txt", b"2", "Rewrite", author=_alice("2026-01-02T12:00:00Z")
         )
         pull.push_head(rewritten.sha, pushed_at="2026-01-02T12:01:00Z")
-        pull.create_review(
+        pull.add_review(
             ReviewSeed(
                 state="APPROVED", user=UserSeed(login="bob"), submitted_at="2026-01-02T13:00:00Z"
             )
         )
-        pull.create_timeline_event(
+        pull.add_timeline_event(
             TimelineEventSeed(
                 event="merged", created_at="2026-01-02T14:00:00Z", actor=UserSeed(login="bob")
             )
         )
-        pull.create_timeline_event(
+        pull.add_timeline_event(
             TimelineEventSeed(
                 event="closed", created_at="2026-01-02T14:00:00Z", actor=UserSeed(login="bob")
             )
@@ -116,8 +116,8 @@ def test_seeded_draft_history_and_force_push_read_back_in_order() -> None:
 def test_merged_at_seed_closes_the_pull_request() -> None:
     """A merged_at seed sets merged, closed_at and the merged and closed events."""
     with Server() as server:
-        repository = server.create_repository("admin", "project")
-        repository.create_pull_request(
+        repository = server.add_repository("admin", "project")
+        repository.add_pull_request(
             2,
             PullRequestSeed(created_at="2026-02-01T00:00:00Z", merged_at="2026-02-02T00:00:00Z"),
         )
@@ -137,10 +137,10 @@ def test_merged_at_seed_closes_the_pull_request() -> None:
 def test_out_of_order_timeline_event_is_refused() -> None:
     """Events must not predate the pull request or its latest event."""
     with Server() as server:
-        repository = server.create_repository("admin", "project")
-        pull = repository.create_pull_request(3, PullRequestSeed(created_at="2026-02-01T00:00:00Z"))
+        repository = server.add_repository("admin", "project")
+        pull = repository.add_pull_request(3, PullRequestSeed(created_at="2026-02-01T00:00:00Z"))
         with pytest.raises(ValueError, match="earlier than the pull request"):
-            pull.create_timeline_event(
+            pull.add_timeline_event(
                 TimelineEventSeed(event="convert_to_draft", created_at="2026-01-01T00:00:00Z")
             )
 
@@ -148,10 +148,10 @@ def test_out_of_order_timeline_event_is_refused() -> None:
 def test_timeline_pages_beyond_one_hundred_entries() -> None:
     """The timeline pages at 100 entries with a next link that keeps per_page."""
     with Server() as server:
-        repository = server.create_repository("admin", "project")
-        pull = repository.create_pull_request(4, PullRequestSeed(created_at="2026-03-01T00:00:00Z"))
+        repository = server.add_repository("admin", "project")
+        pull = repository.add_pull_request(4, PullRequestSeed(created_at="2026-03-01T00:00:00Z"))
         for index in range(101):
-            pull.create_issue_comment({
+            pull.add_issue_comment({
                 "body": f"comment {index}",
                 "created_at": f"2026-03-02T00:{index // 60:02}:{index % 60:02}Z",
             })

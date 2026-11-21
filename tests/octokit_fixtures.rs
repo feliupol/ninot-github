@@ -587,7 +587,7 @@ impl<'a> Replay<'a> {
 /// Creates an empty public repository, as `temporary-repository.js` does for most scenarios.
 fn temporary_repository(server: &Server, name: &str) -> Repository {
     server
-        .create_repository(ORG, name, false, None, None, "main")
+        .add_repository(ORG, name, false, None, None, "main")
         .unwrap()
 }
 
@@ -616,7 +616,7 @@ fn issue(title: &str, body: Option<&str>) -> ninot_github::fixtures::IssueSeed {
 /// `octokit-fixture-org/hello-world`, the long-lived repository of the read-only scenarios.
 fn hello_world(server: &Server) -> Repository {
     let repository = server
-        .create_repository(ORG, "hello-world", false, None, None, "master")
+        .add_repository(ORG, "hello-world", false, None, None, "master")
         .unwrap();
     repository
         .commit_file(
@@ -889,7 +889,7 @@ fn lock_issue() {
     let mut replay = Replay::new(&server);
     let repository = temporary_repository(&server, "lock-issue");
     repository
-        .create_issue(1, issue("Issue without a label", None))
+        .add_issue(1, issue("Issue without a label", None))
         .unwrap();
     replay.known_repository(&repository);
     replay.run("lock-issue");
@@ -935,7 +935,7 @@ fn paginate_issues() {
     let repository = temporary_repository(&server, "paginate-issues");
     for number in 1..=13 {
         repository
-            .create_issue(number, issue(&format!("Test issue {number}"), None))
+            .add_issue(number, issue(&format!("Test issue {number}"), None))
             .unwrap();
     }
     replay.known_repository(&repository);
@@ -1011,7 +1011,7 @@ fn search_issues() {
     let mut replay = Replay::new(&server);
     let repository = temporary_repository(&server, "search-issues");
     repository
-        .create_issue(
+        .add_issue(
             1,
             issue(
                 "The doors don’t open",
@@ -1020,7 +1020,7 @@ fn search_issues() {
         )
         .unwrap();
     repository
-        .create_issue(
+        .add_issue(
             2,
             issue(
                 "Sesame seeds split without a pop!",

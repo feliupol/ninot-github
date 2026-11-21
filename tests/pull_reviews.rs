@@ -20,7 +20,7 @@ fn setup() -> (Server, String, String) {
     let bob = server.user("bob").unwrap().add_token(&["repo"]);
     let carol = server.user("carol").unwrap().add_token(&["repo"]);
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let file = |branch: &str, path: &str| {
         repository

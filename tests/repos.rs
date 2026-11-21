@@ -401,7 +401,7 @@ fn repository_search_resolves_user_me_to_the_caller() {
     server.add_user("other");
     for owner in ["octocat", "other"] {
         server
-            .create_repository(owner, "match", false, None, None, "main")
+            .add_repository(owner, "match", false, None, None, "main")
             .unwrap();
     }
     let octocat = Api::new(

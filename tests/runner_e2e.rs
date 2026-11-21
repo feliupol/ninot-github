@@ -178,7 +178,7 @@ impl Runner {
         .unwrap();
         server.add_org(ORG, &["admin"]);
         server
-            .create_repository(ORG, REPO, true, None, None, "main")
+            .add_repository(ORG, REPO, true, None, None, "main")
             .unwrap();
         let dir = TempDir::new();
         let unpacked = Command::new("tar")

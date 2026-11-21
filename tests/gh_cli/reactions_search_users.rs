@@ -144,9 +144,9 @@ fn reactions_through_the_api() {
     let pull = server
         .repository("admin", "tool")
         .unwrap()
-        .create_pull_request(2, PullRequestSeed::default())
+        .add_pull_request(2, PullRequestSeed::default())
         .unwrap();
-    pull.create_review_comment(ReviewCommentSeed::default())
+    pull.add_review_comment(ReviewCommentSeed::default())
         .unwrap();
     let review_comment = api(
         &server,

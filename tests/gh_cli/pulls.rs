@@ -231,7 +231,7 @@ fn pr_checks_lists_statuses_on_the_head() {
         .unwrap()
         .commit(&head)
         .unwrap()
-        .create_status(CommitStatusSeed {
+        .add_status(CommitStatusSeed {
             state: SeedField::present("success".to_owned()),
             context: SeedField::present("tests".to_owned()),
             ..Default::default()

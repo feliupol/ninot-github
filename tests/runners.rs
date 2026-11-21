@@ -246,7 +246,11 @@ fn register_runner_lists_and_goes_offline() {
             .body["status"],
         "offline"
     );
-    assert!(server.runner("acme", 9_999_999).is_none());
+    assert_eq!(
+        acme.runner(runner_id).map(|found| found.id()),
+        Some(runner_id)
+    );
+    assert!(acme.runner(9_999_999).is_none());
     assert!(server.org("nope").is_none());
 
     let deleted = api.delete(&org("acme", &format!("runners/{}", runner_id)));

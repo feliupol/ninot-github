@@ -29,9 +29,9 @@ fn app_token(server: &Server, installation: u64) -> String {
 fn setup() -> (Server, Repository, String) {
     let server = Server::start().unwrap();
     let repo = server
-        .create_repository("admin", "checks", false, None, None, "main")
+        .add_repository("admin", "checks", false, None, None, "main")
         .unwrap();
-    repo.create_installation(7).unwrap();
+    repo.add_installation(7).unwrap();
     let token = app_token(&server, 7);
     (server, repo, token)
 }
@@ -169,7 +169,7 @@ fn checks_create_records_a_run_and_its_suite() {
 #[test]
 fn checks_update_appends_annotations_and_completes() {
     let (server, repo, token) = setup();
-    repo.create_app_installation(8, 2).unwrap();
+    repo.add_app_installation(8, 2).unwrap();
     let other = app_token(&server, 8);
     let api = Api::new(&server, Some(&token));
     let created = create_run(&api, "lint", "abc", json!({}));
@@ -313,9 +313,9 @@ fn checks_list_annotations_paginates() {
         404
     );
     let hidden = server
-        .create_repository("admin", "hidden", true, None, None, "main")
+        .add_repository("admin", "hidden", true, None, None, "main")
         .unwrap();
-    hidden.create_installation(9).unwrap();
+    hidden.add_installation(9).unwrap();
     assert_eq!(
         outsider(&server)
             .get("/repos/admin/hidden/check-runs/1/annotations")
@@ -327,7 +327,7 @@ fn checks_list_annotations_paginates() {
 #[test]
 fn checks_rerequest_run_resets_the_suite_only() {
     let (server, repo, token) = setup();
-    repo.create_app_installation(8, 2).unwrap();
+    repo.add_app_installation(8, 2).unwrap();
     let other = app_token(&server, 8);
     let api = Api::new(&server, Some(&token));
     let created = create_run(
@@ -387,7 +387,7 @@ fn checks_rerequest_run_resets_the_suite_only() {
 
     let seeded = repo.commit("seeded").unwrap();
     seeded
-        .create_check_run(CheckRunSeed {
+        .add_check_run(CheckRunSeed {
             name: SeedField::present("orphan".to_owned()),
             app: SeedField::present(Some(IntegrationSeed {
                 id: SeedField::present(1),
@@ -411,7 +411,7 @@ fn checks_rerequest_run_resets_the_suite_only() {
 #[test]
 fn checks_create_suite_is_idempotent_per_app() {
     let (server, repo, token) = setup();
-    repo.create_app_installation(8, 2).unwrap();
+    repo.add_app_installation(8, 2).unwrap();
     let other = app_token(&server, 8);
     let api = Api::new(&server, Some(&token));
     assert_eq!(
@@ -567,7 +567,7 @@ fn checks_get_suite_reads_rollup() {
     assert_eq!(suite.body["app"]["slug"], "ninot-test");
     assert_eq!(api.get("/repos/admin/checks/check-suites/999").status, 404);
     server
-        .create_repository("admin", "hidden", true, None, None, "main")
+        .add_repository("admin", "hidden", true, None, None, "main")
         .unwrap();
     assert_eq!(
         outsider(&server)
@@ -628,7 +628,7 @@ fn checks_list_for_suite_filters_and_paginates() {
         404
     );
     server
-        .create_repository("admin", "hidden", true, None, None, "main")
+        .add_repository("admin", "hidden", true, None, None, "main")
         .unwrap();
     assert_eq!(
         outsider(&server)
@@ -641,7 +641,7 @@ fn checks_list_for_suite_filters_and_paginates() {
 #[test]
 fn checks_rerequest_suite_resets_status() {
     let (server, repo, token) = setup();
-    repo.create_app_installation(8, 2).unwrap();
+    repo.add_app_installation(8, 2).unwrap();
     let other = app_token(&server, 8);
     let api = Api::new(&server, Some(&token));
     let created = create_run(&api, "tests", "abc", json!({ "conclusion": "success" }));
@@ -680,7 +680,7 @@ fn checks_rerequest_suite_resets_status() {
 #[test]
 fn checks_list_suites_for_ref_filters() {
     let (server, repo, token) = setup();
-    repo.create_app_installation(8, 2).unwrap();
+    repo.add_app_installation(8, 2).unwrap();
     let other = app_token(&server, 8);
     let api = Api::new(&server, Some(&token));
     let first = api.post(
@@ -716,7 +716,7 @@ fn checks_list_suites_for_ref_filters() {
         404
     );
     server
-        .create_repository("admin", "hidden", true, None, None, "main")
+        .add_repository("admin", "hidden", true, None, None, "main")
         .unwrap();
     assert_eq!(
         outsider(&server)
@@ -732,7 +732,7 @@ fn seeded_check_runs_link_to_their_web_page() {
     let admin = Api::admin(&server);
     repo.commit("seeded")
         .unwrap()
-        .create_check_run(CheckRunSeed {
+        .add_check_run(CheckRunSeed {
             id: SeedField::present(5),
             ..Default::default()
         })

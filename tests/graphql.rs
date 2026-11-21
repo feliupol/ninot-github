@@ -151,10 +151,10 @@ fn unimplemented_fields_are_errors() {
 fn project_items_carry_issue_state_and_paged_comments() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let issue = repository
-        .create_issue(
+        .add_issue(
             7,
             IssueSeed {
                 title: SeedField::present("Closed bug".to_owned()),
@@ -163,12 +163,12 @@ fn project_items_carry_issue_state_and_paged_comments() {
             },
         )
         .unwrap();
-    let project = repository.create_project("Board").unwrap();
+    let project = repository.add_project("Board").unwrap();
     project
-        .create_field("Status", vec!["Todo".to_owned()])
+        .add_field("Status", vec!["Todo".to_owned()])
         .unwrap();
     project
-        .create_issue_item(&issue, [("Status".to_owned(), "Todo".to_owned())].into())
+        .add_issue_item(&issue, [("Status".to_owned(), "Todo".to_owned())].into())
         .unwrap();
     let reply = query(
         &Api::admin(&server),
@@ -192,7 +192,7 @@ fn pull_request_commits_are_dated_by_their_commit_not_by_edits() {
 
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let mut head = String::new();
     for branch in ["main", "feature"] {
@@ -251,7 +251,7 @@ fn pull_request_commits_are_dated_by_their_commit_not_by_edits() {
 fn searched_pull_requests_resolve_their_repository_fields() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     repository.set_auto_merge_allowed(true).unwrap();
     for branch in ["main", "feature"] {
@@ -289,13 +289,13 @@ fn searched_pull_requests_resolve_their_repository_fields() {
 fn reviewed_pull(server: &Server, reviews: &[(&str, &str)]) {
     server.add_org("acme", &["alice", "bob"]);
     let repository = server
-        .create_repository("acme", "project", false, None, None, "main")
+        .add_repository("acme", "project", false, None, None, "main")
         .unwrap();
     let pull = repository
-        .create_pull_request(9, PullRequestSeed::default())
+        .add_pull_request(9, PullRequestSeed::default())
         .unwrap();
     for (login, state) in reviews {
-        pull.create_review(ReviewSeed {
+        pull.add_review(ReviewSeed {
             state: SeedField::present((*state).to_owned()),
             user: SeedField::present(Some(UserSeed {
                 login: SeedField::present((*login).to_owned()),
@@ -405,10 +405,10 @@ fn review_decision_ignores_comments_after_an_approval() {
 fn repository_pull_request_resolves_the_pull_requests_fields() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     repository
-        .create_pull_request(
+        .add_pull_request(
             9,
             PullRequestSeed {
                 title: SeedField::present("Typed".to_owned()),
@@ -445,10 +445,10 @@ fn repository_pull_request_resolves_the_pull_requests_fields() {
 fn searched_issues_are_graphql_issues() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     repository
-        .create_issue(
+        .add_issue(
             7,
             IssueSeed {
                 title: SeedField::present("No body".to_owned()),

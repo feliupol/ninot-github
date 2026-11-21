@@ -74,7 +74,7 @@ fn setup() -> (Server, ninot_github::server::Repository) {
     let server = Server::start().unwrap();
     server.add_org(ORG, &["admin"]);
     let repo = server
-        .create_repository(ORG, "ci", true, None, None, "main")
+        .add_repository(ORG, "ci", true, None, None, "main")
         .unwrap();
     (server, repo)
 }

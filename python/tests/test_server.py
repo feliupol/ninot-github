@@ -44,6 +44,10 @@ def test_authenticated_request() -> None:
     assert response.status == 200
     user = json.loads(response.read())
     assert user["login"] == login
+    found = server.user(login)
+    assert found is not None
+    assert found.login == login
+    assert server.user("nobody") is None
     server.stop()
 
 
@@ -88,8 +92,8 @@ def test_applied_faults() -> None:
 def test_pull_request_review_and_comment_state_is_served_over_http() -> None:
     """The fixture seeds real API reads and records requests over the socket."""
     server = Server()
-    repository = server.create_repository("admin", "project")
-    pull = repository.create_pull_request(
+    repository = server.add_repository("admin", "project")
+    pull = repository.add_pull_request(
         9,
         PullRequestSeed(
             draft=True,
@@ -99,11 +103,11 @@ def test_pull_request_review_and_comment_state_is_served_over_http() -> None:
             head={"sha": "0123456789012345678901234567890123456789"},
         ),
     )
-    pull.create_review(ReviewSeed(state="APPROVED", user=UserSeed(login="reviewer", type="Bot")))
-    pull.create_issue_comment(
+    pull.add_review(ReviewSeed(state="APPROVED", user=UserSeed(login="reviewer", type="Bot")))
+    pull.add_issue_comment(
         IssueCommentSeed(body="Looks good", user=UserSeed(login="reviewer", type="Bot"))
     )
-    pull.create_review_comment(
+    pull.add_review_comment(
         ReviewCommentSeed(
             path="src/main.rs",
             line=7,
@@ -157,14 +161,14 @@ def test_git_and_workflow_fixture_apis_serve_real_http_state() -> None:
         server.add_user("upstream")
         alice = server.add_user("alice")
         token = alice.add_token(["repo", "public_repo"])
-        upstream = server.create_repository(
+        upstream = server.add_repository(
             "upstream", "project", description="upstream", language="Rust"
         )
         head_sha = upstream.commit_file("topic", "README.md", b"topic content\n", "topic").sha
-        fork = server.create_repository("alice", "project-fork")
+        fork = server.add_repository("alice", "project-fork")
         fork.fork_from(upstream)
         headers = {"Authorization": f"token {token}"}
-        fork.create_workflow_run(
+        fork.add_workflow_run(
             WorkflowRunSeed(
                 id=42,
                 name="CI",
@@ -207,8 +211,9 @@ def test_team_review_requests_are_searchable_by_member() -> None:
         server.add_user("me")
         org = server.add_org("org", ["me"])
         org.add_team("reviewers", ["me"])
-        repository = server.create_repository("org", "project")
-        repository.create_pull_request(
+        assert org.runner(1) is None
+        repository = server.add_repository("org", "project")
+        repository.add_pull_request(
             1, PullRequestSeed(requested_teams=[TeamSeed(slug="reviewers")])
         )
         me = server.add_user("me")
@@ -226,7 +231,7 @@ def test_org_plan_is_shown_to_owners_and_limits_private_repositories() -> None:
     with Server() as server:
         token = server.add_user("me").add_token(["repo"])
         org = server.add_org("org", ["me"])
-        server.create_repository("org", "project", private=True)
+        server.add_repository("org", "project", private=True)
         org.set_plan("free")
 
         def get(path: str) -> urllib.request.Request:

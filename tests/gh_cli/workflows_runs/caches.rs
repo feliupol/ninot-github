@@ -20,11 +20,11 @@ fn cache_list_filters_and_delete_by_id_and_key() {
     let server = tls_server();
     let config = TempDir::new();
     let repo = server
-        .create_repository("admin", "tool", false, None, None, "main")
+        .add_repository("admin", "tool", false, None, None, "main")
         .unwrap();
-    repo.create_actions_cache("cargo-registry", "refs/heads/main", 12)
+    repo.add_actions_cache("cargo-registry", "refs/heads/main", 12)
         .unwrap();
-    repo.create_actions_cache("npm", "refs/heads/feature", 34)
+    repo.add_actions_cache("npm", "refs/heads/feature", 34)
         .unwrap();
 
     let caches = gh_json(
@@ -87,10 +87,10 @@ fn cache_delete_is_not_found_or_forbidden() {
     let server = tls_server();
     let config = TempDir::new();
     let repo = server
-        .create_repository("admin", "tool", false, None, None, "main")
+        .add_repository("admin", "tool", false, None, None, "main")
         .unwrap();
     let id = repo
-        .create_actions_cache("cargo", "refs/heads/main", 8)
+        .add_actions_cache("cargo", "refs/heads/main", 8)
         .unwrap();
     let missing = gh_output(
         &server,

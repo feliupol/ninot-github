@@ -25,7 +25,7 @@ fn user(login: &str) -> UserSeed {
 fn mutations_appear_in_the_issue_event_stream() {
     let server = Server::start().unwrap();
     server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
 
@@ -162,7 +162,7 @@ fn list_for_repo_embeds_the_issue_and_get_event_reads_one() {
     let server = Server::start().unwrap();
     let admin = common::Api::admin(&server);
     server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
 
     let first = admin.post("/repos/admin/project/issues", json!({"title": "One"}));
@@ -221,11 +221,11 @@ fn list_for_repo_embeds_the_issue_and_get_event_reads_one() {
 fn pull_request_timeline_events_appear_as_issue_events() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let pull = repository
-        .create_pull_request(
+        .add_pull_request(
             1,
             PullRequestSeed {
                 title: SeedField::present("Change".to_owned()),
@@ -235,7 +235,7 @@ fn pull_request_timeline_events_appear_as_issue_events() {
             },
         )
         .unwrap();
-    pull.create_timeline_event(TimelineEventSeed {
+    pull.add_timeline_event(TimelineEventSeed {
         event: "closed".to_owned(),
         created_at: "2026-01-02T11:00:00Z".to_owned(),
         actor: SeedField::present(user("admin")),
@@ -274,7 +274,7 @@ fn missing_issue_or_event_is_not_found() {
     let server = Server::start().unwrap();
     let admin = common::Api::admin(&server);
     server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     assert_eq!(
         admin.get("/repos/admin/project/issues/404/events").status,
@@ -300,7 +300,7 @@ fn issue_events_render_the_current_actor_and_team() {
     let server = Server::start().unwrap();
     server.add_org("acme", &["admin"]);
     let repository = server
-        .create_repository("acme", "project", false, None, None, "main")
+        .add_repository("acme", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let created = admin.post("/repos/acme/project/issues", json!({"title": "One"}));
@@ -308,7 +308,7 @@ fn issue_events_render_the_current_actor_and_team() {
     let closed = admin.patch("/repos/acme/project/issues/1", json!({"state": "closed"}));
     assert_eq!(closed.status, 200, "{:?}", closed.body);
     let pull = repository
-        .create_pull_request(
+        .add_pull_request(
             2,
             PullRequestSeed {
                 created_at: SeedField::present("2026-05-01T00:00:00Z".to_owned()),
@@ -316,7 +316,7 @@ fn issue_events_render_the_current_actor_and_team() {
             },
         )
         .unwrap();
-    pull.create_timeline_event(TimelineEventSeed {
+    pull.add_timeline_event(TimelineEventSeed {
         requested_team: SeedField::present(ninot_github::fixtures::TeamSeed {
             slug: "reviewers".to_owned(),
         }),
@@ -370,11 +370,11 @@ fn issue_events_render_the_current_actor_and_team() {
 fn seeded_event_actors_render_from_their_account() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let pull = repository
-        .create_pull_request(
+        .add_pull_request(
             1,
             PullRequestSeed {
                 created_at: SeedField::present("2026-01-02T10:00:00Z".to_owned()),
@@ -382,7 +382,7 @@ fn seeded_event_actors_render_from_their_account() {
             },
         )
         .unwrap();
-    pull.create_timeline_event(TimelineEventSeed {
+    pull.add_timeline_event(TimelineEventSeed {
         event: "closed".to_owned(),
         created_at: "2026-01-02T11:00:00Z".to_owned(),
         actor: SeedField::present(UserSeed {

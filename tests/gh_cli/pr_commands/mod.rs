@@ -171,14 +171,14 @@ fn pr_view_comments_reviews_files_commits_and_checks() {
         .commit(&head)
         .unwrap();
     commit
-        .create_status(CommitStatusSeed {
+        .add_status(CommitStatusSeed {
             state: SeedField::present("success".to_owned()),
             context: SeedField::present("tests".to_owned()),
             ..Default::default()
         })
         .unwrap();
     commit
-        .create_check_run(CheckRunSeed {
+        .add_check_run(CheckRunSeed {
             name: SeedField::present("lint".to_owned()),
             status: SeedField::present("completed".to_owned()),
             conclusion: SeedField::present(Some("success".to_owned())),

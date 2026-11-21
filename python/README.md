@@ -24,7 +24,7 @@ from ninot_github import Server
 
 with Server() as server:
     alice = server.add_user("alice")
-    project = server.create_repository("alice", "project")
+    project = server.add_repository("alice", "project")
     token = alice.add_token(["repo"])
     print(server.url)
 ```
@@ -40,13 +40,13 @@ package exports TypedDict models for sparse seed values:
 from ninot_github import PullRequestSeed, ReviewSeed, Server, UserSeed
 
 with Server() as server:
-    project = server.create_repository("admin", "project")
-    pull = project.create_pull_request(9, PullRequestSeed(
+    project = server.add_repository("admin", "project")
+    pull = project.add_pull_request(9, PullRequestSeed(
         draft=False,
         head={"sha": "0123456789abcdef0123456789abcdef01234567"},
         base={"ref": "main"},
     ))
-    pull.create_review(ReviewSeed(
+    pull.add_review(ReviewSeed(
         state="APPROVED",
         user=UserSeed(login="reviewer", type="Bot"),
         submitted_at="2026-01-02T03:04:05Z",
@@ -60,7 +60,7 @@ Pull-request handles own reviews, issue comments, review comments, and review
 threads. Issue handles own issue comments. `Server.add_fault` injects a typed
 fault into the real HTTP request path.
 
-For GitHub App flows, call `project.create_installation(installation_id)`.
+For GitHub App flows, call `project.add_installation(installation_id)`.
 The server accepts JWT-shaped Bearer credentials at the App installation
 endpoints and returns a repository-scoped installation token. Installation
 permissions default to none; seed only the scope used by the scenario:
@@ -69,12 +69,12 @@ permissions default to none; seed only the scope used by the scenario:
 from ninot_github import ActionsPublicKeySeed, ActionsSecretSeed, Server
 
 with Server() as server:
-    repository = server.create_repository("alice", "project", private=True)
-    repository.create_installation(73, secrets_permission="write")
+    repository = server.add_repository("alice", "project", private=True)
+    repository.add_installation(73, secrets_permission="write")
     repository.set_actions_public_key(
         ActionsPublicKeySeed(key_id="fixture-key", key="BASE64_PUBLIC_KEY")
     )
-    existing = repository.create_actions_secret(
+    existing = repository.add_actions_secret(
         ActionsSecretSeed(
             name="CI_TOKEN",
             encrypted_value="BASE64_CIPHERTEXT",
@@ -115,16 +115,16 @@ Fixtures seed the same history with explicit timestamps:
 from ninot_github import GitIdentitySeed, PullRequestSeed, Server, TimelineEventSeed
 
 with Server() as server:
-    repository = server.create_repository("admin", "project")
+    repository = server.add_repository("admin", "project")
     alice = GitIdentitySeed(name="alice", email="alice@example.com", date="2026-01-02T09:00:00Z")
     first = repository.commit_file("feature", "a.txt", b"1", "First", author=alice)
-    pull = repository.create_pull_request(1, PullRequestSeed(
+    pull = repository.add_pull_request(1, PullRequestSeed(
         draft=True,
         created_at="2026-01-02T10:00:00Z",
         head={"ref": "feature", "sha": first.sha},
         files=[{"filename": "a.txt", "additions": 1}],
     ))
-    pull.create_timeline_event(
+    pull.add_timeline_event(
         TimelineEventSeed(event="ready_for_review", created_at="2026-01-02T11:00:00Z")
     )
     rewritten = repository.commit_file(
@@ -133,7 +133,7 @@ with Server() as server:
     pull.push_head(rewritten.sha, pushed_at="2026-01-02T12:01:00Z")  # head_ref_force_pushed
 ```
 
-- `create_timeline_event` applies the event to the pull request as the action would (it
+- `add_timeline_event` applies the event to the pull request as the action would (it
   becomes ready, draft, merged, closed...). Events dated before the pull request's creation
   or its latest event, and transitions its state does not allow, are refused.
 - `PullRequestSeed.merged_at` / `closed_at` close the pull request and write its `merged` and
@@ -151,8 +151,8 @@ other query parameters). `GET /pulls` sorts by `created` (default, descending), 
 `popularity` (ascending unless `direction=desc`); `sort=long-running` answers 501.
 `GET /actions/runs` filters on `branch`, `event`, `status` and `head_sha`, newest first.
 
-Repository CI state belongs to `Repository.create_workflow_run` and
-`Commit.create_check_run`/`Commit.create_status`. Repository contents and
+Repository CI state belongs to `Repository.add_workflow_run` and
+`Commit.add_check_run`/`Commit.add_status`. Repository contents and
 comparison state use real Git commits via `Repository.commit_file`; a fork's
 `fork_from` copies refs and objects so cross-repository compare and pull-request
 creation see the same history.

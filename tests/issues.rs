@@ -57,7 +57,7 @@ fn issues_update() {
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     let carol_token = server.user("carol").unwrap().add_token(&["repo"]);
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let bob = common::Api::new(&server, Some(&bob_token));
@@ -139,9 +139,9 @@ fn issues_update() {
     assert!(cleared.body["labels"].as_array().unwrap().is_empty());
 
     server
-        .create_repository("admin", "other", false, None, None, "main")
+        .add_repository("admin", "other", false, None, None, "main")
         .unwrap()
-        .create_issue(
+        .add_issue(
             1,
             IssueSeed {
                 title: SeedField::present("other".to_owned()),
@@ -178,7 +178,7 @@ fn issues_update() {
     assert_eq!(admin.get(&second_path).body["state"], "open");
 
     repository
-        .create_issue(
+        .add_issue(
             30,
             IssueSeed {
                 title: SeedField::present("authored".to_owned()),
@@ -211,7 +211,7 @@ fn issues_update() {
     );
 
     repository
-        .create_pull_request(
+        .add_pull_request(
             40,
             PullRequestSeed {
                 title: SeedField::present("pr".to_owned()),
@@ -233,7 +233,7 @@ fn issues_add_assignees() {
     server.add_user("carol");
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let bob = common::Api::new(&server, Some(&bob_token));
@@ -266,7 +266,7 @@ fn issues_add_assignees() {
     );
 
     repository
-        .create_pull_request(40, PullRequestSeed::default())
+        .add_pull_request(40, PullRequestSeed::default())
         .unwrap();
     let pull_assignees = admin.post(
         "/repos/admin/project/issues/40/assignees",
@@ -285,7 +285,7 @@ fn issues_add_assignees() {
     let member_refs: Vec<&str> = members.iter().map(String::as_str).collect();
     server.add_org("acme", &member_refs);
     server
-        .create_repository("acme", "widgets", false, None, None, "main")
+        .add_repository("acme", "widgets", false, None, None, "main")
         .unwrap();
     let org_issue = admin.post("/repos/acme/widgets/issues", json!({"title": "Cap"}));
     assert_eq!(org_issue.status, 201, "{:?}", org_issue.body);
@@ -330,7 +330,7 @@ fn issues_remove_assignees() {
     server.add_user("bob");
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let bob = common::Api::new(&server, Some(&bob_token));
@@ -369,7 +369,7 @@ fn issues_remove_assignees() {
     );
 
     repository
-        .create_pull_request(40, PullRequestSeed::default())
+        .add_pull_request(40, PullRequestSeed::default())
         .unwrap();
     let pull = "/repos/admin/project/issues/40/assignees";
     admin.post(pull, json!({"assignees": ["admin"]}));
@@ -386,14 +386,14 @@ fn issues_list_assignees() {
     server.add_user("member");
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     server
-        .create_repository("admin", "secret", true, None, None, "main")
+        .add_repository("admin", "secret", true, None, None, "main")
         .unwrap();
     server.add_org("acme", &["admin", "member", "ghost"]);
     server
-        .create_repository("acme", "widgets", false, None, None, "main")
+        .add_repository("acme", "widgets", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let bob = common::Api::new(&server, Some(&bob_token));
@@ -418,11 +418,11 @@ fn issues_check_user_can_be_assigned() {
     server.add_user("member");
     server.add_user("outsider");
     server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     server.add_org("acme", &["admin", "member"]);
     server
-        .create_repository("acme", "widgets", false, None, None, "main")
+        .add_repository("acme", "widgets", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
 
@@ -451,7 +451,7 @@ fn issues_check_user_can_be_assigned_to_issue() {
     let server = Server::start().unwrap();
     server.add_user("bob");
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let created = admin.post("/repos/admin/project/issues", json!({"title": "Assign"}));
@@ -479,7 +479,7 @@ fn issues_check_user_can_be_assigned_to_issue() {
         404
     );
     repository
-        .create_pull_request(40, PullRequestSeed::default())
+        .add_pull_request(40, PullRequestSeed::default())
         .unwrap();
     assert_eq!(
         admin
@@ -501,7 +501,7 @@ fn issues_set_labels() {
     server.add_user("bob");
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let bob = common::Api::new(&server, Some(&bob_token));
@@ -539,7 +539,7 @@ fn issues_set_labels() {
         404
     );
     repository
-        .create_pull_request(40, PullRequestSeed::default())
+        .add_pull_request(40, PullRequestSeed::default())
         .unwrap();
     let pull = admin.put(
         "/repos/admin/project/issues/40/labels",
@@ -555,7 +555,7 @@ fn issues_remove_all_labels() {
     server.add_user("bob");
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let bob = common::Api::new(&server, Some(&bob_token));
@@ -587,7 +587,7 @@ fn issues_remove_label() {
     server.add_user("bob");
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let bob = common::Api::new(&server, Some(&bob_token));
@@ -606,7 +606,7 @@ fn issues_remove_label() {
     assert_eq!(admin.delete(&format!("{labels}/docs")).status, 404);
 
     repository
-        .create_pull_request(40, PullRequestSeed::default())
+        .add_pull_request(40, PullRequestSeed::default())
         .unwrap();
     admin.put(
         "/repos/admin/project/issues/40/labels",
@@ -629,7 +629,7 @@ fn issues_create_label() {
     server.add_user("bob");
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let bob = common::Api::new(&server, Some(&bob_token));
@@ -734,7 +734,7 @@ fn issues_create_label() {
 fn issues_get_label() {
     let server = Server::start().unwrap();
     server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     admin.post(
@@ -756,7 +756,7 @@ fn issues_get_label() {
 fn stored_labels_render_their_url_and_archiver_on_each_read() {
     let server = Server::start().unwrap();
     server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     admin.post("/repos/admin/project/labels", json!({"name": "Bug"}));
@@ -787,7 +787,7 @@ fn issues_update_label() {
     server.add_user("bob");
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let bob = common::Api::new(&server, Some(&bob_token));
@@ -913,7 +913,7 @@ fn issues_delete_label() {
     server.add_user("bob");
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let bob = common::Api::new(&server, Some(&bob_token));
@@ -972,10 +972,10 @@ fn issues_list_milestones() {
     server.add_user("bob");
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     server
-        .create_repository("admin", "secret", true, None, None, "main")
+        .add_repository("admin", "secret", true, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let bob = common::Api::new(&server, Some(&bob_token));
@@ -1044,7 +1044,7 @@ fn issues_create_milestone() {
     server.add_user("bob");
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let bob = common::Api::new(&server, Some(&bob_token));
@@ -1096,7 +1096,7 @@ fn issues_create_milestone() {
 fn issues_get_milestone() {
     let server = Server::start().unwrap();
     server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let created = admin.post("/repos/admin/project/milestones", json!({"title": "v1"}));
@@ -1114,7 +1114,7 @@ fn issues_update_milestone() {
     server.add_user("bob");
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let bob = common::Api::new(&server, Some(&bob_token));
@@ -1178,7 +1178,7 @@ fn issues_delete_milestone() {
     server.add_user("bob");
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let bob = common::Api::new(&server, Some(&bob_token));
@@ -1203,7 +1203,7 @@ fn issues_delete_milestone() {
 fn issues_list_labels_for_milestone() {
     let server = Server::start().unwrap();
     server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let milestone = admin.post("/repos/admin/project/milestones", json!({"title": "v1"}));
@@ -1243,13 +1243,13 @@ fn issues_get_comment() {
     server.add_user("bob");
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let secret = server
-        .create_repository("admin", "secret", true, None, None, "main")
+        .add_repository("admin", "secret", true, None, None, "main")
         .unwrap();
     server
-        .create_repository("admin", "other", false, None, None, "main")
+        .add_repository("admin", "other", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let bob = common::Api::new(&server, Some(&bob_token));
@@ -1278,9 +1278,9 @@ fn issues_get_comment() {
     );
 
     secret
-        .create_issue(1, IssueSeed::default())
+        .add_issue(1, IssueSeed::default())
         .unwrap()
-        .create_comment(IssueCommentSeed {
+        .add_comment(IssueCommentSeed {
             body: SeedField::present("hidden".to_owned()),
             ..Default::default()
         })
@@ -1304,13 +1304,13 @@ fn issues_update_comment() {
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     let carol_token = server.user("carol").unwrap().add_token(&["repo"]);
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let bob = common::Api::new(&server, Some(&bob_token));
     let carol = common::Api::new(&server, Some(&carol_token));
     let issue = repository
-        .create_issue(
+        .add_issue(
             1,
             IssueSeed {
                 title: SeedField::present("Talk".to_owned()),
@@ -1319,7 +1319,7 @@ fn issues_update_comment() {
         )
         .unwrap();
     issue
-        .create_comment(IssueCommentSeed {
+        .add_comment(IssueCommentSeed {
             body: SeedField::present("original".to_owned()),
             user: SeedField::present(Some(user("bob"))),
             updated_at: SeedField::present("2000-01-01T00:00:00Z".to_owned()),
@@ -1357,9 +1357,9 @@ fn issues_update_comment() {
     );
 
     repository
-        .create_pull_request(8, PullRequestSeed::default())
+        .add_pull_request(8, PullRequestSeed::default())
         .unwrap()
-        .create_issue_comment(IssueCommentSeed {
+        .add_issue_comment(IssueCommentSeed {
             body: SeedField::present("on the pull".to_owned()),
             user: SeedField::present(Some(user("bob"))),
             ..Default::default()
@@ -1383,21 +1383,21 @@ fn issues_delete_comment() {
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     let carol_token = server.user("carol").unwrap().add_token(&["repo"]);
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let bob = common::Api::new(&server, Some(&bob_token));
     let carol = common::Api::new(&server, Some(&carol_token));
-    let issue = repository.create_issue(1, IssueSeed::default()).unwrap();
+    let issue = repository.add_issue(1, IssueSeed::default()).unwrap();
     issue
-        .create_comment(IssueCommentSeed {
+        .add_comment(IssueCommentSeed {
             body: SeedField::present("bob's".to_owned()),
             user: SeedField::present(Some(user("bob"))),
             ..Default::default()
         })
         .unwrap();
     issue
-        .create_comment(IssueCommentSeed {
+        .add_comment(IssueCommentSeed {
             body: SeedField::present("carol's".to_owned()),
             user: SeedField::present(Some(user("carol"))),
             ..Default::default()
@@ -1445,14 +1445,14 @@ fn issues_delete_comment() {
     );
 
     let pull = repository
-        .create_pull_request(8, PullRequestSeed::default())
+        .add_pull_request(8, PullRequestSeed::default())
         .unwrap();
-    pull.create_issue_comment(IssueCommentSeed {
+    pull.add_issue_comment(IssueCommentSeed {
         body: SeedField::present("note".to_owned()),
         ..Default::default()
     })
     .unwrap();
-    pull.create_review_comment(ReviewCommentSeed {
+    pull.add_review_comment(ReviewCommentSeed {
         path: SeedField::present("src/main.rs".to_owned()),
         body: SeedField::present("line".to_owned()),
         ..Default::default()
@@ -1490,21 +1490,21 @@ fn issues_list_comments_for_repo() {
     server.add_user("bob");
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     server
-        .create_repository("admin", "secret", true, None, None, "main")
+        .add_repository("admin", "secret", true, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let bob = common::Api::new(&server, Some(&bob_token));
-    let issue = repository.create_issue(1, IssueSeed::default()).unwrap();
+    let issue = repository.add_issue(1, IssueSeed::default()).unwrap();
     let posted = admin.post(
         "/repos/admin/project/issues/1/comments",
         json!({"body": "new"}),
     );
     assert_eq!(posted.status, 201, "{:?}", posted.body);
     issue
-        .create_comment(IssueCommentSeed {
+        .add_comment(IssueCommentSeed {
             body: SeedField::present("old".to_owned()),
             created_at: SeedField::present("2000-01-01T00:00:00Z".to_owned()),
             updated_at: SeedField::present("2000-01-01T00:00:00Z".to_owned()),
@@ -1512,14 +1512,14 @@ fn issues_list_comments_for_repo() {
         })
         .unwrap();
     let pull = repository
-        .create_pull_request(8, PullRequestSeed::default())
+        .add_pull_request(8, PullRequestSeed::default())
         .unwrap();
-    pull.create_issue_comment(IssueCommentSeed {
+    pull.add_issue_comment(IssueCommentSeed {
         body: SeedField::present("pull-note".to_owned()),
         ..Default::default()
     })
     .unwrap();
-    pull.create_review_comment(ReviewCommentSeed {
+    pull.add_review_comment(ReviewCommentSeed {
         path: SeedField::present("src/main.rs".to_owned()),
         body: SeedField::present("review-note".to_owned()),
         ..Default::default()
@@ -1574,7 +1574,7 @@ fn issues_lock() {
     server.add_user("bob");
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let bob = common::Api::new(&server, Some(&bob_token));
@@ -1603,7 +1603,7 @@ fn issues_lock() {
     assert_eq!(bob.put(&lock, json!({})).status, 403);
 
     repository
-        .create_pull_request(8, PullRequestSeed::default())
+        .add_pull_request(8, PullRequestSeed::default())
         .unwrap();
     assert_eq!(
         admin
@@ -1625,7 +1625,7 @@ fn issues_unlock() {
     server.add_user("bob");
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let bob = common::Api::new(&server, Some(&bob_token));
@@ -1649,7 +1649,7 @@ fn issues_unlock() {
     );
 
     repository
-        .create_pull_request(8, PullRequestSeed::default())
+        .add_pull_request(8, PullRequestSeed::default())
         .unwrap();
     admin.put("/repos/admin/project/issues/8/lock", json!({}));
     assert_eq!(
@@ -1670,27 +1670,27 @@ fn issues_list() {
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     let carol_token = server.user("carol").unwrap().add_token(&["repo"]);
     let project = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     server
-        .create_repository("bob", "tools", false, None, None, "main")
+        .add_repository("bob", "tools", false, None, None, "main")
         .unwrap();
     server.add_org("acme", &["bob"]);
     server
-        .create_repository("acme", "widgets", false, None, None, "main")
+        .add_repository("acme", "widgets", false, None, None, "main")
         .unwrap();
     server
-        .create_repository("carol", "public", false, None, None, "main")
+        .add_repository("carol", "public", false, None, None, "main")
         .unwrap();
     let secret = server
-        .create_repository("carol", "secret", true, None, None, "main")
+        .add_repository("carol", "secret", true, None, None, "main")
         .unwrap();
     let bob = common::Api::new(&server, Some(&bob_token));
     let carol = common::Api::new(&server, Some(&carol_token));
     let anon = common::Api::new(&server, None);
 
     project
-        .create_issue(
+        .add_issue(
             1,
             IssueSeed {
                 title: SeedField::present("assigned".to_owned()),
@@ -1700,7 +1700,7 @@ fn issues_list() {
         )
         .unwrap();
     project
-        .create_issue(
+        .add_issue(
             2,
             IssueSeed {
                 title: SeedField::present("by-bob".to_owned()),
@@ -1710,7 +1710,7 @@ fn issues_list() {
         )
         .unwrap();
     project
-        .create_issue(
+        .add_issue(
             3,
             IssueSeed {
                 title: SeedField::present("mention".to_owned()),
@@ -1720,7 +1720,7 @@ fn issues_list() {
         )
         .unwrap();
     project
-        .create_issue(
+        .add_issue(
             4,
             IssueSeed {
                 title: SeedField::present("almost".to_owned()),
@@ -1730,7 +1730,7 @@ fn issues_list() {
         )
         .unwrap();
     project
-        .create_issue(
+        .add_issue(
             5,
             IssueSeed {
                 title: SeedField::present("shut".to_owned()),
@@ -1740,7 +1740,7 @@ fn issues_list() {
         )
         .unwrap();
     project
-        .create_issue(
+        .add_issue(
             6,
             IssueSeed {
                 title: SeedField::present("labeled".to_owned()),
@@ -1753,7 +1753,7 @@ fn issues_list() {
         )
         .unwrap();
     project
-        .create_pull_request(
+        .add_pull_request(
             9,
             PullRequestSeed {
                 title: SeedField::present("pr".to_owned()),
@@ -1781,7 +1781,7 @@ fn issues_list() {
         201
     );
     secret
-        .create_issue(
+        .add_issue(
             1,
             IssueSeed {
                 title: SeedField::present("carol-secret".to_owned()),
@@ -1904,7 +1904,7 @@ fn issues_list_for_org() {
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     server.add_org("acme", &["bob"]);
     server
-        .create_repository("acme", "widgets", false, None, None, "main")
+        .add_repository("acme", "widgets", false, None, None, "main")
         .unwrap();
     let bob = common::Api::new(&server, Some(&bob_token));
     let anon = common::Api::new(&server, None);
@@ -1936,15 +1936,15 @@ fn issues_list_for_authenticated_user() {
     server.add_user("bob");
     let bob_token = server.user("bob").unwrap().add_token(&["repo"]);
     let project = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     server
-        .create_repository("bob", "tools", false, None, None, "main")
+        .add_repository("bob", "tools", false, None, None, "main")
         .unwrap();
     let bob = common::Api::new(&server, Some(&bob_token));
     let anon = common::Api::new(&server, None);
     project
-        .create_issue(
+        .add_issue(
             1,
             IssueSeed {
                 title: SeedField::present("assigned".to_owned()),
@@ -1975,7 +1975,7 @@ fn issues_list_for_authenticated_user() {
 fn label_and_comment_urls_follow_github_shapes() {
     let server = Server::start().unwrap();
     server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let base = server.url();
@@ -2044,7 +2044,7 @@ fn label_names(body: &Value) -> Vec<String> {
 fn issue_labels_are_the_repository_labels() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     let stored = admin.post(
@@ -2078,7 +2078,7 @@ fn issue_labels_are_the_repository_labels() {
     );
 
     repository
-        .create_issue(
+        .add_issue(
             50,
             IssueSeed {
                 labels: SeedField::present(vec![LabelSeed {
@@ -2094,7 +2094,7 @@ fn issue_labels_are_the_repository_labels() {
     assert_eq!(seeded.body["labels"][0]["name"], "bug");
     assert_eq!(seeded.body["labels"][0]["id"], stored.body["id"]);
 
-    let contradicting = repository.create_issue(
+    let contradicting = repository.add_issue(
         51,
         IssueSeed {
             labels: SeedField::present(vec![LabelSeed {
@@ -2115,11 +2115,11 @@ fn issue_labels_are_the_repository_labels() {
 fn issue_assignee_is_the_first_assignee() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     repository
-        .create_issue(
+        .add_issue(
             1,
             IssueSeed {
                 assignees: SeedField::present(vec![user("bob"), user("carol")]),
@@ -2132,7 +2132,7 @@ fn issue_assignee_is_the_first_assignee() {
     assert_eq!(logins(&both.body["assignees"]), ["bob", "carol"]);
 
     repository
-        .create_issue(
+        .add_issue(
             2,
             IssueSeed {
                 assignee: SeedField::present(Some(user("carol"))),
@@ -2144,7 +2144,7 @@ fn issue_assignee_is_the_first_assignee() {
     assert_eq!(single.body["assignee"]["login"], "carol");
     assert_eq!(logins(&single.body["assignees"]), ["carol"]);
 
-    let disagreeing = repository.create_issue(
+    let disagreeing = repository.add_issue(
         3,
         IssueSeed {
             assignee: SeedField::present(Some(user("carol"))),
@@ -2167,10 +2167,10 @@ fn author_association_follows_the_repository_owner() {
     let carol = common::Api::new(&server, Some(&carol_token));
     let admin = common::Api::admin(&server);
     server
-        .create_repository("acme", "tool", false, None, None, "main")
+        .add_repository("acme", "tool", false, None, None, "main")
         .unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
 
     let member_issue = bob.post("/repos/acme/tool/issues", json!({"title": "From a member"}));
@@ -2185,7 +2185,7 @@ fn author_association_follows_the_repository_owner() {
     assert_eq!(member_comment.body["author_association"], "MEMBER");
 
     let issue = repository
-        .create_issue(
+        .add_issue(
             1,
             IssueSeed {
                 user: SeedField::present(user("carol")),
@@ -2198,7 +2198,7 @@ fn author_association_follows_the_repository_owner() {
         "NONE"
     );
     issue
-        .create_comment(IssueCommentSeed {
+        .add_comment(IssueCommentSeed {
             user: SeedField::present(Some(user("admin"))),
             ..Default::default()
         })
@@ -2218,13 +2218,13 @@ fn author_association_follows_the_repository_owner() {
 fn seeded_issue_comments_link_to_the_issue() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     repository
-        .create_issue(4, IssueSeed::default())
+        .add_issue(4, IssueSeed::default())
         .unwrap()
-        .create_comment(IssueCommentSeed::default())
+        .add_comment(IssueCommentSeed::default())
         .unwrap();
     let comment = &admin.get("/repos/admin/project/issues/4/comments").body[0];
     let id = comment["id"].as_u64().unwrap();
@@ -2238,7 +2238,7 @@ fn seeded_issue_comments_link_to_the_issue() {
 fn issue_seeds_reject_values_issues_derive() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let styled_user = UserSeed {
         login: SeedField::present("bob".to_owned()),
@@ -2261,13 +2261,13 @@ fn issue_seeds_reject_values_issues_derive() {
     ];
     for (offset, seed) in refused.into_iter().enumerate() {
         let error = repository
-            .create_issue(10 + offset as u64, seed)
+            .add_issue(10 + offset as u64, seed)
             .err()
             .expect("the seed is refused");
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput, "{error}");
     }
     let issue = repository
-        .create_issue(
+        .add_issue(
             20,
             IssueSeed {
                 comments: SeedField::present(0),
@@ -2276,7 +2276,7 @@ fn issue_seeds_reject_values_issues_derive() {
         )
         .unwrap();
     let error = issue
-        .create_comment(IssueCommentSeed {
+        .add_comment(IssueCommentSeed {
             user: SeedField::present(Some(styled_user)),
             ..Default::default()
         })
@@ -2288,13 +2288,13 @@ fn issue_seeds_reject_values_issues_derive() {
 fn issue_urls_follow_a_repository_rename() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     repository
-        .create_issue(1, IssueSeed::default())
+        .add_issue(1, IssueSeed::default())
         .unwrap()
-        .create_comment(IssueCommentSeed::default())
+        .add_comment(IssueCommentSeed::default())
         .unwrap();
     let renamed = admin.patch("/repos/admin/project", json!({"name": "renamed"}));
     assert_eq!(renamed.status, 200, "{:?}", renamed.body);
@@ -2320,11 +2320,11 @@ fn issue_urls_follow_a_repository_rename() {
 fn issue_users_follow_their_accounts() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     let admin = common::Api::admin(&server);
     repository
-        .create_issue(
+        .add_issue(
             1,
             IssueSeed {
                 user: SeedField::present(user("bob")),
@@ -2333,7 +2333,7 @@ fn issue_users_follow_their_accounts() {
             },
         )
         .unwrap()
-        .create_comment(IssueCommentSeed {
+        .add_comment(IssueCommentSeed {
             user: SeedField::present(Some(user("bob"))),
             ..Default::default()
         })
@@ -2353,7 +2353,7 @@ fn issue_users_follow_their_accounts() {
 fn pull_requests_share_issue_numbers_and_read_back_as_issues() {
     let server = Server::start().unwrap();
     let repository = server
-        .create_repository("admin", "project", false, None, None, "main")
+        .add_repository("admin", "project", false, None, None, "main")
         .unwrap();
     repository
         .commit_file("main", std::path::Path::new("base.txt"), b"base\n", "Base")

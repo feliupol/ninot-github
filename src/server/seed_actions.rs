@@ -8,7 +8,7 @@ impl Repository {
     /// Attaches an Actions artifact named `name` to workflow run `run_id`.
     ///
     /// `bytes` are stored as a zip entry of that name so `gh run download` extracts them.
-    pub fn create_artifact(&self, run_id: u64, name: &str, bytes: &[u8]) -> io::Result<u64> {
+    pub fn add_artifact(&self, run_id: u64, name: &str, bytes: &[u8]) -> io::Result<u64> {
         self.ensure_running()?;
         let zip = zip_entry(name, bytes)?;
         let mut state = lock(&self.app.state);
@@ -37,7 +37,7 @@ impl Repository {
     }
 
     /// Records an Actions cache named `key` on `git_ref` (for example `refs/heads/main`).
-    pub fn create_actions_cache(
+    pub fn add_actions_cache(
         &self,
         key: &str,
         git_ref: &str,

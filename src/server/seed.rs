@@ -147,7 +147,7 @@ impl Server {
     }
 
     /// Creates a repository and returns the handle that owns its fixture operations.
-    pub fn create_repository(
+    pub fn add_repository(
         &self,
         owner: &str,
         name: &str,
@@ -206,25 +206,6 @@ impl Server {
             name,
             server_url: self.url().to_owned(),
         })
-    }
-
-    /// Returns a handle for a runner in an organization.
-    pub fn runner(&self, org: &str, id: u64) -> Option<Runner> {
-        let state = lock(&self.app.state);
-        if state.account(org).is_some_and(|account| {
-            account.kind == crate::state::AccountKind::Organization
-                && account.runners.contains_key(&id)
-        }) {
-            Some(Runner {
-                org: Org {
-                    app: self.app.clone(),
-                    login: org.to_owned(),
-                },
-                id,
-            })
-        } else {
-            None
-        }
     }
 }
 
@@ -296,6 +277,17 @@ impl Org {
             org: self.clone(),
             id,
         })
+    }
+
+    /// Returns a handle for a runner registered in this organization, or `None` when it is absent.
+    pub fn runner(&self, id: u64) -> Option<Runner> {
+        lock(&self.app.state)
+            .account(&self.login)
+            .is_some_and(|account| account.runners.contains_key(&id))
+            .then(|| Runner {
+                org: self.clone(),
+                id,
+            })
     }
 }
 
@@ -541,12 +533,12 @@ impl Repository {
     }
 
     /// Seeds a GitHub App installation associated with this repository.
-    pub fn create_installation(&self, installation_id: u64) -> io::Result<()> {
-        self.create_installation_with_secrets_permission(installation_id, None)
+    pub fn add_installation(&self, installation_id: u64) -> io::Result<()> {
+        self.add_installation_with_secrets_permission(installation_id, None)
     }
 
     /// Seeds an installation and its explicit repository Actions secrets permission.
-    pub fn create_installation_with_secrets_permission(
+    pub fn add_installation_with_secrets_permission(
         &self,
         installation_id: u64,
         secrets_permission: Option<crate::fixtures::ActionsSecretsPermission>,
@@ -562,7 +554,7 @@ impl Repository {
     }
 
     /// Seeds a GitHub App installation of `app_id` on this repository.
-    pub fn create_app_installation(&self, installation_id: u64, app_id: u64) -> io::Result<()> {
+    pub fn add_app_installation(&self, installation_id: u64, app_id: u64) -> io::Result<()> {
         self.ensure_running()?;
         lock(&self.app.state).add_app_installation(
             &self.owner,
@@ -592,7 +584,7 @@ impl Repository {
     }
 
     /// Seeds an already-encrypted Actions secret owned by this repository.
-    pub fn create_actions_secret(
+    pub fn add_actions_secret(
         &self,
         seed: crate::fixtures::ActionsSecretSeed,
     ) -> io::Result<ActionsSecret> {
@@ -653,7 +645,7 @@ impl Repository {
     }
 
     /// Creates an issue with a sparse typed REST seed.
-    pub fn create_issue(&self, number: u64, seed: crate::fixtures::IssueSeed) -> io::Result<Issue> {
+    pub fn add_issue(&self, number: u64, seed: crate::fixtures::IssueSeed) -> io::Result<Issue> {
         self.ensure_running()?;
         let request = self.api_request();
         let mut state = lock(&self.app.state);
@@ -692,7 +684,7 @@ impl Repository {
     }
 
     /// Creates a pull request with a sparse typed REST seed.
-    pub fn create_pull_request(
+    pub fn add_pull_request(
         &self,
         number: u64,
         seed: crate::fixtures::PullRequestSeed,
@@ -815,7 +807,7 @@ impl Repository {
     }
 
     /// Creates a workflow run and its jobs with sparse typed seeds.
-    pub fn create_workflow_run(
+    pub fn add_workflow_run(
         &self,
         seed: crate::fixtures::WorkflowRunSeed,
         jobs: Vec<crate::fixtures::JobSeed>,
@@ -864,7 +856,7 @@ impl Repository {
     }
 
     /// Creates a Projects v2 board owned by this repository.
-    pub fn create_project(&self, title: &str) -> io::Result<Project> {
+    pub fn add_project(&self, title: &str) -> io::Result<Project> {
         self.ensure_running()?;
         let mut state = lock(&self.app.state);
         require_repository(&state, &self.owner, &self.name)?;
@@ -914,7 +906,7 @@ impl PullRequest {
     }
 
     /// Adds a review to this pull request.
-    pub fn create_review(&self, seed: crate::fixtures::ReviewSeed) -> io::Result<Review> {
+    pub fn add_review(&self, seed: crate::fixtures::ReviewSeed) -> io::Result<Review> {
         self.repository.ensure_running()?;
         let urls = self.repository.urls().pull(self.number);
         let mut state = lock(&self.repository.app.state);
@@ -1027,23 +1019,17 @@ impl PullRequest {
     }
 
     /// Adds an issue comment to this pull request.
-    pub fn create_issue_comment(&self, seed: crate::fixtures::IssueCommentSeed) -> io::Result<()> {
-        create_issue_comment(&self.repository, self.number, seed)
+    pub fn add_issue_comment(&self, seed: crate::fixtures::IssueCommentSeed) -> io::Result<()> {
+        add_issue_comment(&self.repository, self.number, seed)
     }
 
     /// Adds a review comment to this pull request.
-    pub fn create_review_comment(
-        &self,
-        seed: crate::fixtures::ReviewCommentSeed,
-    ) -> io::Result<()> {
-        create_review_comment(&self.repository, self.number, seed)
+    pub fn add_review_comment(&self, seed: crate::fixtures::ReviewCommentSeed) -> io::Result<()> {
+        add_review_comment(&self.repository, self.number, seed)
     }
 
     /// Adds a persisted GraphQL review thread and returns its node id.
-    pub fn create_review_thread(
-        &self,
-        seed: crate::fixtures::ReviewThreadSeed,
-    ) -> io::Result<String> {
+    pub fn add_review_thread(&self, seed: crate::fixtures::ReviewThreadSeed) -> io::Result<String> {
         self.repository.ensure_running()?;
         let supplied_id = match &seed.id {
             crate::fixtures::SeedField::Present(id) => Some(id.clone()),
@@ -1138,10 +1124,7 @@ impl PullRequest {
     /// Refuses an unknown event, a force-push (use [`Self::push_head`]), an event dated before
     /// the pull request's creation or its latest event, and one its current state does not
     /// allow, such as readying a pull request that is not a draft.
-    pub fn create_timeline_event(
-        &self,
-        seed: crate::fixtures::TimelineEventSeed,
-    ) -> io::Result<()> {
+    pub fn add_timeline_event(&self, seed: crate::fixtures::TimelineEventSeed) -> io::Result<()> {
         use crate::fixtures::SeedField;
         use crate::state::TimelineEventKind;
         self.repository.ensure_running()?;
@@ -1393,9 +1376,9 @@ impl Issue {
     }
 
     /// Adds a comment to this issue.
-    pub fn create_comment(&self, seed: crate::fixtures::IssueCommentSeed) -> io::Result<()> {
+    pub fn add_comment(&self, seed: crate::fixtures::IssueCommentSeed) -> io::Result<()> {
         self.repository.ensure_running()?;
-        create_issue_comment(&self.repository, self.number, seed)
+        add_issue_comment(&self.repository, self.number, seed)
     }
 }
 
@@ -1438,7 +1421,7 @@ impl Commit {
     }
 
     /// Adds a check run associated with this commit.
-    pub fn create_check_run(&self, seed: crate::fixtures::CheckRunSeed) -> io::Result<()> {
+    pub fn add_check_run(&self, seed: crate::fixtures::CheckRunSeed) -> io::Result<()> {
         self.repository.ensure_running()?;
         let request = self.repository.api_request();
         let mut state = lock(&self.repository.app.state);
@@ -1479,7 +1462,7 @@ impl Commit {
     }
 
     /// Adds a commit status associated with this commit.
-    pub fn create_status(&self, seed: crate::fixtures::CommitStatusSeed) -> io::Result<()> {
+    pub fn add_status(&self, seed: crate::fixtures::CommitStatusSeed) -> io::Result<()> {
         self.repository.ensure_running()?;
         let request = self.repository.api_request();
         let mut state = lock(&self.repository.app.state);
@@ -1524,7 +1507,7 @@ impl Project {
     }
 
     /// Adds a single-select field and its options.
-    pub fn create_field(&self, name: &str, options: Vec<String>) -> io::Result<()> {
+    pub fn add_field(&self, name: &str, options: Vec<String>) -> io::Result<()> {
         ensure_app_running(&self.app)?;
         let id =
             crate::graphql::database_id(&self.node_id).expect("project id is a GraphQL node id");
@@ -1533,7 +1516,7 @@ impl Project {
     }
 
     /// Adds an issue-backed project item.
-    pub fn create_issue_item(
+    pub fn add_issue_item(
         &self,
         issue: &Issue,
         field_values: std::collections::BTreeMap<String, String>,
@@ -1652,7 +1635,7 @@ fn not_found(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::NotFound, message.into())
 }
 
-fn create_issue_comment(
+fn add_issue_comment(
     repository: &Repository,
     number: u64,
     seed: crate::fixtures::IssueCommentSeed,
@@ -1784,7 +1767,7 @@ fn create_comment_on_issue(
     Ok(())
 }
 
-fn create_review_comment(
+fn add_review_comment(
     repository: &Repository,
     number: u64,
     seed: crate::fixtures::ReviewCommentSeed,

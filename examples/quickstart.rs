@@ -19,7 +19,7 @@ fn main() {
     let alice = server.add_user("alice");
     let token = alice.add_token(&["repo"]);
     let repo = server
-        .create_repository("alice", "hello", false, None, None, "main")
+        .add_repository("alice", "hello", false, None, None, "main")
         .expect("create the repository");
     repo.commit_file("main", Path::new("README.md"), b"hello\n", "Initial commit")
         .expect("commit README.md");
