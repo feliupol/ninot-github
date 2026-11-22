@@ -201,23 +201,20 @@ fn concurrent_requests_hit_the_secondary_limit() {
     });
     server.add_fault(Rule::new(
         Target::Operation("users/get-authenticated".into()),
-        Fault::LatencyMs(3000),
+        Fault::LatencyMs(5000),
     ));
     std::thread::scope(|scope| {
         let slow = scope.spawn(|| Api::admin(&server).get("/user").status);
-        std::thread::sleep(Duration::from_millis(200));
-        // A loaded machine can start the slow request late; requests pass until it is in flight.
-        let limited = loop {
+        // The slow request holds its slot from admission until its latency fault ends.
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while server.applied_faults().is_empty() {
             assert!(
-                !slow.is_finished(),
-                "the slow request ended before any request was refused"
+                std::time::Instant::now() < deadline,
+                "the slow request never reached its latency fault"
             );
-            let reply = Api::admin(&server).get("/zen");
-            if reply.status != 200 {
-                break reply;
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        };
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let limited = Api::admin(&server).get("/zen");
         assert_eq!(limited.status, 403);
         assert_eq!(limited.header("retry-after"), Some("60"));
         assert_eq!(slow.join().unwrap(), 200);
