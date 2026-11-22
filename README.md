@@ -352,7 +352,7 @@ command above bans, through `tools/untyped-json/clippy.toml`:
 
 It checks only the library and binary, so tests, `xtask/`, `build.rs` and `#[cfg(test)]` code are
 not covered. Clippy does not flag `Value` variants such as `serde_json::Value::Null` or indexing
-like `x["key"]`, so a test in `xtask/src/untyped_json.rs` (part of `cargo test`) fails on those
+like `x["key"]`, so a test in `xtask/tests/untyped_json.rs` (part of `cargo test`) fails on those
 in `src/` files that carry no untyped-JSON `#![expect]` or `#![allow]`. It reads source text: it
 skips modules declared under `#[cfg(test)]` and everything after a file's first `#[cfg(test)]`.
 

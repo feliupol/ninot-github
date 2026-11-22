@@ -10,8 +10,9 @@ use super::objects::{
     Ref, RepositoryName, Status, TotalCount,
 };
 use super::pull_objects::{AutoMergeRequest, ChangedFile, GitActor};
-use super::pulls::{review_decision, review_objects};
+use super::pulls::review_objects;
 use super::query::{account_object, repository_object};
+use super::review_rollup::review_decision;
 use super::types::{
     MergeStateStatus, MergeableState, PatchStatus, PullRequestMergeMethod, PullRequestReviewState,
     PullRequestState, StatusState,

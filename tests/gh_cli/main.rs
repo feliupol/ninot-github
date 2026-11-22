@@ -107,19 +107,25 @@ fn gh_output_as(
     token: &str,
     args: &[&str],
 ) -> std::process::Output {
-    log_coverage(json!({ "test": test_name(), "gh": args }));
-    isolated(Command::new("gh"), server, config)
+    gh_command(server, config, args)
         .env("GH_ENTERPRISE_TOKEN", token)
-        .args(args)
-        .current_dir(config)
         .output()
         .expect("cannot run gh; install the GitHub CLI to run these tests")
+}
+
+/// The only place the gh_cli tests start `gh`: logs the invocation for `cargo xtask gh-coverage`
+/// and points `gh` at `server`, running in `config`. Callers add stdin or environment.
+fn gh_command(server: &Server, config: &Path, args: &[&str]) -> Command {
+    log_coverage(json!({ "test": test_name(), "gh": args }));
+    let mut command = isolated(Command::new("gh"), server, config);
+    command.args(args).current_dir(config);
+    command
 }
 
 /// Runs `git` in `dir` with the configuration `gh` sees, returning stdout or panicking with
 /// stderr.
 fn git(server: &Server, config: &Path, dir: &Path, args: &[&str]) -> String {
-    let output = isolated(Command::new("git"), server, config)
+    let output = isolated(common::git_command(), server, config)
         .args([
             "-c",
             "user.name=Admin",

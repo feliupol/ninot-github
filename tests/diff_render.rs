@@ -3,37 +3,25 @@
 mod common;
 
 use std::fs;
-use std::process::Command;
 
-use common::{Api, TempDir, clone_url, git_ok};
+use common::{Api, TempDir, clone_url, git_ok, git_ok_bytes};
 use ninot_github::Server;
 use serde_json::json;
 
+/// Runs git with the output settings `git diff` and `format-patch` need for a stable comparison.
 fn git_bytes(dir: &std::path::Path, args: &[&str]) -> Vec<u8> {
-    let output = Command::new("git")
-        .current_dir(dir)
-        .args([
-            "-c",
-            "color.ui=false",
-            "-c",
-            "diff.mnemonicPrefix=false",
-            "-c",
-            "diff.noprefix=false",
-            "-c",
-            "core.quotepath=false",
-        ])
-        .args(args)
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "git {} failed: {}",
-        args.join(" "),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    output.stdout
+    let mut all = vec![
+        "-c",
+        "color.ui=false",
+        "-c",
+        "diff.mnemonicPrefix=false",
+        "-c",
+        "diff.noprefix=false",
+        "-c",
+        "core.quotepath=false",
+    ];
+    all.extend_from_slice(args);
+    git_ok_bytes(dir, &all)
 }
 
 /// Drops the `2.x.y` line format-patch prints after `-- `.

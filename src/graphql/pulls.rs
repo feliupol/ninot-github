@@ -1,13 +1,11 @@
 //! Pull request GraphQL objects and field resolvers.
 
-use std::collections::HashMap;
-
 use async_graphql::Error;
 use serde::Deserialize;
 
 use super::objects::{self, Actor, Commit, Connection, Review};
 use super::query::repository_object;
-use super::types::{PullRequestReviewDecision, PullRequestReviewState};
+use super::review_rollup::{Opinion, latest_opinions};
 use super::{AccountKey, Env, Map, NumberArgs, Output, RepositoryKey, database_id};
 use crate::render::node_id;
 use crate::state::{Account, Repo, State, lock};
@@ -81,70 +79,6 @@ pub(super) fn pull_location(state: &State, encoded: &str) -> Option<(String, Str
             .find(|repo| repo.id == repository_id && repo.pull_requests.contains_key(&number))
             .map(|repo| (account.login.clone(), repo.name.clone(), number))
     })
-}
-
-/// A review as the review rules see it: author login, whether the author can push, state.
-pub(super) type Opinion = (Option<String>, bool, PullRequestReviewState);
-
-/// The indices, in submission order, of each pusher's latest approving, changes-requesting or
-/// dismissed review: `PullRequest.latestOpinionatedReviews`.
-///
-/// Only reviewers with push access count, whatever `writersOnly` says: reviews from
-/// non-pushers are absent with the default `writersOnly: false`. Logins compare
-/// case-insensitively.
-///
-/// Source: `PullRequest.latestOpinionatedReviews` ("A list of latest reviews per user
-/// associated with the pull request") and `PullRequestReview.authorCanPushToRepository` in
-/// `spec/schema.docs.graphql`.
-/// Source: observed on github.com 2026-11-15:
-/// <https://github.com/octocat/Spoon-Knife/pull/4008> has approvals and a changes request, all
-/// from reviewers who cannot push, an empty `latestOpinionatedReviews` and a null decision.
-fn latest_opinions(reviews: &[Opinion]) -> Vec<usize> {
-    let mut latest: HashMap<String, usize> = HashMap::new();
-    for (index, (author, can_push, state)) in reviews.iter().enumerate() {
-        if let Some(author) = author
-            && *can_push
-            && matches!(
-                state,
-                PullRequestReviewState::Approved
-                    | PullRequestReviewState::ChangesRequested
-                    | PullRequestReviewState::Dismissed
-            )
-        {
-            latest.insert(author.to_lowercase(), index);
-        }
-    }
-    let mut indices: Vec<usize> = latest.into_values().collect();
-    indices.sort_unstable();
-    indices
-}
-
-/// A pull request's `reviewDecision` from its reviews when none is seeded: any changes request
-/// among the latest opinionated reviews wins, then any approval, else null. A dismissed review
-/// is no opinion.
-///
-/// Known gap: GitHub answers `REVIEW_REQUIRED` when branch protection requires more approving
-/// reviews than were given. The fake models no required review count, so this never derives it.
-///
-/// Source: `PullRequest.reviewDecision` in `spec/schema.docs.graphql`.
-/// Source: observed on github.com 2026-11-15:
-/// <https://github.com/octocat/Spoon-Knife/pull/4008> reads null with only non-pusher reviews;
-/// <https://github.com/cli/cli/pull/15009> reads `APPROVED` after one reviewer went from
-/// changes requested to approved;
-/// <https://github.com/cli/cli/pull/8361> reads `REVIEW_REQUIRED` after the same sequence,
-/// because protection required more approvals.
-pub(super) fn review_decision(reviews: &[Opinion]) -> Option<PullRequestReviewDecision> {
-    let latest: Vec<PullRequestReviewState> = latest_opinions(reviews)
-        .into_iter()
-        .map(|index| reviews[index].2)
-        .collect();
-    if latest.contains(&PullRequestReviewState::ChangesRequested) {
-        Some(PullRequestReviewDecision::ChangesRequested)
-    } else if latest.contains(&PullRequestReviewState::Approved) {
-        Some(PullRequestReviewDecision::Approved)
-    } else {
-        None
-    }
 }
 
 /// A pull request's reviews, in submission order, with how the review rules see each.
@@ -289,5 +223,39 @@ pub(super) fn stored_commit(
 }
 
 #[cfg(test)]
-#[path = "pulls_tests.rs"]
-mod tests;
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stored_commit_falls_back_only_without_storage_or_commit() {
+        let dir =
+            std::env::temp_dir().join(format!("ninot-github-stored-commit-{}", std::process::id()));
+        let git_dir = dir.join("repo.git");
+        std::fs::create_dir_all(&git_dir).unwrap();
+        git::init_bare(&git_dir, "main").unwrap();
+        git::commit_readme(&git_dir, "main", "repo", &crate::handlers::BOT).unwrap();
+        let sha = git::resolve_commit(&git_dir, "refs/heads/main")
+            .unwrap()
+            .unwrap();
+
+        assert!(stored_commit(None, &sha).unwrap().is_none());
+        let missing = "0000000000000000000000000000000000000000";
+        assert!(stored_commit(Some(&git_dir), missing).unwrap().is_none());
+        assert_eq!(
+            stored_commit(Some(&git_dir), &sha).unwrap().unwrap().sha,
+            sha
+        );
+
+        let object = git_dir.join("objects").join(&sha[..2]).join(&sha[2..]);
+        let mut permissions = std::fs::metadata(&object).unwrap().permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        std::fs::set_permissions(&object, permissions).unwrap();
+        std::fs::write(&object, b"not a zlib stream").unwrap();
+        let Err(error) = stored_commit(Some(&git_dir), &sha) else {
+            panic!("a corrupt commit object reads as an error");
+        };
+        assert!(error.message.contains(&sha), "{}", error.message);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}

@@ -5,16 +5,12 @@ mod fields;
 mod write;
 
 use std::path::Path;
-use std::process::Command;
 
 use ninot_github::fixtures::{CheckRunSeed, CommitStatusSeed, SeedField};
 use serde_json::Value;
 
 use crate::common::TempDir;
-use crate::{
-    api, gh, gh_json, gh_output, isolated, log_coverage, open_pull, repo_with_branches, test_name,
-    tls_server,
-};
+use crate::{api, gh, gh_command, gh_json, gh_output, open_pull, repo_with_branches, tls_server};
 
 /// Runs `gh` in a clone.
 ///
@@ -27,15 +23,13 @@ pub(super) fn gh_in(
     dir: &Path,
     args: &[&str],
 ) -> String {
-    log_coverage(serde_json::json!({ "test": test_name(), "gh": args }));
     let endpoint = server.url().strip_prefix("https://").unwrap();
     let hostname = endpoint.split(':').next().unwrap_or(endpoint);
     let repo = format!("{endpoint}/admin/tool");
-    let output = isolated(Command::new("gh"), server, config)
+    let output = gh_command(server, config, args)
         .env("GH_HOST", hostname)
         .env("GH_REPO", &repo)
         .env("GH_ENTERPRISE_TOKEN", server.admin_token())
-        .args(args)
         .current_dir(dir)
         .output()
         .expect("cannot run gh");

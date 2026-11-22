@@ -143,18 +143,26 @@ impl Drop for TempDir {
     }
 }
 
-/// Runs git in `dir`, isolated from the user's configuration and never prompting.
-pub fn git(dir: &std::path::Path, args: &[&str]) -> std::process::Output {
-    std::process::Command::new("git")
-        .current_dir(dir)
-        .args(args)
+/// The only place tests start `git`: isolated from the user's and system configuration and
+/// never prompting. Callers add arguments, identity and further environment.
+pub fn git_command() -> std::process::Command {
+    let mut command = std::process::Command::new("git");
+    command
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env(
             "GIT_CONFIG_GLOBAL",
             if cfg!(windows) { "NUL" } else { "/dev/null" },
         )
         .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_ASKPASS", "")
+        .env("GIT_ASKPASS", "");
+    command
+}
+
+/// Runs git in `dir` as the `Test` identity.
+pub fn git(dir: &std::path::Path, args: &[&str]) -> std::process::Output {
+    git_command()
+        .current_dir(dir)
+        .args(args)
         .env("GIT_AUTHOR_NAME", "Test")
         .env("GIT_AUTHOR_EMAIL", "test@example.com")
         .env("GIT_COMMITTER_NAME", "Test")
@@ -165,6 +173,13 @@ pub fn git(dir: &std::path::Path, args: &[&str]) -> std::process::Output {
 
 /// Runs git and panics with its stderr unless it succeeds; returns trimmed stdout.
 pub fn git_ok(dir: &std::path::Path, args: &[&str]) -> String {
+    String::from_utf8_lossy(&git_ok_bytes(dir, args))
+        .trim()
+        .to_owned()
+}
+
+/// Runs git and panics with its stderr unless it succeeds; returns stdout unchanged.
+pub fn git_ok_bytes(dir: &std::path::Path, args: &[&str]) -> Vec<u8> {
     let output = git(dir, args);
     assert!(
         output.status.success(),
@@ -172,7 +187,7 @@ pub fn git_ok(dir: &std::path::Path, args: &[&str]) -> String {
         args.join(" "),
         String::from_utf8_lossy(&output.stderr)
     );
-    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    output.stdout
 }
 
 /// Clone URL of `owner/repo`, authenticated with `token` when given.

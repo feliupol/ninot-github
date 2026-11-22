@@ -5,12 +5,12 @@ mod variables;
 
 use std::io::Write as _;
 use std::path::Path;
-use std::process::{Command, Output, Stdio};
+use std::process::{Output, Stdio};
 
 use ninot_github::Server;
 use ninot_github::fixtures::ActionsPublicKeySeed;
 
-use crate::{gh, isolated, log_coverage, test_name};
+use crate::{gh, gh_command};
 
 /// 32-byte key `gh` can seal a repository secret to.
 const KEY_ID: &str = "actions-key";
@@ -45,10 +45,7 @@ fn create_environment(server: &Server, config: &Path, repo: &str, name: &str) {
 
 /// Runs `gh` with `body` on stdin. `Command::output` would close stdin empty.
 fn gh_stdin(server: &Server, config: &Path, args: &[&str], body: &str) -> String {
-    log_coverage(serde_json::json!({ "test": test_name(), "gh": args }));
-    let mut child = isolated(Command::new("gh"), server, config)
-        .args(args)
-        .current_dir(config)
+    let mut child = gh_command(server, config, args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

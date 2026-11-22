@@ -57,6 +57,7 @@ mod pull_write;
 mod pulls;
 mod query;
 mod read;
+mod review_rollup;
 mod schema;
 mod search;
 
