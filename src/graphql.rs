@@ -25,12 +25,9 @@
 use std::sync::{Arc, Mutex};
 
 use async_graphql::Error;
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value as Json;
-use winnow::Parser;
 
 use crate::api::Caller;
 use crate::state::State;
@@ -39,7 +36,6 @@ use errors::typed_error;
 
 mod edges;
 mod errors;
-mod grammar;
 mod issue_actions;
 mod issue_comments;
 mod issue_labels;
@@ -214,24 +210,19 @@ struct PageArgs {
 
 /// The numeric id inside a node id produced by [`node_id`].
 pub(crate) fn database_id(node: &str) -> Option<u64> {
-    let decoded = String::from_utf8(STANDARD.decode(node).ok()?).ok()?;
-    grammar::node_payload.parse(decoded.as_str()).ok()
+    crate::ids::NodeId::decode(node).map(|node| node.id)
 }
 
 pub use schema::{execute, fields};
 
-/// Decodes a `cursor:<offset>` pagination cursor.
+/// The offset a pagination cursor names.
 fn cursor_index(cursor: &str) -> Option<usize> {
-    STANDARD
-        .decode(cursor)
-        .ok()
-        .and_then(|bytes| String::from_utf8(bytes).ok())
-        .and_then(|text| grammar::cursor.parse(text.as_str()).ok())
+    crate::ids::Cursor::decode(cursor).map(|cursor| cursor.offset)
 }
 
-/// Encodes a pagination cursor for `index`.
+/// The pagination cursor of the item at `index`.
 fn cursor_of(index: usize) -> String {
-    STANDARD.encode(format!("cursor:{index}"))
+    crate::ids::Cursor { offset: index }.encode()
 }
 
 #[cfg(test)]

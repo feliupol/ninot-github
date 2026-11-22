@@ -5,8 +5,6 @@
     reason = "untyped JSON; remove when this module is typed"
 )]
 
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD;
 use chrono::{DateTime, Utc};
 use url::Url;
 
@@ -21,7 +19,7 @@ use crate::webhooks::events::model::{PayloadError, parse, required};
 
 /// GitHub's opaque global node id.
 pub fn node_id(kind: &str, id: u64) -> String {
-    STANDARD.encode(format!("0{}:{kind}{id}", kind.len()))
+    crate::ids::NodeId::new(kind, id).encode()
 }
 
 /// The host of a web URL, with its port when it has one, for a repository's `git@host:` clone

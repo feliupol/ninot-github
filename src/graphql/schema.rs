@@ -23,9 +23,8 @@ use async_graphql::parser::types::{
 };
 use async_graphql::{Error, PathSegment, Positioned, QueryPathSegment, ServerResult};
 use serde_json::Value as Json;
-use winnow::Parser;
 
-use super::{Env, Map, Resolver, SDL, grammar};
+use super::{Env, Map, Resolver, SDL};
 use crate::api::{ApiResponse, Caller};
 use crate::server::Hit;
 use crate::state::State;
@@ -74,7 +73,7 @@ fn resolve(
 ) -> Result<Option<FieldValue<'static>>, Error> {
     let empty = Map::new();
     let parent = ctx.parent_value.downcast_ref::<Map>().unwrap_or(&empty);
-    let (_, name) = grammar::field_key.parse(key).unwrap_or(("", key));
+    let name = ctx.field().name();
     let value = match resolver {
         Some(resolver) => {
             let args: Map = ctx
@@ -426,9 +425,12 @@ pub fn fields() -> Vec<String> {
     fields
 }
 
-/// The `Type.field` of an `Unknown field "field" on type "Type".` validation error.
+/// The `Type.field` of an `Unknown field "field" on type "Type".` validation error, ignoring
+/// any "Did you mean" suggestion async-graphql appends.
 fn unknown_field(message: &str) -> Option<String> {
-    let (type_name, field) = grammar::unknown_field(&mut &*message).ok()?;
+    let rest = message.strip_prefix("Unknown field \"")?;
+    let (field, rest) = rest.split_once("\" on type \"")?;
+    let (type_name, _) = rest.split_once('"')?;
     Some(format!("{type_name}.{field}"))
 }
 

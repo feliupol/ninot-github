@@ -1,9 +1,6 @@
 //! Query root fields and repository objects.
 
 use async_graphql::Error;
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD;
-use winnow::Parser;
 
 use super::objects::{self, Connection, GitObject, PageInfo, Ref};
 use super::types::{
@@ -224,13 +221,12 @@ pub(super) fn repositories(env: &Env, parent: &Map, args: &Map) -> Result<Output
     let total = repos.len();
     let start = args
         .after
-        .and_then(|cursor| STANDARD.decode(cursor).ok())
-        .and_then(|bytes| String::from_utf8(bytes).ok())
-        .and_then(|text| super::grammar::cursor.parse(text.as_str()).ok())
+        .as_deref()
+        .and_then(super::cursor_index)
         .map_or(0, |index| index + 1);
     let count = args.first.unwrap_or(30).clamp(0, 100) as usize;
     let end = (start + count).min(total);
-    let cursor = |index: usize| STANDARD.encode(format!("cursor:{index}"));
+    let cursor = super::cursor_of;
     let account = state.account(&login);
     let nodes = repos
         .get(start..end)
