@@ -80,7 +80,7 @@ impl Handler for ops::ChecksCreate {
         if run.status == types::CheckRunStatus::Completed {
             crate::webhooks::events::check_run::completed(&mut ctx, &run)?;
         }
-        Ok(ApiResponse::typed(201, &types::ChecksCreateResponse(run)))
+        Ok(ApiResponse::created(&types::ChecksCreateResponse(run)))
     }
 }
 
@@ -149,10 +149,7 @@ impl Handler for ops::ChecksUpdate {
                 crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
             crate::webhooks::events::check_run::completed(&mut ctx, &updated)?;
         }
-        Ok(ApiResponse::typed(
-            200,
-            &types::ChecksUpdateResponse(updated),
-        ))
+        Ok(ApiResponse::ok_typed(&types::ChecksUpdateResponse(updated)))
     }
 }
 
@@ -195,16 +192,15 @@ impl Handler for ops::ChecksRerequestRun {
         let mut ctx =
             crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
         crate::webhooks::events::check_run::rerequested(&mut ctx, &run)?;
-        Ok(ApiResponse::typed(
-            201,
-            &types::ChecksRerequestRunResponse(types::EmptyObject {}),
-        ))
+        Ok(ApiResponse::created(&types::ChecksRerequestRunResponse(
+            types::EmptyObject {},
+        )))
     }
 }
 
 // Source: OpenAPI checks/rerequest-run 422
 fn not_rerequestable() -> ApiResponse {
-    ApiResponse::unprocessable("Check run is not rerequestable")
+    crate::errors::GithubError::CheckNotRerequestable.to_response()
 }
 
 fn parse_id(value: &str) -> Result<i64, ApiResponse> {

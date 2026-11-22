@@ -8,7 +8,7 @@ use super::page::page_window;
 use super::pull_objects::{RollupContexts, StateCount, StatusCount};
 use super::pull_view::pull_object;
 use super::types::{ComparisonStatus, PullRequestMergeMethod};
-use super::{Env, Map, Output, PageArgs, RepositoryKey, not_found, read};
+use super::{Env, Map, Output, PageArgs, RepositoryKey, read};
 use crate::render::node_id;
 use crate::state::lock;
 use ninot_common::git;
@@ -68,10 +68,10 @@ fn pull_requests(env: &Env, parent: &Map, args: &Map) -> Result<Output, Error> {
     let state = lock(&env.state);
     let account = state
         .account(&repository.owner.login)
-        .ok_or_else(|| not_found("repository does not exist".to_owned()))?;
+        .ok_or_else(super::errors::repository_not_found)?;
     let repo = account
         .repo(&repository.name)
-        .ok_or_else(|| not_found("repository does not exist".to_owned()))?;
+        .ok_or_else(super::errors::repository_not_found)?;
     let mut rows = Vec::new();
     for (number, pull) in &repo.pull_requests {
         let Some(data) = pull.data.as_ref() else {
@@ -189,16 +189,15 @@ pub(super) fn owned_pull(env: &Env, parent: &Map) -> Result<super::objects::Pull
     let state = lock(&env.state);
     let account = state
         .account(&repository.owner.login)
-        .ok_or_else(|| not_found("repository does not exist".to_owned()))?;
+        .ok_or_else(super::errors::repository_not_found)?;
     let repo = account
         .repo(&repository.name)
-        .ok_or_else(|| not_found("repository does not exist".to_owned()))?;
+        .ok_or_else(super::errors::repository_not_found)?;
     let pull = repo
         .pull_requests
         .get(&number)
-        .ok_or_else(|| not_found("pull request does not exist".to_owned()))?;
-    pull_object(env, account, repo, number, pull)?
-        .ok_or_else(|| not_found("pull request REST model does not exist".to_owned()))
+        .ok_or_else(super::errors::pull_not_found)?;
+    pull_object(env, account, repo, number, pull)?.ok_or_else(super::errors::pull_rest_not_found)
 }
 
 #[derive(Deserialize)]
@@ -264,7 +263,7 @@ fn rollup_contexts(env: &Env, parent: &Map, args: &Map) -> Result<Output, Error>
     let repo = state
         .account(&parent.owner)
         .and_then(|account| account.repo(&parent.name))
-        .ok_or_else(|| not_found("repository does not exist".to_owned()))?;
+        .ok_or_else(super::errors::repository_not_found)?;
     let rollup = super::pull_status::rollup_nodes(repo, &parent.commit.oid);
     let paged = page_window(rollup.nodes, first, last, after);
     Output::of(RollupContexts {
@@ -322,21 +321,19 @@ fn compare_ref(env: &Env, parent: &Map, args: &Map) -> Result<Output, Error> {
     let CompareArgs { head_ref } = read(args)?;
     let name = parent
         .repository
-        .ok_or_else(|| not_found("ref has no repository".to_owned()))?;
+        .ok_or_else(super::errors::ref_without_repository)?;
     let (owner, repo_name) = name
         .name_with_owner
         .split_once('/')
-        .ok_or_else(|| not_found("ref has no repository".to_owned()))?;
+        .ok_or_else(super::errors::ref_without_repository)?;
     let state = lock(&env.state);
     let git_dir = state
         .account(owner)
         .and_then(|account| account.repo(repo_name))
         .and_then(|repo| repo.git_dir.clone())
-        .ok_or_else(|| not_found("repository does not exist".to_owned()))?;
-    let base =
-        tip(&git_dir, &parent.name).ok_or_else(|| not_found("ref does not exist".to_owned()))?;
-    let head =
-        tip(&git_dir, &head_ref).ok_or_else(|| not_found("head ref does not exist".to_owned()))?;
+        .ok_or_else(super::errors::repository_not_found)?;
+    let base = tip(&git_dir, &parent.name).ok_or_else(super::errors::ref_missing)?;
+    let head = tip(&git_dir, &head_ref).ok_or_else(super::errors::head_ref_missing)?;
     let ahead_by = git::new_commits(&git_dir, &head, &[&base])
         .map_err(|error| Error::new(error.to_string()))?
         .len();

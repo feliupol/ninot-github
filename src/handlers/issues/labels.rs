@@ -77,7 +77,7 @@ impl Handler for ops::IssuesSetLabels {
         fire_label_diff(&mut state, request, &found, number, &added, &removed)?;
         let after = super::record::snapshot(&state, request, &found, number)?;
         super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
-        Ok(ApiResponse::typed(200, &labels))
+        Ok(ApiResponse::ok_typed(&labels))
     }
 }
 
@@ -149,10 +149,9 @@ impl Handler for ops::IssuesRemoveLabel {
         fire_label_diff(&mut state, request, &found, number, &[], &removed)?;
         let after = super::record::snapshot(&state, request, &found, number)?;
         super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
-        Ok(ApiResponse::typed(
-            200,
-            &labels_named(&state, request, &found, &remaining),
-        ))
+        Ok(ApiResponse::ok_typed(&labels_named(
+            &state, request, &found, &remaining,
+        )))
     }
 }
 
@@ -195,7 +194,7 @@ fn requested_names(body: &Value) -> Result<Vec<String>, ApiResponse> {
         Value::String(name) => Ok(vec![trimmed_name(name)?]),
         Value::Array(items) => items.iter().map(one_name).collect(),
         Value::Object(object) => names_field(object),
-        _ => Err(ApiResponse::unprocessable("Invalid request body")),
+        _ => Err(crate::errors::GithubError::InvalidBody.to_response()),
     }
 }
 

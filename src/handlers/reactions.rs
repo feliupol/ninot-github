@@ -163,10 +163,7 @@ fn create(
     let subject = subject(&state, request, &found, kind)?;
     // Source: OpenAPI reactions/create-for-issue 200 ("Reaction exists")
     if let Some(existing) = state.reactions.find(subject, &caller, content) {
-        return Ok(ApiResponse::typed(
-            200,
-            &rendered(&state, request, existing),
-        ));
+        return Ok(ApiResponse::ok_typed(&rendered(&state, request, existing)));
     }
     let reaction = Reaction {
         id: state.next_id(),
@@ -176,7 +173,7 @@ fn create(
     };
     let body = rendered(&state, request, &reaction);
     state.reactions.add(subject, reaction);
-    Ok(ApiResponse::typed(201, &body))
+    Ok(ApiResponse::created(&body))
 }
 
 fn delete(state: &Mutex<State>, request: &ApiRequest, kind: Kind) -> ApiResult {
@@ -196,10 +193,7 @@ fn delete(state: &Mutex<State>, request: &ApiRequest, kind: Kind) -> ApiResult {
         .ok_or_else(ApiResponse::not_found)?;
     // Unsourced: the docs name no status for deleting another user's reaction.
     if !reaction.user.matches(&caller) {
-        return Err(ApiResponse::error(
-            403,
-            "Resource not accessible by personal access token",
-        ));
+        return Err(crate::errors::GithubError::PatForbidden.to_response());
     }
     state.reactions.remove(subject, id);
     Ok(ApiResponse::no_content())

@@ -593,8 +593,7 @@ impl Handler for ops::SearchIssuesAndPullRequests {
             .skip((page - 1).saturating_mul(per_page))
             .take(per_page)
             .collect();
-        Ok(ApiResponse::typed(
-            200,
+        Ok(ApiResponse::ok_typed(
             &crate::types::SearchIssuesAndPullRequestsResponse {
                 incomplete_results: false,
                 items,
@@ -688,7 +687,7 @@ impl Handler for ops::SearchRepos {
             items,
             total_count,
         };
-        let mut api_response = ApiResponse::typed(200, &response);
+        let mut api_response = ApiResponse::ok_typed(&response);
         let mut links = Vec::new();
         for (target, relation) in [
             (page.saturating_add(1), "next"),

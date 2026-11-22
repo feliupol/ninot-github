@@ -20,9 +20,7 @@ impl Handler for ops::PullsCreate {
         let head_ref = body.head.as_str();
         let base_ref = body.base.as_str();
         if title.is_empty() || head_ref.is_empty() || base_ref.is_empty() {
-            return Err(ApiResponse::unprocessable(
-                "title, head and base are required",
-            ));
+            return Err(crate::errors::GithubError::TitleHeadBaseRequired.to_response());
         }
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
@@ -85,9 +83,7 @@ impl Handler for ops::PullsCreate {
                         ))
                     })
                 })
-                .ok_or_else(|| {
-                    ApiResponse::unprocessable("head branch does not exist in this fork network")
-                })?
+                .ok_or_else(|| crate::errors::GithubError::HeadNotInForkNetwork.to_response())?
         };
         if head_git_dir != *git_dir {
             crate::fixture_git::copy_refs(git_dir, &head_git_dir).map_err(ApiResponse::internal)?;
@@ -95,10 +91,10 @@ impl Handler for ops::PullsCreate {
         // A missing branch is a validation failure; the status only. Source: OpenAPI pulls/create 422
         let base_sha = ninot_common::git::resolve_commit(git_dir, base_ref)
             .map_err(ApiResponse::internal)?
-            .ok_or_else(|| ApiResponse::unprocessable("base branch does not exist"))?;
+            .ok_or_else(|| crate::errors::GithubError::BaseBranchMissing.to_response())?;
         let head_sha = ninot_common::git::resolve_commit(git_dir, head_name)
             .map_err(ApiResponse::internal)?
-            .ok_or_else(|| ApiResponse::unprocessable("head branch does not exist"))?;
+            .ok_or_else(|| crate::errors::GithubError::HeadBranchMissing.to_response())?;
         let repo_urls = request.urls().repo(&found.owner, &found.name);
         let urls = repo_urls.pull(number);
         let base = types::PullRequestBase {
@@ -180,7 +176,7 @@ impl Handler for ops::PullsCreate {
         state.add_pull_request(&found.owner, &found.name, number, data.clone());
         let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
         events::pull_request::opened(&mut ctx, &data)?;
-        Ok(ApiResponse::typed(201, &data))
+        Ok(ApiResponse::created(&data))
     }
 }
 
@@ -191,9 +187,7 @@ impl Handler for ops::IssuesAddLabels {
         let requested_labels = match body {
             types::IssuesAddLabelsRequest::Variant0 { labels } => {
                 if labels.is_empty() {
-                    return Err(ApiResponse::unprocessable(
-                        "labels must contain at least one label",
-                    ));
+                    return Err(crate::errors::GithubError::LabelsRequired.to_response());
                 }
                 labels
                     .into_iter()
@@ -323,7 +317,7 @@ impl Handler for ops::IssuesAddLabels {
             }
             _ => labels,
         };
-        Ok(ApiResponse::typed(200, &labels))
+        Ok(ApiResponse::ok_typed(&labels))
     }
 }
 
@@ -333,7 +327,7 @@ impl Handler for ops::IssuesCreateComment {
         let body: types::IssuesCreateCommentRequest = request.json_as()?;
         let text = body.body.as_str();
         if text.is_empty() {
-            return Err(ApiResponse::unprocessable("body is required"));
+            return Err(crate::errors::GithubError::BodyRequired.to_response());
         }
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
@@ -405,6 +399,6 @@ impl Handler for ops::IssuesCreateComment {
         };
         let mut ctx = Ctx::new(&mut state, request, &found.owner, &found.name);
         events::issue_comment::created(&mut ctx, number, &comment)?;
-        Ok(ApiResponse::typed(201, &comment))
+        Ok(ApiResponse::created(&comment))
     }
 }

@@ -96,7 +96,7 @@ fn lock_reason(body: &Value) -> Result<Option<LockReason>, ApiResponse> {
     let value = match body {
         Value::Null => return Ok(None),
         Value::Object(object) => object.get("lock_reason"),
-        _ => return Err(ApiResponse::unprocessable("Invalid request body")),
+        _ => return Err(crate::errors::GithubError::InvalidBody.to_response()),
     };
     match value {
         None | Some(Value::Null) => Ok(None),

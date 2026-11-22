@@ -65,14 +65,11 @@ pub(crate) fn checks_forbidden(request: &ApiRequest) -> ApiResponse {
             .iter()
             .any(|scope| scope.starts_with("installation:"))
     });
-    ApiResponse::error(
-        403,
-        if integration {
-            "Resource not accessible by integration"
-        } else {
-            "Resource not accessible by personal access token"
-        },
-    )
+    if integration {
+        crate::errors::GithubError::IntegrationForbidden.to_response()
+    } else {
+        crate::errors::GithubError::PatForbidden.to_response()
+    }
 }
 
 /// GitHub App embedded on check runs and check suites.

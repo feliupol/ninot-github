@@ -37,7 +37,7 @@ impl Handler for ops::IssuesAddAssignees {
         // Source: <https://docs.github.com/en/rest/issues/assignees#add-assignees-to-an-issue>
         if !found.permission.push {
             return current_issue(&state, request, &found, number)
-                .map(|issue| ApiResponse::typed(201, &issue));
+                .map(|issue| ApiResponse::created(&issue));
         }
         let logins = match body.get("assignees") {
             Some(value) => logins_from(value)?,
@@ -84,7 +84,7 @@ impl Handler for ops::IssuesAddAssignees {
         }
         let after = super::record::snapshot(&state, request, &found, number)?;
         super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
-        Ok(ApiResponse::typed(201, &issue))
+        Ok(ApiResponse::created(&issue))
     }
 }
 
@@ -99,7 +99,7 @@ impl Handler for ops::IssuesRemoveAssignees {
         // Source: <https://docs.github.com/en/rest/issues/assignees#remove-assignees-from-an-issue>
         if !found.permission.push {
             return current_issue(&state, request, &found, number)
-                .map(|issue| ApiResponse::typed(200, &issue));
+                .map(|issue| ApiResponse::ok_typed(&issue));
         }
         let logins = match body.get("assignees") {
             Some(value) => string_logins(value)?,
@@ -136,7 +136,7 @@ impl Handler for ops::IssuesRemoveAssignees {
         }
         let after = super::record::snapshot(&state, request, &found, number)?;
         super::record::record_changes(&mut state, &found, number, &actor, &before, &after);
-        Ok(ApiResponse::typed(200, &issue))
+        Ok(ApiResponse::ok_typed(&issue))
     }
 }
 

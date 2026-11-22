@@ -6,7 +6,7 @@ use serde::Deserialize;
 use super::issue_actions::{actor, label_by_id, repo_location, webhook_err};
 use super::issues::issue_location as locate_issue;
 use super::types::IssueStateReason;
-use super::{Env, Map, MutationArgs, Output, database_id, not_found, read, typed_error};
+use super::{Env, Map, MutationArgs, Output, database_id, read};
 use crate::handlers::issues::{next_subject_number, record, rendered_issue, resolve_issue_label};
 use crate::handlers::repos::Found;
 use crate::render::node_id;
@@ -71,22 +71,16 @@ struct IssueRef {
 fn create_issue(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
     let MutationArgs { input } = read::<MutationArgs<CreateIssueInput>>(args)?;
     if !env.caller.has_scope("repo") && !env.caller.has_scope("public_repo") {
-        return Err(typed_error(
-            "Your token has not been granted the required scopes to execute this query.",
-            "INSUFFICIENT_SCOPES",
-        ));
+        return Err(super::errors::insufficient_scopes());
     }
     let mut state = lock(&env.state);
     let (owner, name) = repo_location(&state, &input.repository_id)
-        .ok_or_else(|| not_found("Could not resolve to a Repository.".to_owned()))?;
+        .ok_or_else(super::errors::resolve_repository)?;
     let permission = state
         .permission(Some(&env.caller), &owner, &name)
-        .ok_or_else(|| typed_error("Resource not accessible by integration", "FORBIDDEN"))?;
+        .ok_or_else(super::errors::integration_forbidden)?;
     if !permission.push {
-        return Err(typed_error(
-            "Resource not accessible by personal access token",
-            "FORBIDDEN",
-        ));
+        return Err(super::errors::pat_forbidden());
     }
     let found = Found {
         owner: owner.clone(),
@@ -150,7 +144,7 @@ fn create_issue(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
     );
     let actor = actor(&state, &request, &env.caller.login)?;
     let after_snap = record::snapshot(&state, &request, &found, number)
-        .map_err(|_| not_found("issue does not exist".to_owned()))?;
+        .map_err(|_| super::errors::issue_not_found())?;
     record::record_changes(
         &mut state,
         &found,
@@ -189,15 +183,11 @@ fn create_issue(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
 fn update_issue(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
     let MutationArgs { input } = read::<MutationArgs<UpdateIssueInput>>(args)?;
     let mut state = lock(&env.state);
-    let (owner, name, number) = locate_issue(&state, &input.id).ok_or_else(|| {
-        not_found(format!(
-            "Could not resolve to a node with the global id of '{}'",
-            input.id
-        ))
-    })?;
+    let (owner, name, number) =
+        locate_issue(&state, &input.id).ok_or_else(|| super::errors::resolve_node(input.id))?;
     let permission = state
         .permission(Some(&env.caller), &owner, &name)
-        .ok_or_else(|| typed_error("Resource not accessible by integration", "FORBIDDEN"))?;
+        .ok_or_else(super::errors::integration_forbidden)?;
     let found = Found {
         owner: owner.clone(),
         name: name.clone(),
@@ -205,9 +195,9 @@ fn update_issue(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
     };
     let request = env.request();
     let before = rendered_issue(&state, &request, &found, number)
-        .ok_or_else(|| not_found("issue does not exist".to_owned()))?;
+        .ok_or_else(super::errors::issue_not_found)?;
     let before_snap = record::snapshot(&state, &request, &found, number)
-        .map_err(|_| not_found("issue does not exist".to_owned()))?;
+        .map_err(|_| super::errors::issue_not_found())?;
     let assignees = input.assignee_ids.as_ref().map(|ids| {
         ids.iter()
             .filter_map(|id| account_login(&state, id).map(Name::new))
@@ -222,7 +212,7 @@ fn update_issue(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
             .repo_mut(&mut state)
             .issues
             .get_mut(&number)
-            .ok_or_else(|| not_found("issue does not exist".to_owned()))?;
+            .ok_or_else(super::errors::issue_not_found)?;
         if let Some(title) = input.title {
             issue.title = title;
         }
@@ -239,7 +229,7 @@ fn update_issue(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
     }
     let actor = actor(&state, &request, &env.caller.login)?;
     let after_snap = record::snapshot(&state, &request, &found, number)
-        .map_err(|_| not_found("issue does not exist".to_owned()))?;
+        .map_err(|_| super::errors::issue_not_found())?;
     record::record_changes(
         &mut state,
         &found,
@@ -288,14 +278,11 @@ fn set_issue_state(
     typename: &'static str,
 ) -> Result<Output, Error> {
     let mut state = lock(&env.state);
-    let (owner, name, number) = locate_issue(&state, issue_id).ok_or_else(|| {
-        not_found(format!(
-            "Could not resolve to a node with the global id of '{issue_id}'"
-        ))
-    })?;
+    let (owner, name, number) =
+        locate_issue(&state, issue_id).ok_or_else(|| super::errors::resolve_node(issue_id))?;
     let permission = state
         .permission(Some(&env.caller), &owner, &name)
-        .ok_or_else(|| typed_error("Resource not accessible by integration", "FORBIDDEN"))?;
+        .ok_or_else(super::errors::integration_forbidden)?;
     let found = Found {
         owner: owner.clone(),
         name: name.clone(),
@@ -303,15 +290,15 @@ fn set_issue_state(
     };
     let request = env.request();
     let before = rendered_issue(&state, &request, &found, number)
-        .ok_or_else(|| not_found("issue does not exist".to_owned()))?;
+        .ok_or_else(super::errors::issue_not_found)?;
     let before_snap = record::snapshot(&state, &request, &found, number)
-        .map_err(|_| not_found("issue does not exist".to_owned()))?;
+        .map_err(|_| super::errors::issue_not_found())?;
     {
         let issue = found
             .repo_mut(&mut state)
             .issues
             .get_mut(&number)
-            .ok_or_else(|| not_found("issue does not exist".to_owned()))?;
+            .ok_or_else(super::errors::issue_not_found)?;
         let now = crate::time::now_utc();
         issue.state = next;
         issue.state_reason = Some(match (next, reason) {
@@ -331,7 +318,7 @@ fn set_issue_state(
     }
     let actor = actor(&state, &request, &env.caller.login)?;
     let after_snap = record::snapshot(&state, &request, &found, number)
-        .map_err(|_| not_found("issue does not exist".to_owned()))?;
+        .map_err(|_| super::errors::issue_not_found())?;
     record::record_changes(
         &mut state,
         &found,

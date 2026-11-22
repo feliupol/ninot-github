@@ -26,10 +26,7 @@ fn find(state: &State, request: &ApiRequest, write: bool) -> Result<Found, ApiRe
     // Users with push access can create, edit and delete releases.
     // Source: <https://docs.github.com/en/rest/releases/releases#create-a-release>
     if write && !found.permission.push {
-        return Err(ApiResponse::error(
-            403,
-            "Must have push access to repository",
-        ));
+        return Err(crate::errors::GithubError::PushRepository.to_response());
     }
     Ok(found)
 }
@@ -146,7 +143,7 @@ fn ensure_tag(repo: &Repo, tag: &str, target: &str) -> Result<bool, ApiResponse>
         return Ok(false);
     }
     if git::is_empty(git_dir).map_err(ApiResponse::internal)? {
-        return Err(ApiResponse::unprocessable("Repository is empty."));
+        return Err(crate::errors::GithubError::EmptyRepository.to_response());
     }
     let sha = git::resolve_commit(git_dir, target)
         .map_err(ApiResponse::internal)?
@@ -227,7 +224,7 @@ impl Handler for ops::ReposCreateRelease {
             crate::webhooks::events::create::reference(&mut ctx, &rendered.tag_name, "tag")?;
         }
         crate::webhooks::events::release::deliver(&mut ctx, action, &rendered, None)?;
-        Ok(ApiResponse::typed(201, &rendered))
+        Ok(ApiResponse::created(&rendered))
     }
 }
 
@@ -255,10 +252,9 @@ impl Handler for ops::ReposGetLatestRelease {
             .rev()
             .find(|release| !release.draft && !release.prerelease)
             .ok_or_else(ApiResponse::not_found)?;
-        Ok(ApiResponse::typed(
-            200,
-            &render_release(&state, request, &found, release),
-        ))
+        Ok(ApiResponse::ok_typed(&render_release(
+            &state, request, &found, release,
+        )))
     }
 }
 
@@ -275,10 +271,9 @@ impl Handler for ops::ReposGetReleaseByTag {
             .iter()
             .find(|release| !release.draft && release.tag_name == tag)
             .ok_or_else(ApiResponse::not_found)?;
-        Ok(ApiResponse::typed(
-            200,
-            &render_release(&state, request, &found, release),
-        ))
+        Ok(ApiResponse::ok_typed(&render_release(
+            &state, request, &found, release,
+        )))
     }
 }
 
@@ -290,10 +285,9 @@ impl Handler for ops::ReposGetRelease {
         let release = visible(found.repo(&state), &found)
             .find(|release| release.id == id)
             .ok_or_else(ApiResponse::not_found)?;
-        Ok(ApiResponse::typed(
-            200,
-            &render_release(&state, request, &found, release),
-        ))
+        Ok(ApiResponse::ok_typed(&render_release(
+            &state, request, &found, release,
+        )))
     }
 }
 
@@ -389,7 +383,7 @@ impl Handler for ops::ReposUpdateRelease {
                 )?;
             }
         }
-        Ok(ApiResponse::typed(200, &rendered))
+        Ok(ApiResponse::ok_typed(&rendered))
     }
 }
 
@@ -491,10 +485,9 @@ impl Handler for ops::ReposUploadReleaseAsset {
             .find(|release| release.id == id)
             .unwrap();
         let asset = release.assets.last().unwrap();
-        Ok(ApiResponse::typed(
-            201,
-            &render_asset(&state, request, &found, release, asset),
-        ))
+        Ok(ApiResponse::created(&render_asset(
+            &state, request, &found, release, asset,
+        )))
     }
 }
 
@@ -519,16 +512,14 @@ impl Handler for ops::ReposGetReleaseAsset {
             find_asset(found.repo(&state), &found, id).ok_or_else(ApiResponse::not_found)?;
         // Source: <https://docs.github.com/en/rest/releases/assets#get-a-release-asset>
         if request.accept().contains("application/octet-stream") {
-            return Ok(ApiResponse::bytes(
-                200,
+            return Ok(ApiResponse::bytes_ok(
                 &asset.content_type,
                 asset.data.clone(),
             ));
         }
-        Ok(ApiResponse::typed(
-            200,
-            &render_asset(&state, request, &found, release, asset),
-        ))
+        Ok(ApiResponse::ok_typed(&render_asset(
+            &state, request, &found, release, asset,
+        )))
     }
 }
 
@@ -570,7 +561,7 @@ pub fn download(state: &Mutex<State>, caller: Option<&Caller>, path: &str) -> Op
         .find(|release| release.tag_name == tag)
         .and_then(|release| release.assets.iter().find(|asset| asset.name == *file));
     Some(match asset {
-        Some(asset) => ApiResponse::bytes(200, "application/octet-stream", asset.data.clone()),
+        Some(asset) => ApiResponse::bytes_ok("application/octet-stream", asset.data.clone()),
         None => ApiResponse::not_found(),
     })
 }

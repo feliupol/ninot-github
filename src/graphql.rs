@@ -25,7 +25,6 @@
 use std::sync::{Arc, Mutex};
 
 use async_graphql::Error;
-use async_graphql::ErrorExtensions;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use serde::Deserialize;
@@ -36,7 +35,10 @@ use winnow::Parser;
 use crate::api::Caller;
 use crate::state::State;
 
+use errors::typed_error;
+
 mod edges;
+mod errors;
 mod grammar;
 mod issue_actions;
 mod issue_comments;
@@ -82,7 +84,7 @@ impl Output {
     fn of(value: impl serde::Serialize) -> Result<Self, Error> {
         serde_json::to_value(value)
             .map(Self)
-            .map_err(|error| Error::new(format!("cannot serialize the result: {error}")))
+            .map_err(|error| errors::cannot_serialize(&error))
     }
 }
 
@@ -127,20 +129,9 @@ impl Env {
     }
 }
 
-/// GitHub's error for a missing object, with its `NOT_FOUND` type.
-fn not_found(message: String) -> Error {
-    typed_error(message, "NOT_FOUND")
-}
-
-/// An error that GitHub reports with a top-level `type`.
-fn typed_error(message: impl Into<String>, kind: &'static str) -> Error {
-    Error::new(message).extend_with(|_, extensions| extensions.set("type", kind))
-}
-
 /// Reads a field's arguments, or its parent object, as `T`.
 fn read<T: DeserializeOwned>(object: &Map) -> Result<T, Error> {
-    T::deserialize(Json::Object(object.clone()))
-        .map_err(|error| Error::new(format!("unexpected arguments or parent: {error}")))
+    T::deserialize(Json::Object(object.clone())).map_err(|error| errors::unexpected_args(&error))
 }
 
 /// The arguments of a mutation: its input object.

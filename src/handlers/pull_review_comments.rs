@@ -161,7 +161,7 @@ impl Handler for ops::PullsGetReviewComment {
             subject,
             &comment.url,
         ));
-        Ok(ApiResponse::typed(200, &comment))
+        Ok(ApiResponse::ok_typed(&comment))
     }
 }
 
@@ -178,10 +178,7 @@ impl Handler for ops::PullsUpdateReviewComment {
         let pull = found.pull_mut(&mut state, number)?;
         let comment = &mut pull.review_comments[index];
         if !may_change(&found, comment, &caller.login) {
-            return Err(ApiResponse::error(
-                403,
-                "Must have admin rights to Repository.",
-            ));
+            return Err(crate::errors::GithubError::AdminRequired.to_response());
         }
         let now = crate::time::now_utc();
         comment.body = text;
@@ -190,7 +187,7 @@ impl Handler for ops::PullsUpdateReviewComment {
         if let Some(data) = &mut pull.data {
             data.updated_at = now;
         }
-        Ok(ApiResponse::typed(200, &comment))
+        Ok(ApiResponse::ok_typed(&comment))
     }
 }
 
@@ -204,10 +201,7 @@ impl Handler for ops::PullsDeleteReviewComment {
             locate(&state, &found, request, id).ok_or_else(ApiResponse::not_found)?;
         let pull = found.pull_mut(&mut state, number)?;
         if !may_change(&found, &pull.review_comments[index], &caller.login) {
-            return Err(ApiResponse::error(
-                403,
-                "Must have admin rights to Repository.",
-            ));
+            return Err(crate::errors::GithubError::AdminRequired.to_response());
         }
         pull.review_comments.remove(index);
         if let Some(data) = &mut pull.data {
@@ -288,7 +282,7 @@ impl Handler for ops::PullsCreateReviewComment {
             },
         );
         store(&mut state, request, &found, number, &comment)?;
-        Ok(ApiResponse::typed(201, &comment))
+        Ok(ApiResponse::created(&comment))
     }
 }
 
@@ -387,5 +381,5 @@ fn reply(
         },
     );
     store(state, request, found, number, &comment)?;
-    Ok(ApiResponse::typed(201, &comment))
+    Ok(ApiResponse::created(&comment))
 }

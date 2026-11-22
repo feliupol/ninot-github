@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use super::Handler;
 use super::repo_admin::{admin_repo, private_plan};
 use super::repos::Found;
-use crate::api::{ApiRequest, ApiResponse, ApiResult, Body, paginate_with};
+use crate::api::{ApiRequest, ApiResponse, ApiResult, paginate_with};
 use crate::operation::ops;
 use crate::render::{node_id, simple_user};
 use crate::state::{AccountKind, DeploymentPolicy, Environment, EnvironmentSecret, State, lock};
@@ -22,10 +22,6 @@ use crate::types;
 /// At most six required reviewers per environment.
 // Source: OpenAPI repos/create-or-update-environment, `reviewers` description.
 const MAX_REVIEWERS: usize = 6;
-
-/// GitHub's refusal of required reviewers on a private repository whose plan lacks them.
-// Source: GitHub's 422 body for a required reviewers rule on a private repository.
-const REVIEWERS_PLAN_LIMIT: &str = "Failed to create the environment protection rule. Please ensure the billing plan supports the required reviewers protection rule.";
 
 /// The administered repository of the request and its environment `environment_name`.
 pub(super) fn environment<'a>(
@@ -106,10 +102,9 @@ impl Handler for ops::ReposGetEnvironment {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let state = lock(state);
         let (found, env) = environment(&state, request)?;
-        Ok(ApiResponse::typed(
-            200,
-            &types::ReposGetEnvironmentResponse(render(request, &state, &found, env)),
-        ))
+        Ok(ApiResponse::ok_typed(&types::ReposGetEnvironmentResponse(
+            render(request, &state, &found, env),
+        )))
     }
 }
 
@@ -147,7 +142,9 @@ impl Handler for ops::ReposCreateOrUpdateEnvironment {
         if !reviewer_ids.is_empty()
             && private_plan(&state, &found).is_some_and(|plan| !plan.private_required_reviewers())
         {
-            return Err(ApiResponse::unprocessable(REVIEWERS_PLAN_LIMIT));
+            // GitHub's refusal of required reviewers on a private repository whose plan lacks them.
+            // Source: GitHub's 422 body for a required reviewers rule on a private repository.
+            return Err(crate::errors::GithubError::ReviewersPlanLimit.to_response());
         }
         let name = request.param("environment_name").to_owned();
         let exists = found.repo(&state).setup.environments.contains_key(&name);
@@ -188,8 +185,7 @@ impl Handler for ops::ReposCreateOrUpdateEnvironment {
         }
         env.updated_at = now;
         let env = env.clone();
-        Ok(ApiResponse::typed(
-            200,
+        Ok(ApiResponse::ok_typed(
             &types::ReposCreateOrUpdateEnvironmentResponse(render(request, &state, &found, &env)),
         ))
     }
@@ -258,11 +254,7 @@ impl Handler for ops::ReposCreateDeploymentBranchPolicy {
         {
             // Source: OpenAPI repos/create-deployment-branch-policy 303, "Response if the same
             // branch name pattern already exists".
-            return Ok(ApiResponse {
-                status: 303,
-                headers: Vec::new(),
-                body: Body::Empty,
-            });
+            return Ok(ApiResponse::see_other());
         }
         let name = request.param("environment_name").to_owned();
         let id = state.next_id();
@@ -279,8 +271,7 @@ impl Handler for ops::ReposCreateDeploymentBranchPolicy {
             .get_mut(&name)
             .expect("environment found above");
         env.policies.insert(id, policy);
-        Ok(ApiResponse::typed(
-            200,
+        Ok(ApiResponse::ok_typed(
             &types::ReposCreateDeploymentBranchPolicyResponse(rendered),
         ))
     }
@@ -307,8 +298,7 @@ impl Handler for ops::ActionsGetEnvironmentPublicKey {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let state = lock(state);
         let (found, env) = environment(&state, request)?;
-        Ok(ApiResponse::typed(
-            200,
+        Ok(ApiResponse::ok_typed(
             &types::ActionsGetEnvironmentPublicKeyResponse(public_key(found.repo(&state).id, env)),
         ))
     }
@@ -371,7 +361,7 @@ impl Handler for ops::ActionsCreateOrUpdateEnvironmentSecret {
         if created_at.is_some() {
             Ok(ApiResponse::no_content())
         } else {
-            Ok(ApiResponse::typed(201, &types::EmptyObject {}))
+            Ok(ApiResponse::created(&types::EmptyObject {}))
         }
     }
 }

@@ -70,10 +70,7 @@ fn cancel_run(state: &Mutex<State>, request: &ApiRequest, force: bool) -> ApiRes
             .find(|run| run.id == id)
             .ok_or_else(ApiResponse::not_found)?;
         if run.status.as_deref() == Some("completed") {
-            return Err(ApiResponse::error(
-                409,
-                "Cannot cancel a workflow run that is completed",
-            ));
+            return Err(crate::errors::GithubError::WorkflowRunAlreadyCompleted.to_response());
         }
         run.status = Some("completed".to_owned());
         run.conclusion = Some("cancelled".to_owned());
@@ -90,13 +87,11 @@ fn cancel_run(state: &Mutex<State>, request: &ApiRequest, force: bool) -> ApiRes
         }
     }
     if force {
-        Ok(ApiResponse::typed(
-            202,
+        Ok(ApiResponse::accepted(
             &types::ActionsForceCancelWorkflowRunResponse(types::EmptyObject {}),
         ))
     } else {
-        Ok(ApiResponse::typed(
-            202,
+        Ok(ApiResponse::accepted(
             &types::ActionsCancelWorkflowRunResponse(types::EmptyObject {}),
         ))
     }
@@ -159,7 +154,7 @@ impl Handler for ops::ActionsReRunJobForWorkflowRun {
             })
             .ok_or_else(ApiResponse::not_found)?;
         if !completed {
-            return Err(ApiResponse::error(403, "Job cannot be rerun"));
+            return Err(crate::errors::GithubError::JobCannotBeRerun.to_response());
         }
         remember_attempt(repo, run_id);
         let now = crate::time::now_utc();
@@ -191,8 +186,7 @@ impl Handler for ops::ActionsReRunJobForWorkflowRun {
             step.completed_at = None;
             step.started_at = None;
         }
-        Ok(ApiResponse::typed(
-            201,
+        Ok(ApiResponse::created(
             &types::ActionsReRunJobForWorkflowRunResponse(types::EmptyObject {}),
         ))
     }

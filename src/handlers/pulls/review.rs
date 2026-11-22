@@ -25,9 +25,7 @@ impl Handler for ops::PullsCreateReview {
         if !matches!(event, "APPROVE" | "PENDING")
             && body.body.as_deref().unwrap_or_default().is_empty()
         {
-            return Err(ApiResponse::unprocessable(
-                "body is required for this review event",
-            ));
+            return Err(crate::errors::GithubError::ReviewBodyRequired.to_response());
         }
 
         let mut state = lock(state);
@@ -61,9 +59,7 @@ impl Handler for ops::PullsCreateReview {
         if matches!(event, "APPROVE" | "REQUEST_CHANGES")
             && data.user.login.eq_ignore_ascii_case(&caller.login)
         {
-            return Err(ApiResponse::unprocessable(
-                "A pull request author cannot approve or request changes on their own pull request",
-            ));
+            return Err(crate::errors::GithubError::AuthorCannotApprove.to_response());
         }
         let review_state = match event {
             "APPROVE" => "APPROVED",
@@ -132,7 +128,7 @@ impl Handler for ops::PullsCreateReview {
                 }
             }
         }
-        Ok(ApiResponse::typed(200, &review))
+        Ok(ApiResponse::ok_typed(&review))
     }
 }
 
@@ -142,9 +138,7 @@ impl Handler for ops::PullsRequestReviewers {
         let body: types::PullsRequestReviewersRequest = request.json_as()?;
         let (reviewers, teams) = (body.reviewers, body.team_reviewers);
         if reviewers.is_empty() && teams.is_empty() {
-            return Err(ApiResponse::unprocessable(
-                "reviewers or team_reviewers is required",
-            ));
+            return Err(crate::errors::GithubError::ReviewersRequired.to_response());
         }
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
@@ -239,10 +233,9 @@ impl Handler for ops::PullsRequestReviewers {
         for team in &added_teams {
             events::pull_request::review_requested_team(&mut ctx, &data, team)?;
         }
-        Ok(ApiResponse::typed(
-            201,
-            &crate::render::pull_request_simple(&data),
-        ))
+        Ok(ApiResponse::created(&crate::render::pull_request_simple(
+            &data,
+        )))
     }
 }
 
@@ -257,10 +250,7 @@ impl Handler for ops::PullsRemoveRequestedReviewers {
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         if !found.permission.push {
-            return Err(ApiResponse::error(
-                403,
-                "Resource not accessible by personal access token",
-            ));
+            return Err(crate::errors::GithubError::PatForbidden.to_response());
         }
         let actor = caller_user(&state, request, &caller.login)?;
         let ids = body
@@ -313,9 +303,8 @@ impl Handler for ops::PullsRemoveRequestedReviewers {
             .map_err(|message| ApiResponse::unprocessable(&message))?;
         }
         let data = pull.data.as_ref().expect("checked above");
-        Ok(ApiResponse::typed(
-            200,
-            &crate::render::pull_request_simple(data),
-        ))
+        Ok(ApiResponse::ok_typed(&crate::render::pull_request_simple(
+            data,
+        )))
     }
 }

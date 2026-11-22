@@ -14,20 +14,12 @@ use crate::types;
 // Source: <https://docs.github.com/en/rest/repos/repos#replace-all-repository-topics>
 pub(super) const SCOPES: [&str; 1] = ["repo"];
 
-/// GitHub's refusal of a feature its plan withholds from private repositories.
-// Source: GitHub's 403 body for rulesets of a private repository on Free.
-pub(super) const PLAN_LIMIT: &str =
-    "Upgrade to GitHub Pro or make this repository public to enable this feature.";
-
 /// The repository of the request, when the caller administers it.
 pub(super) fn admin_repo(state: &State, request: &ApiRequest) -> Result<Found, ApiResponse> {
     request.require_scope(&SCOPES)?;
     let found = find_repo(state, request)?;
     if !found.permission.admin {
-        return Err(ApiResponse::error(
-            403,
-            "Must have admin rights to Repository.",
-        ));
+        return Err(crate::errors::GithubError::AdminRequired.to_response());
     }
     Ok(found)
 }
@@ -41,9 +33,14 @@ pub(super) fn private_plan(state: &State, found: &Found) -> Option<Plan> {
 }
 
 /// 403 when the owner's plan withholds rulesets from this repository.
+///
+/// GitHub's refusal of a feature its plan withholds from private repositories.
+// Source: GitHub's 403 body for rulesets of a private repository on Free.
 pub(super) fn require_rulesets(state: &State, found: &Found) -> Result<(), ApiResponse> {
     match private_plan(state, found) {
-        Some(plan) if !plan.private_rulesets() => Err(ApiResponse::error(403, PLAN_LIMIT)),
+        Some(plan) if !plan.private_rulesets() => {
+            Err(crate::errors::GithubError::PlanLimit.to_response())
+        }
         _ => Ok(()),
     }
 }
@@ -92,8 +89,7 @@ impl Handler for ops::ReposReplaceAllTopics {
             ));
         }
         found.repo_mut(&mut state).setup.topics = names.clone();
-        Ok(ApiResponse::typed(
-            200,
+        Ok(ApiResponse::ok_typed(
             &types::ReposReplaceAllTopicsResponse(types::Topic { names }),
         ))
     }
@@ -104,10 +100,9 @@ impl Handler for ops::ReposGetAllTopics {
         let state = lock(state);
         let found = find_repo(&state, request)?;
         let names = found.repo(&state).setup.topics.clone();
-        Ok(ApiResponse::typed(
-            200,
-            &types::ReposGetAllTopicsResponse(types::Topic { names }),
-        ))
+        Ok(ApiResponse::ok_typed(&types::ReposGetAllTopicsResponse(
+            types::Topic { names },
+        )))
     }
 }
 
@@ -119,8 +114,7 @@ impl Handler for ops::ActionsGetGithubActionsPermissionsRepository {
         // A disabled repository has no allowed actions.
         // Source: <https://docs.github.com/en/rest/actions/permissions#get-github-actions-permissions-for-a-repository>
         let allowed_actions = actions.enabled.then_some(actions.allowed_actions);
-        Ok(ApiResponse::typed(
-            200,
+        Ok(ApiResponse::ok_typed(
             &types::ActionsGetGithubActionsPermissionsRepositoryResponse(
                 types::ActionsRepositoryPermissions {
                     allowed_actions,
@@ -152,8 +146,7 @@ impl Handler for ops::ActionsGetGithubActionsDefaultWorkflowPermissionsRepositor
         let state = lock(state);
         let found = admin_repo(&state, request)?;
         let actions = &found.repo(&state).setup.actions;
-        Ok(ApiResponse::typed(
-            200,
+        Ok(ApiResponse::ok_typed(
             &types::ActionsGetGithubActionsDefaultWorkflowPermissionsRepositoryResponse(
                 types::ActionsGetDefaultWorkflowPermissions {
                     can_approve_pull_request_reviews: types::ActionsCanApprovePullRequestReviews(

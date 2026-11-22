@@ -52,7 +52,7 @@ impl Handler for ops::IssuesCreateLabel {
             .repo_mut(&mut state)
             .labels
             .insert(Name::new(&record.name), record);
-        Ok(ApiResponse::typed(201, &label).with_header("location", label.url.clone()))
+        Ok(ApiResponse::created(&label).with_header("location", label.url.clone()))
     }
 }
 
@@ -65,7 +65,7 @@ impl Handler for ops::IssuesGetLabel {
             .get(&key)
             .cloned()
             .ok_or_else(ApiResponse::not_found)?;
-        Ok(ApiResponse::typed(200, &label))
+        Ok(ApiResponse::ok_typed(&label))
     }
 }
 
@@ -82,7 +82,7 @@ impl Handler for ops::IssuesUpdateLabel {
         super::require_push(&found)?;
         let patch = label_patch(&state, request, &found, &body, &key)?;
         let label = store_patch(&mut state, request, &found, &key, patch)?;
-        Ok(ApiResponse::typed(200, &label))
+        Ok(ApiResponse::ok_typed(&label))
     }
 }
 

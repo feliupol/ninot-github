@@ -47,7 +47,7 @@ impl Handler for ops::OrgsList {
             .iter()
             .map(|org| organization_simple(request, org))
             .collect();
-        let response = ApiResponse::json(200, Value::Array(body));
+        let response = ApiResponse::ok(Value::Array(body));
         Ok(match next {
             // Source: <https://docs.github.com/en/rest/orgs/orgs#list-organizations>
             Some(last) if more => response.with_header(
@@ -117,7 +117,7 @@ impl Handler for ops::OrgsUpdate {
             profile.has_repository_projects = Some(value);
         }
         let org = state.account(request.param("org")).expect("organization");
-        Ok(ApiResponse::typed(200, &render::organization(request, org)))
+        Ok(ApiResponse::ok_typed(&render::organization(request, org)))
     }
 }
 
@@ -145,13 +145,10 @@ impl Handler for ops::OrgsListAppInstallations {
                 .map(|installation| super::apps::installation_model(request, &state, installation))
                 .collect(),
         );
-        let response = ApiResponse::json(
-            200,
-            json!({
-                "total_count": total,
-                "installations": serde_json::to_value(page).expect("installations serialize"),
-            }),
-        );
+        let response = ApiResponse::ok(json!({
+            "total_count": total,
+            "installations": serde_json::to_value(page).expect("installations serialize"),
+        }));
         Ok(match link {
             Some(link) => response.with_header("link", link),
             None => response,

@@ -272,13 +272,10 @@ impl Handler for ops::SearchTopics {
     fn handle(_state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         Query::from_request(request)?;
         let items: Vec<types::TopicSearchResultItem> = Vec::new();
-        Ok(ApiResponse::typed(
-            200,
-            &types::SearchTopicsResponse {
-                incomplete_results: false,
-                total_count: count(items.len()),
-                items,
-            },
-        ))
+        Ok(ApiResponse::ok_typed(&types::SearchTopicsResponse {
+            incomplete_results: false,
+            total_count: count(items.len()),
+            items,
+        }))
     }
 }

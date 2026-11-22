@@ -70,16 +70,14 @@ impl Handler for ops::GitCreateTag {
         let target = object_id(&body.object)?;
         let header = repo
             .find_header(target)
-            .map_err(|_| ApiResponse::unprocessable("object does not exist"))?;
+            .map_err(|_| crate::errors::GithubError::ObjectMissing.to_response())?;
         let expected = match body.type_ {
             types::GitCreateTagRequestType::Commit => gix::objs::Kind::Commit,
             types::GitCreateTagRequestType::Tree => gix::objs::Kind::Tree,
             types::GitCreateTagRequestType::Blob => gix::objs::Kind::Blob,
         };
         if header.kind() != expected {
-            return Err(ApiResponse::unprocessable(
-                "object type does not match the provided type",
-            ));
+            return Err(crate::errors::GithubError::ObjectTypeMismatch.to_response());
         }
         let now = crate::time::now_utc();
         let mutex = state;
@@ -123,11 +121,12 @@ impl Handler for ops::GitCreateTag {
             );
             crate::webhooks::events::create::reference(&mut ctx, &body.tag, "tag")?;
         }
-        Ok(ApiResponse::typed(
-            201,
-            &types::GitCreateTagResponse(render_tag(request, &located, &sha, decoded)?),
+        Ok(
+            ApiResponse::created(&types::GitCreateTagResponse(render_tag(
+                request, &located, &sha, decoded,
+            )?))
+            .with_header("location", url),
         )
-        .with_header("location", url))
     }
 }
 
@@ -143,9 +142,8 @@ impl Handler for ops::GitGetTag {
         }
         let stored = repo.find_tag(id).map_err(ApiResponse::internal)?;
         let decoded = stored.decode().map_err(ApiResponse::internal)?;
-        Ok(ApiResponse::typed(
-            200,
-            &types::GitGetTagResponse(render_tag(request, &located, &id.to_string(), decoded)?),
-        ))
+        Ok(ApiResponse::ok_typed(&types::GitGetTagResponse(
+            render_tag(request, &located, &id.to_string(), decoded)?,
+        )))
     }
 }

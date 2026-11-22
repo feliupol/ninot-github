@@ -135,7 +135,7 @@ fn selected_page(request: &ApiRequest, org: &Account, ids: &[u64]) -> ApiResult 
 }
 
 fn created() -> ApiResult {
-    Ok(ApiResponse::typed(201, &types::EmptyObject {}))
+    Ok(ApiResponse::created(&types::EmptyObject {}))
 }
 
 /// Ids to store for a partial update. Omitted ids keep the current selection.
@@ -159,14 +159,14 @@ fn chosen_ids(
 
 // Source: OpenAPI actions/list-selected-repos-for-org-variable, 409 when visibility is not selected.
 fn not_selected() -> ApiResponse {
-    ApiResponse::error(409, "Visibility must be selected")
+    crate::errors::GithubError::VisibilityMustBeSelected.to_response()
 }
 
 impl Handler for ops::ActionsGetOrgPublicKey {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let state = lock(state);
         let org = owner_org(&state, request)?;
-        Ok(ApiResponse::typed(200, &org_public_key(org.id)))
+        Ok(ApiResponse::ok_typed(&org_public_key(org.id)))
     }
 }
 
@@ -202,10 +202,9 @@ impl Handler for ops::ActionsGetOrgSecret {
             .actions_secrets
             .get(request.param("secret_name"))
             .ok_or_else(ApiResponse::not_found)?;
-        Ok(ApiResponse::typed(
-            200,
-            &render_secret(request, &org.login, secret),
-        ))
+        Ok(ApiResponse::ok_typed(&render_secret(
+            request, &org.login, secret,
+        )))
     }
 }
 
@@ -350,10 +349,9 @@ impl Handler for ops::ActionsGetOrgVariable {
             .actions_variables
             .get(&variable_name(request.param("name")))
             .ok_or_else(ApiResponse::not_found)?;
-        Ok(ApiResponse::typed(
-            200,
-            &render_variable(request, &org.login, variable),
-        ))
+        Ok(ApiResponse::ok_typed(&render_variable(
+            request, &org.login, variable,
+        )))
     }
 }
 

@@ -54,10 +54,7 @@ pub(crate) fn locate_writable(
     let caller = request.require_scope(&["repo", "public_repo"])?.clone();
     let located = locate(state, request)?;
     if !located.found.permission.push {
-        return Err(ApiResponse::error(
-            403,
-            "Resource not accessible by integration",
-        ));
+        return Err(crate::errors::GithubError::IntegrationForbidden.to_response());
     }
     Ok((caller, located))
 }
@@ -65,7 +62,7 @@ pub(crate) fn locate_writable(
 /// GitHub's answer for git data in a repository without commits.
 /// Source: <https://docs.github.com/en/rest/guides/using-the-rest-api-to-interact-with-your-git-database#overview>
 pub(crate) fn empty_repository() -> ApiResponse {
-    ApiResponse::error(409, "Git Repository is empty.")
+    crate::errors::GithubError::GitRepositoryEmpty.to_response()
 }
 
 /// Opens the bare repository, ignoring the user's and system's configuration.
@@ -258,6 +255,6 @@ pub(crate) fn is_ancestor(git_dir: &Path, old: &str, new: &str) -> Result<bool, 
         return Ok(true);
     }
     let reachable = ninot_common::git::new_commits(git_dir, new, &[])
-        .map_err(|_| ApiResponse::unprocessable("Update is not a fast forward"))?;
+        .map_err(|_| crate::errors::GithubError::NotFastForward.to_response())?;
     Ok(reachable.iter().any(|sha| sha.eq_ignore_ascii_case(old)))
 }

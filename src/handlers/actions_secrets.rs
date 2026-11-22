@@ -19,10 +19,7 @@ fn secret_repository<'a>(
 ) -> Result<&'a crate::state::Repo, ApiResponse> {
     let found = find_repo(state, request)?;
     if !found.permission.admin {
-        return Err(ApiResponse::error(
-            403,
-            "Must have admin rights to Repository.",
-        ));
+        return Err(crate::errors::GithubError::AdminRequired.to_response());
     }
     let repo = state
         .account(&found.owner)
@@ -40,8 +37,7 @@ impl Handler for ops::ActionsGetRepoPublicKey {
             .actions_public_key
             .as_ref()
             .ok_or_else(ApiResponse::not_found)?;
-        Ok(ApiResponse::typed(
-            200,
+        Ok(ApiResponse::ok_typed(
             &types::ActionsGetRepoPublicKeyResponse(types::ActionsPublicKey {
                 key_id: key.key_id.clone(),
                 key: key.key.clone(),
@@ -94,10 +90,9 @@ impl Handler for ops::ActionsGetRepoSecret {
             created_at: secret.created_at,
             updated_at: secret.updated_at,
         };
-        Ok(ApiResponse::typed(
-            200,
-            &types::ActionsGetRepoSecretResponse(output),
-        ))
+        Ok(ApiResponse::ok_typed(&types::ActionsGetRepoSecretResponse(
+            output,
+        )))
     }
 }
 
@@ -108,10 +103,7 @@ impl Handler for ops::ActionsCreateOrUpdateRepoSecret {
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         if !found.permission.admin {
-            return Err(ApiResponse::error(
-                403,
-                "Must have admin rights to Repository.",
-            ));
+            return Err(crate::errors::GithubError::AdminRequired.to_response());
         }
         let repo = state
             .account_mut(&found.owner)
@@ -146,8 +138,7 @@ impl Handler for ops::ActionsCreateOrUpdateRepoSecret {
         if existed {
             Ok(ApiResponse::no_content())
         } else {
-            Ok(ApiResponse::typed(
-                201,
+            Ok(ApiResponse::created(
                 &types::ActionsCreateOrUpdateRepoSecretResponse(types::EmptyObject {}),
             ))
         }
@@ -160,10 +151,7 @@ impl Handler for ops::ActionsDeleteRepoSecret {
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         if !found.permission.admin {
-            return Err(ApiResponse::error(
-                403,
-                "Must have admin rights to Repository.",
-            ));
+            return Err(crate::errors::GithubError::AdminRequired.to_response());
         }
         let repo = state
             .account_mut(&found.owner)

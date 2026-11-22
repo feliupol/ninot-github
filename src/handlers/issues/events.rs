@@ -65,10 +65,13 @@ impl Handler for ops::IssuesGetEvent {
             .into_iter()
             .find(|(event, _)| event.id == id)
             .ok_or_else(ApiResponse::not_found)?;
-        Ok(ApiResponse::json(
-            200,
-            render_event(&state, request, &found, &event, Some(&issue)),
-        ))
+        Ok(ApiResponse::ok(render_event(
+            &state,
+            request,
+            &found,
+            &event,
+            Some(&issue),
+        )))
     }
 }
 

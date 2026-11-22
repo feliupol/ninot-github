@@ -124,7 +124,7 @@ impl Handler for ops::UsersUpdateAuthenticated {
         if let Some(name) = body.name {
             account.name = Some(name);
         }
-        Ok(ApiResponse::typed(200, &private_user(request, account)))
+        Ok(ApiResponse::ok_typed(&private_user(request, account)))
     }
 }
 
@@ -208,7 +208,7 @@ impl Handler for ops::UsersCreatePublicSshKeyForAuthenticatedUser {
         };
         let response = full_key(request, &stored);
         account.ssh_keys.push(stored);
-        Ok(ApiResponse::typed(201, &response))
+        Ok(ApiResponse::created(&response))
     }
 }
 
@@ -274,10 +274,9 @@ impl Handler for ops::UsersGetById {
             .accounts()
             .find(|account| account.id == id)
             .ok_or_else(ApiResponse::not_found)?;
-        Ok(ApiResponse::typed(
-            200,
-            &render::public_user(request, account),
-        ))
+        Ok(ApiResponse::ok_typed(&render::public_user(
+            request, account,
+        )))
     }
 }
 
@@ -308,7 +307,7 @@ impl Handler for ops::UsersList {
             .iter()
             .map(|account| render::simple_user(request, account))
             .collect();
-        let response = ApiResponse::typed(200, &users);
+        let response = ApiResponse::ok_typed(&users);
         Ok(match accounts.last() {
             Some(last) if more => {
                 let url = request

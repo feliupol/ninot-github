@@ -14,7 +14,7 @@ impl Handler for ops::GistsCreate {
         request.require_scope(&["gist"])?;
         let body: types::GistsCreateRequest = request.json_as()?;
         if body.files.is_empty() {
-            return Err(ApiResponse::unprocessable("files is required"));
+            return Err(crate::errors::GithubError::FilesRequired.to_response());
         }
 
         let mut state = lock(state);
@@ -37,10 +37,7 @@ impl Handler for ops::GistsCreate {
         };
         let rendered = gist_simple(request, &gist);
         state.gists.push(gist);
-        Ok(ApiResponse::typed(
-            201,
-            &types::GistsCreateResponse(rendered),
-        ))
+        Ok(ApiResponse::created(&types::GistsCreateResponse(rendered)))
     }
 }
 

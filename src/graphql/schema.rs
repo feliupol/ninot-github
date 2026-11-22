@@ -92,11 +92,9 @@ fn resolve(
             Some(value) => value,
             // Connections store `nodes`. `edges` is the same page with cursors.
             None if name == "edges" => super::edges::from_nodes(parent)
-                .ok_or_else(|| Error::new(format!("Not implemented by ninot-github: {key}")))?,
+                .ok_or_else(|| super::errors::not_implemented(key))?,
             None => {
-                return Err(Error::new(format!(
-                    "Not implemented by ninot-github: {key}"
-                )));
+                return Err(super::errors::not_implemented(key));
             }
         },
     };
@@ -444,11 +442,16 @@ pub fn execute(
     body: &[u8],
 ) -> ApiResponse {
     let Some(caller) = caller else {
-        return ApiResponse::error(401, "This endpoint requires you to be authenticated.");
+        return crate::errors::GithubError::GraphqlUnauthenticated.to_response();
     };
     let request: async_graphql::Request = match serde_json::from_slice(body) {
         Ok(request) => request,
-        Err(error) => return ApiResponse::error(400, &format!("Problems parsing JSON: {error}")),
+        Err(error) => {
+            return crate::errors::GithubError::ProblemsParsingJsonDetail {
+                detail: error.to_string(),
+            }
+            .to_response();
+        }
     };
     let request = request
         .data(Env {

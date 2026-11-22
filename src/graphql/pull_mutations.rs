@@ -6,7 +6,7 @@ use serde::Deserialize;
 use super::objects::{AutoMergeRequest, NodeRef};
 use super::pulls::{pull_id, pull_location};
 use super::types::PullRequestMergeMethod;
-use super::{Env, Map, MutationArgs, Output, not_found, read, typed_error};
+use super::{Env, Map, MutationArgs, Output, read, typed_error};
 use crate::render::node_id;
 use crate::state::lock;
 
@@ -70,17 +70,14 @@ struct AutoMergePullRequest {
 fn set_pull_request_auto_merge(env: &Env, args: &Map, enabled: bool) -> Result<Output, Error> {
     let MutationArgs { input } = read::<MutationArgs<AutoMergeInput>>(args)?;
     let mut state = lock(&env.state);
-    let (owner, repo, number) = pull_location(&state, &input.pull_request_id)
-        .ok_or_else(|| not_found("pull request does not exist".to_owned()))?;
+    let (owner, repo, number) =
+        pull_location(&state, &input.pull_request_id).ok_or_else(super::errors::pull_not_found)?;
     let allowed = state
         .account(&owner)
         .and_then(|account| account.repo(&repo))
         .is_some_and(|repository| repository.settings.allow_auto_merge);
     if enabled && !allowed {
-        return Err(typed_error(
-            "auto merge is not allowed for this repository",
-            "UNPROCESSABLE",
-        ));
+        return Err(super::errors::auto_merge_not_allowed());
     }
     let enabled_by = state.account(&env.caller.login).map(|account| {
         crate::render::simple_user(
@@ -98,7 +95,7 @@ fn set_pull_request_auto_merge(env: &Env, args: &Map, enabled: bool) -> Result<O
     let data = pull
         .data
         .as_mut()
-        .ok_or_else(|| not_found("pull request REST model does not exist".to_owned()))?;
+        .ok_or_else(super::errors::pull_rest_not_found)?;
     let auto_merge_request = if enabled {
         let method = match input.merge_method.unwrap_or(PullRequestMergeMethod::Squash) {
             PullRequestMergeMethod::Merge => crate::types::AutoMergeMergeMethod::Merge,
@@ -199,12 +196,9 @@ fn set_pull_request_draft(env: &Env, args: &Map, draft: bool) -> Result<Output, 
                         .as_ref()
                         .is_some_and(|data| data.draft.unwrap_or(false) != draft);
                     if flips {
-                        let actor = actor.clone().ok_or_else(|| {
-                            not_found(format!(
-                                "Could not resolve to a User '{}'",
-                                env.caller.login
-                            ))
-                        })?;
+                        let actor = actor
+                            .clone()
+                            .ok_or_else(|| super::errors::resolve_user(&env.caller.login))?;
                         pull.apply_event(crate::state::NewTimelineEvent {
                             id: event_id,
                             kind: if draft {
@@ -237,9 +231,7 @@ fn set_pull_request_draft(env: &Env, args: &Map, draft: bool) -> Result<Output, 
             }
         }
     }
-    Err(not_found(format!(
-        "Could not resolve to a node with the global id of '{id}'"
-    )))
+    Err(super::errors::resolve_node(id))
 }
 
 /// The input of `Mutation.resolveReviewThread` that is applied.
@@ -272,7 +264,7 @@ fn resolve_review_thread(env: &Env, _: &Map, args: &Map) -> Result<Output, Error
             }
         }
     }
-    Err(not_found(format!("Could not resolve review thread '{id}'")))
+    Err(super::errors::resolve_review_thread(&id))
 }
 
 /// The input of `Mutation.addPullRequestReviewThreadReply` that is applied.
@@ -316,5 +308,5 @@ fn reply_to_review_thread(env: &Env, _: &Map, args: &Map) -> Result<Output, Erro
             }
         }
     }
-    Err(not_found(format!("Could not resolve review thread '{id}'")))
+    Err(super::errors::resolve_review_thread(&id))
 }

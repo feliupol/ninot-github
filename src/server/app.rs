@@ -12,11 +12,11 @@ fn body_error(error: &axum::Error) -> ApiResponse {
         }
         source = cause.source();
     }
-    ApiResponse::error(400, "cannot read request body")
+    crate::errors::GithubError::CannotReadBody.to_response()
 }
 
 fn body_too_large() -> ApiResponse {
-    ApiResponse::error(413, "Request body too large")
+    crate::errors::GithubError::BodyTooLarge.to_response()
 }
 
 /// The largest request body the fake reads, 100 MiB (GitHub's hard limit for one file). A
@@ -52,9 +52,6 @@ pub(super) async fn dispatch(AxumState(app): AxumState<Arc<App>>, request: Reque
         None => response,
     }
 }
-
-/// Body of a `403` secondary rate limit, as GitHub words it.
-const SECONDARY_RATE_LIMIT: &str = "You have exceeded a secondary rate limit. Please wait a few minutes before you try again. If you reach out to GitHub Support for help, please include the request ID.";
 
 impl App {
     /// Applies rate limits and injected faults around [`App::serve`].
@@ -156,14 +153,17 @@ impl App {
                         format!("user ID {id}")
                     }
                 };
-                let message = format!("API rate limit exceeded for {who}.");
-                (ApiResponse::error(403, &message), window)
+                (
+                    crate::errors::GithubError::RateLimitExceeded { who }.to_response(),
+                    window,
+                )
             }
             Refusal::Secondary {
                 window,
                 retry_after,
             } => (
-                ApiResponse::error(403, SECONDARY_RATE_LIMIT)
+                crate::errors::GithubError::SecondaryRateLimit
+                    .to_response()
                     .with_header("retry-after", retry_after.to_string()),
                 window,
             ),
@@ -214,16 +214,15 @@ impl App {
         let terminal = match decision.terminal {
             None => return self.serve(parts, body, client),
             Some(Fault::Status(status)) => {
-                let message = if status >= 500 {
-                    "Server Error"
-                } else {
-                    "Injected fault"
-                };
-                return into_response(ApiResponse::error(status, message), None);
+                return into_response(
+                    crate::errors::GithubError::injected(status).to_response(),
+                    None,
+                );
             }
             Some(Fault::SecondaryRateLimit) => {
                 return into_response(
-                    ApiResponse::error(403, SECONDARY_RATE_LIMIT)
+                    crate::errors::GithubError::SecondaryRateLimit
+                        .to_response()
                         .with_header("retry-after", "60".to_owned()),
                     None,
                 );
@@ -261,7 +260,7 @@ impl App {
                     .cloned();
                 if let Some(text) = text {
                     return into_response(
-                        ApiResponse::bytes(200, "text/plain; charset=utf-8", text.into_bytes()),
+                        ApiResponse::bytes_ok("text/plain; charset=utf-8", text.into_bytes()),
                         None,
                     );
                 }
@@ -336,7 +335,7 @@ impl App {
                     }
                 };
                 return into_response(
-                    ApiResponse::bytes(200, "application/zip", bytes),
+                    ApiResponse::bytes_ok("application/zip", bytes),
                     caller.as_ref(),
                 );
             }
@@ -369,7 +368,7 @@ impl App {
                 };
                 if let Some(bytes) = bytes {
                     return into_response(
-                        ApiResponse::bytes(200, "application/zip", bytes),
+                        ApiResponse::bytes_ok("application/zip", bytes),
                         caller.as_ref(),
                     );
                 }
@@ -401,7 +400,7 @@ impl App {
             &body,
             &web_url,
         ) {
-            if response.status == 404 {
+            if crate::errors::is_not_found(response.status) {
                 self.record(Hit::Unrouted {
                     method: parts.method.to_string(),
                     path: path.to_owned(),
@@ -473,10 +472,10 @@ impl App {
             response
         };
         let Some(handler) = handlers::handler(found.info) else {
-            let response = ApiResponse::error(
-                501,
-                &format!("Not implemented by ninot-github: {}", found.info.id),
-            );
+            let response = crate::errors::GithubError::NotImplemented {
+                operation: found.info.id.to_owned(),
+            }
+            .to_response();
             return served(into_response(response, caller.as_ref()));
         };
         if let Err(refusal) = validate::check_request(found.info, &body) {
@@ -521,7 +520,7 @@ impl App {
             ));
         }
         #[cfg(feature = "response-log")]
-        if (200..300).contains(&response.status)
+        if crate::errors::is_success(response.status)
             && let Body::Json(body) = &response.body
         {
             super::response_log::record(operation, response.status, body);
@@ -540,7 +539,7 @@ impl App {
         let caller = match self.authenticate(&parts.headers) {
             Ok(caller) => caller,
             Err(_) => {
-                return git_text(401, "Bad credentials\n")
+                return git_text(StatusCode::UNAUTHORIZED, "Bad credentials\n")
                     .with_header("www-authenticate", "Basic realm=\"GitHub\"".to_owned())
                     .into_axum();
             }
@@ -557,9 +556,9 @@ impl App {
                 Some((owner, name, permission, git_dir))
             })
         };
-        let denied = |status: u16, text: &str| {
+        let denied = |status: StatusCode, text: &str| {
             if caller.is_none() {
-                git_text(401, "Authentication required\n")
+                git_text(StatusCode::UNAUTHORIZED, "Authentication required\n")
                     .with_header("www-authenticate", "Basic realm=\"GitHub\"".to_owned())
                     .into_axum()
             } else {
@@ -570,8 +569,8 @@ impl App {
             Some((owner, name, permission, git_dir)) if !push || permission.push => {
                 (owner, name, git_dir)
             }
-            Some(_) => return denied(403, "Permission denied\n"),
-            None => return denied(404, "Repository not found.\n"),
+            Some(_) => return denied(StatusCode::FORBIDDEN, "Permission denied\n"),
+            None => return denied(StatusCode::NOT_FOUND, "Repository not found.\n"),
         };
         let header = |name: &str| {
             parts
@@ -594,9 +593,12 @@ impl App {
         let before = receive.then(|| ref_snapshot(&git_dir));
         let response = match git::http_backend(&git_dir, &request) {
             Ok(response) => response,
-            Err(error) => return git_text(500, &format!("{error}\n")).into_axum(),
+            Err(error) => {
+                return git_text(StatusCode::INTERNAL_SERVER_ERROR, &format!("{error}\n"))
+                    .into_axum();
+            }
         };
-        if let Some(before) = before.filter(|_| response.status == 200) {
+        if let Some(before) = before.filter(|_| crate::errors::is_ok(response.status)) {
             let after = ref_snapshot(&git_dir);
             let host = parts
                 .headers
@@ -664,7 +666,7 @@ impl App {
             webhooks::events::create::from_push(&self.state, &urls, &owner, &name, &before, &after);
             webhooks::events::delete::from_push(&self.state, &urls, &owner, &name, &before, &after);
         }
-        let mut reply = ApiResponse::bytes(response.status, "", response.body);
+        let mut reply = ApiResponse::bytes_raw(response.status, "", response.body);
         reply.headers = response.headers;
         into_response(reply, None)
     }
@@ -697,7 +699,7 @@ impl App {
             }));
         }
         // Source: <https://docs.github.com/en/rest/authentication/authenticating-to-the-rest-api#failed-login-limit>
-        Err(ApiResponse::error(401, "Bad credentials"))
+        Err(crate::errors::GithubError::BadCredentials.to_response())
     }
 }
 
@@ -797,8 +799,8 @@ fn first_default_branch(
         .map(str::to_owned)
 }
 
-fn git_text(status: u16, text: &str) -> ApiResponse {
-    ApiResponse::bytes(status, "text/plain", text.as_bytes().to_vec())
+fn git_text(status: StatusCode, text: &str) -> ApiResponse {
+    ApiResponse::bytes_status(status, "text/plain", text.as_bytes().to_vec())
 }
 
 impl ApiResponse {

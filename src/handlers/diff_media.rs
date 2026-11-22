@@ -40,7 +40,7 @@ fn vendor(token: &str, suffix: &str) -> bool {
 }
 
 fn text(bytes: Vec<u8>) -> ApiResponse {
-    ApiResponse::bytes(200, TEXT, bytes)
+    ApiResponse::bytes_ok(TEXT, bytes)
 }
 
 /// The pull request's three-dot diff or mbox patch, when `Accept` asks for it.

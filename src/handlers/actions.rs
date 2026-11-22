@@ -51,7 +51,7 @@ impl Handler for ops::ReposGetCombinedStatusForRef {
             statuses,
             url: commit.status(),
         });
-        Ok(ApiResponse::typed(200, &response))
+        Ok(ApiResponse::ok_typed(&response))
     }
 }
 
@@ -80,7 +80,9 @@ impl Handler for ops::ActionsListWorkflowRunsForRepo {
         };
         let response = ApiResponse::conditional_typed(request, &response);
         Ok(match link {
-            Some(link) if response.status == 200 => response.with_header("link", link),
+            Some(link) if crate::errors::is_ok(response.status) => {
+                response.with_header("link", link)
+            }
             _ => response,
         })
     }
@@ -119,10 +121,7 @@ fn rerun_workflow(state: &Mutex<State>, request: &ApiRequest, failed_only: bool)
     let mut state = lock(state);
     let found = find_repo(&state, request)?;
     if !found.permission.push {
-        return Err(ApiResponse::error(
-            403,
-            "Resource not accessible by integration",
-        ));
+        return Err(crate::errors::GithubError::IntegrationForbidden.to_response());
     }
     let id = request
         .param("run_id")
@@ -140,7 +139,7 @@ fn rerun_workflow(state: &Mutex<State>, request: &ApiRequest, failed_only: bool)
             .find(|run| run.id == id)
             .ok_or_else(ApiResponse::not_found)?;
         if run.status.as_deref() != Some("completed") {
-            return Err(ApiResponse::error(409, "Workflow run is not completed"));
+            return Err(crate::errors::GithubError::WorkflowRunNotCompleted.to_response());
         }
         let jobs = repo
             .workflow_jobs
@@ -172,7 +171,7 @@ fn rerun_workflow(state: &Mutex<State>, request: &ApiRequest, failed_only: bool)
             }
         }
         if failed_only && rerun_ids.is_empty() {
-            return Err(ApiResponse::error(409, "Workflow run has no failed jobs"));
+            return Err(crate::errors::GithubError::WorkflowRunNoFailedJobs.to_response());
         }
         run.run_attempt = run.run_attempt.saturating_add(1);
         run.status = Some("queued".to_owned());
@@ -205,15 +204,13 @@ fn rerun_workflow(state: &Mutex<State>, request: &ApiRequest, failed_only: bool)
         crate::webhooks::events::workflow_job::deliver(&mut ctx, &run, job)?;
     }
     if failed_only {
-        Ok(ApiResponse::typed(
-            201,
+        Ok(ApiResponse::created(
             &types::ActionsReRunWorkflowFailedJobsResponse(types::EmptyObject {}),
         ))
     } else {
-        Ok(ApiResponse::typed(
-            201,
-            &types::ActionsReRunWorkflowResponse(types::EmptyObject {}),
-        ))
+        Ok(ApiResponse::created(&types::ActionsReRunWorkflowResponse(
+            types::EmptyObject {},
+        )))
     }
 }
 
@@ -314,11 +311,7 @@ impl Handler for ops::ActionsDownloadJobLogsForWorkflowRun {
             return Err(ApiResponse::not_found());
         }
         let location = request.urls().job_logs(&found.owner, &found.name, id);
-        Ok(ApiResponse {
-            status: 302,
-            headers: vec![("location".to_owned(), location)],
-            body: crate::api::Body::Empty,
-        })
+        Ok(ApiResponse::found(location))
     }
 }
 
@@ -340,11 +333,7 @@ impl Handler for ops::ActionsDownloadWorkflowRunLogs {
         let location = request
             .urls()
             .run_log_archive(&found.owner, &found.name, run_id);
-        Ok(ApiResponse {
-            status: 302,
-            headers: vec![("location".to_owned(), location)],
-            body: crate::api::Body::Empty,
-        })
+        Ok(ApiResponse::found(location))
     }
 }
 
@@ -417,7 +406,7 @@ impl Handler for ops::ReposListCommitStatusesForRef {
                 .map(|status| super::status_model::status(&urls, sha, status))
                 .collect(),
         );
-        Ok(ApiResponse::typed(200, &response))
+        Ok(ApiResponse::ok_typed(&response))
     }
 }
 
@@ -438,6 +427,6 @@ impl Handler for ops::ReposListPullRequestsAssociatedWithCommit {
             .map(crate::render::pull_request_simple)
             .collect();
         let response = types::ReposListPullRequestsAssociatedWithCommitResponse(pulls);
-        Ok(ApiResponse::typed(200, &response))
+        Ok(ApiResponse::ok_typed(&response))
     }
 }

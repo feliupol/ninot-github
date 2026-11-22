@@ -51,7 +51,7 @@ impl Handler for ops::IssuesUpdate {
         let loaded = load_issue(&state, &found, &caller.login, number)?;
         let change = parse_change(&state, request, &found, &body, &loaded, number, caller)?;
         let issue = apply_change(&mut state, request, &found, &caller.login, number, change)?;
-        Ok(ApiResponse::typed(200, &issue))
+        Ok(ApiResponse::ok_typed(&issue))
     }
 }
 
@@ -69,10 +69,7 @@ fn load_issue(
     // Issue owners and users with push access or Triage role can edit an issue.
     // Source: <https://docs.github.com/en/rest/issues/issues#update-an-issue>
     if !found.permission.push && !issue.authored_by(login) {
-        return Err(ApiResponse::error(
-            403,
-            "Must have push access to this repository",
-        ));
+        return Err(crate::errors::GithubError::PushAccess.to_response());
     }
     Ok(Loaded {
         state: issue.state.as_str().to_owned(),

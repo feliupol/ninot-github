@@ -6,7 +6,7 @@ use serde::Deserialize;
 use super::issue_actions::webhook_err;
 use super::pull_fields::owned_pull;
 use super::types::PullRequestMergeMethod;
-use super::{Env, Json, Map, MutationArgs, Output, not_found, read, typed_error};
+use super::{Env, Json, Map, MutationArgs, Output, read, typed_error};
 use crate::api::{ApiResponse, Body};
 use crate::handlers::pull_git::{self, LandMethod};
 use crate::handlers::pulls::merge::{LandRequest, default_headline, land_pull};
@@ -48,7 +48,7 @@ fn merge_pull(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
         .and_then(|account| account.repo(&name))
         .and_then(|repo| repo.pull_requests.get(&number))
         .and_then(|pull| pull.data.clone())
-        .ok_or_else(|| not_found("pull request does not exist".to_owned()))?;
+        .ok_or_else(super::errors::pull_not_found)?;
     let method = match input.merge_method {
         Some(PullRequestMergeMethod::Squash) => LandMethod::Squash,
         Some(PullRequestMergeMethod::Rebase) => LandMethod::Rebase,
@@ -109,12 +109,7 @@ fn update_branch(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
     let actor = state
         .account(&env.caller.login)
         .map(|account| crate::render::simple_user(&request, account))
-        .ok_or_else(|| {
-            not_found(format!(
-                "Could not resolve to a User '{}'",
-                env.caller.login
-            ))
-        })?;
+        .ok_or_else(|| super::errors::resolve_user(&env.caller.login))?;
     let (git_dir, head_ref, base_ref) = {
         let repo = state
             .account(&owner)
@@ -123,14 +118,14 @@ fn update_branch(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
         let git_dir = repo
             .git_dir
             .clone()
-            .ok_or_else(|| typed_error("repository has no git storage", "UNPROCESSABLE"))?;
+            .ok_or_else(super::errors::no_git_storage_unprocessable)?;
         let data = repo
             .pull_requests
             .get(&number)
             .and_then(|pull| pull.data.as_ref())
-            .ok_or_else(|| not_found("pull request does not exist".to_owned()))?;
+            .ok_or_else(super::errors::pull_not_found)?;
         if data.state != crate::types::PullRequestState::Open {
-            return Err(typed_error("pull request is not open", "UNPROCESSABLE"));
+            return Err(super::errors::pull_not_open());
         }
         (git_dir, data.head.ref_.clone(), data.base.ref_.clone())
     };
@@ -141,19 +136,13 @@ fn update_branch(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
         .as_ref()
         .is_some_and(|sha| sha != &head)
     {
-        return Err(typed_error(
-            "expected head sha didn't match current head ref.",
-            "UNPROCESSABLE",
-        ));
+        return Err(super::errors::head_sha_not_current());
     }
     if ninot_common::git::new_commits(&git_dir, &base, &[&head])
         .map_err(|error| Error::new(error.to_string()))?
         .is_empty()
     {
-        return Err(typed_error(
-            "There are no new commits on the base branch.",
-            "UNPROCESSABLE",
-        ));
+        return Err(super::errors::no_new_commits());
     }
     let sha = pull_git::merge_base_into_head(&git_dir, &head, &base, &head_ref, &base_ref)
         .map_err(git_error)?;
@@ -215,17 +204,14 @@ fn revert_pull(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
             .pull_requests
             .get(&number)
             .and_then(|pull| pull.data.clone())
-            .ok_or_else(|| not_found("pull request does not exist".to_owned()))?;
+            .ok_or_else(super::errors::pull_not_found)?;
         if !data.merged {
-            return Err(typed_error(
-                "only a merged pull request can be reverted",
-                "UNPROCESSABLE",
-            ));
+            return Err(super::errors::only_merged_can_revert());
         }
         let git_dir = repo
             .git_dir
             .clone()
-            .ok_or_else(|| typed_error("repository has no git storage", "UNPROCESSABLE"))?;
+            .ok_or_else(super::errors::no_git_storage_unprocessable)?;
         let repository_id = repo.id;
         let new_number = crate::handlers::issues::next_subject_number(repo);
         (data, git_dir, repository_id, new_number)
@@ -233,7 +219,7 @@ fn revert_pull(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
     let merge_sha = data
         .merge_commit_sha
         .clone()
-        .ok_or_else(|| typed_error("pull request has no merge commit", "UNPROCESSABLE"))?;
+        .ok_or_else(super::errors::no_merge_commit)?;
     let base_tip = tip(&git_dir, &data.base.ref_)?;
     let title = input
         .title
@@ -257,12 +243,7 @@ fn revert_pull(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
     let user = state
         .account(&env.caller.login)
         .map(|account| crate::render::simple_user(&request, account))
-        .ok_or_else(|| {
-            not_found(format!(
-                "Could not resolve to a User '{}'",
-                env.caller.login
-            ))
-        })?;
+        .ok_or_else(|| super::errors::resolve_user(&env.caller.login))?;
     let mut created = data;
     let urls = request.urls().repo(&owner, &name);
     let pull_urls = urls.pull(new_number);
@@ -329,11 +310,7 @@ fn pull_by_id(env: &Env, id: &str) -> Result<super::objects::PullRequest, Error>
 }
 
 fn locate(state: &crate::state::State, id: &str) -> Result<(String, String, u64), Error> {
-    super::pulls::pull_location(state, id).ok_or_else(|| {
-        not_found(format!(
-            "Could not resolve to a node with the global id of '{id}'"
-        ))
-    })
+    super::pulls::pull_location(state, id).ok_or_else(|| super::errors::resolve_node(id))
 }
 
 fn require_push(
@@ -344,21 +321,18 @@ fn require_push(
 ) -> Result<(), Error> {
     let permission = state
         .permission(Some(&env.caller), owner, name)
-        .ok_or_else(|| not_found("repository does not exist".to_owned()))?;
+        .ok_or_else(super::errors::repository_not_found)?;
     if permission.push {
         Ok(())
     } else {
-        Err(typed_error(
-            "Resource not accessible by personal access token",
-            "FORBIDDEN",
-        ))
+        Err(super::errors::pat_forbidden())
     }
 }
 
 fn tip(git_dir: &std::path::Path, branch: &str) -> Result<String, Error> {
     ninot_common::git::resolve_commit(git_dir, &format!("refs/heads/{branch}"))
         .map_err(|error| Error::new(error.to_string()))?
-        .ok_or_else(|| typed_error(format!("{branch} does not exist"), "UNPROCESSABLE"))
+        .ok_or_else(|| super::errors::branch_missing(branch))
 }
 
 fn git_error(fail: pull_git::GitFail) -> Error {
@@ -380,10 +354,6 @@ fn rest_error(response: ApiResponse) -> Error {
             .to_owned(),
         _ => "request failed".to_owned(),
     };
-    let kind = match response.status {
-        403 => "FORBIDDEN",
-        404 => "NOT_FOUND",
-        _ => "UNPROCESSABLE",
-    };
+    let kind = super::errors::rest_kind(response.status);
     typed_error(message, kind)
 }

@@ -15,10 +15,9 @@ impl Handler for ops::UsersGetAuthenticated {
         let account = state
             .account(&caller.login)
             .ok_or_else(ApiResponse::not_found)?;
-        Ok(ApiResponse::typed(
-            200,
-            &render::public_user(request, account),
-        ))
+        Ok(ApiResponse::ok_typed(&render::public_user(
+            request, account,
+        )))
     }
 }
 
@@ -28,10 +27,9 @@ impl Handler for ops::UsersGetByUsername {
         let account = state
             .account(request.param("username"))
             .ok_or_else(ApiResponse::not_found)?;
-        Ok(ApiResponse::typed(
-            200,
-            &render::public_user(request, account),
-        ))
+        Ok(ApiResponse::ok_typed(&render::public_user(
+            request, account,
+        )))
     }
 }
 
@@ -42,9 +40,8 @@ impl Handler for ops::OrgsGet {
             .account(request.param("org"))
             .filter(|account| account.kind == AccountKind::Organization)
             .ok_or_else(ApiResponse::not_found)?;
-        Ok(ApiResponse::typed(
-            200,
-            &render::organization(request, account),
-        ))
+        Ok(ApiResponse::ok_typed(&render::organization(
+            request, account,
+        )))
     }
 }

@@ -88,10 +88,7 @@ pub(crate) fn authorize(
         Ok(())
     } else {
         // Source: <https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api#resource-not-accessible>
-        Err(ApiResponse::error(
-            403,
-            "Resource not accessible by integration",
-        ))
+        Err(crate::errors::GithubError::IntegrationForbidden.to_response())
     }
 }
 

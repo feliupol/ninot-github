@@ -83,7 +83,7 @@ pub fn find_repo(state: &State, request: &ApiRequest) -> Result<Found, ApiRespon
             url: Some(location.clone()),
         };
         // Source: OpenAPI repos/get 301
-        return Err(ApiResponse::typed(301, &body).with_header("location", location));
+        return Err(ApiResponse::moved_permanently(&body).with_header("location", location));
     }
     // 404, not 403, so private repositories are not confirmed to exist.
     // Source: <https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api#404-not-found-for-an-existing-resource>
@@ -96,10 +96,7 @@ fn find_admin_repo(state: &State, request: &ApiRequest) -> Result<Found, ApiResp
     if found.permission.admin {
         Ok(found)
     } else {
-        Err(ApiResponse::error(
-            403,
-            "Must have admin rights to Repository.",
-        ))
+        Err(crate::errors::GithubError::AdminRequired.to_response())
     }
 }
 
@@ -288,7 +285,7 @@ fn create(
             pull: true,
         },
     );
-    Ok(ApiResponse::typed(201, &value))
+    Ok(ApiResponse::created(&value))
 }
 
 impl Handler for ops::ReposCreateForAuthenticatedUser {
@@ -319,10 +316,7 @@ impl Handler for ops::ReposCreateInOrg {
                 .filter(|account| account.kind == AccountKind::Organization)
                 .ok_or_else(ApiResponse::not_found)?;
             if !account.is_administered_by(&caller.login) {
-                return Err(ApiResponse::error(
-                    403,
-                    "You need admin access to the organization before adding a repository to it.",
-                ));
+                return Err(crate::errors::GithubError::OrgAdminBeforeAdding.to_response());
             }
         }
         let private = body.visibility.map_or(body.private, |visibility| {
@@ -344,10 +338,9 @@ impl Handler for ops::ReposGet {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let state = lock(state);
         let found = find_repo(&state, request)?;
-        Ok(ApiResponse::typed(
-            200,
-            &render_found(&state, request, &found),
-        ))
+        Ok(ApiResponse::ok_typed(&render_found(
+            &state, request, &found,
+        )))
     }
 }
 
@@ -490,10 +483,9 @@ impl Handler for ops::ReposUpdate {
                 .map_err(ApiResponse::internal)?;
         }
         repo.updated_at = crate::time::now_utc();
-        Ok(ApiResponse::typed(
-            200,
-            &render_found(&state, request, &found),
-        ))
+        Ok(ApiResponse::ok_typed(&render_found(
+            &state, request, &found,
+        )))
     }
 }
 
@@ -504,10 +496,7 @@ impl Handler for ops::ReposDelete {
         // Source: <https://docs.github.com/en/rest/repos/repos#delete-a-repository>
         let found = find_admin_repo(&state, request)?;
         if !request.require_caller()?.has_scope("delete_repo") {
-            return Err(ApiResponse::error(
-                403,
-                "Must have admin rights to Repository.",
-            ));
+            return Err(crate::errors::GithubError::AdminRequired.to_response());
         }
         let deleted = state.delete_repo(&found.owner, &found.name);
         drop(state);
@@ -547,9 +536,8 @@ impl Handler for ops::ReposTransfer {
             name: new_name,
             permission: found.permission,
         };
-        Ok(ApiResponse::typed(
-            202,
-            &types::MinimalRepository::from(render_found(&state, request, &moved)),
-        ))
+        Ok(ApiResponse::accepted(&types::MinimalRepository::from(
+            render_found(&state, request, &moved),
+        )))
     }
 }

@@ -98,7 +98,7 @@ impl Handler for ops::ActionsDeleteActionsCacheByKey {
         let found = require_actions_write(&state, request)?;
         let key = request
             .query("key")
-            .ok_or_else(|| ApiResponse::unprocessable("key is required"))?
+            .ok_or_else(|| crate::errors::GithubError::KeyRequired.to_response())?
             .to_owned();
         let git_ref = request.query("ref").map(str::to_owned);
         let repo = found.repo_mut(&mut state);
@@ -123,8 +123,7 @@ impl Handler for ops::ActionsDeleteActionsCacheByKey {
                     .is_none_or(|git_ref| &cache.git_ref == git_ref))
         });
         let rendered = matched.iter().map(render_cache).collect();
-        Ok(ApiResponse::typed(
-            200,
+        Ok(ApiResponse::ok_typed(
             &types::ActionsDeleteActionsCacheByKeyResponse(types::ActionsCacheList {
                 total_count: matched.len() as i64,
                 actions_caches: rendered,

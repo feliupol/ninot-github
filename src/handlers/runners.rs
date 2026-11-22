@@ -36,10 +36,7 @@ fn authorize(state: &State, request: &ApiRequest) -> Result<String, ApiResponse>
         .ok_or_else(ApiResponse::not_found)?;
     // Source: <https://docs.github.com/en/rest/actions/self-hosted-runners#create-a-registration-token-for-an-organization>
     if !caller.has_scope("admin:org") {
-        return Err(ApiResponse::error(
-            403,
-            "Resource not accessible by personal access token",
-        ));
+        return Err(crate::errors::GithubError::PatForbidden.to_response());
     }
     Ok(org.login.clone())
 }
@@ -152,8 +149,7 @@ fn issue_token(state: &Mutex<State>, request: &ApiRequest, kind: RunnerTokenKind
     let mut state = lock(state);
     let org = authorize(&state, request)?;
     let (token, expires_at) = state.issue_runner_token(&org, kind);
-    Ok(ApiResponse::json(
-        201,
+    Ok(ApiResponse::created_json(
         json!({ "token": token, "expires_at": expires_at }),
     ))
 }
@@ -240,7 +236,7 @@ fn runner_http_error(error: CreateRunnerError) -> ApiResponse {
             ApiResponse::validation_failed("Runner", "name", "invalid")
         }
         CreateRunnerError::DuplicateName => {
-            ApiResponse::error(409, "A runner with this name already exists.")
+            crate::errors::GithubError::RunnerNameExists.to_response()
         }
         CreateRunnerError::UnknownGroup => ApiResponse::not_found(),
     }
@@ -481,9 +477,7 @@ fn assign_runners(
             .values()
             .any(|runner| runner.group_id == group_id && !runner_ids.contains(&runner.id))
     {
-        return Err(ApiResponse::unprocessable(
-            "Runners cannot be removed from the default runner group.",
-        ));
+        return Err(crate::errors::GithubError::CannotRemoveDefaultGroupRunners.to_response());
     }
     let default_id = account.default_runner_group_id().unwrap();
     for runner in account.runners.values_mut() {
@@ -655,7 +649,7 @@ impl Handler for ops::ActionsGenerateRunnerJitconfigForOrg {
             "runner": render_runner(runner),
             "encoded_jit_config": encoded,
         });
-        Ok(ApiResponse::json(201, body))
+        Ok(ApiResponse::created_json(body))
     }
 }
 
@@ -736,10 +730,11 @@ impl Handler for ops::ActionsCreateSelfHostedRunnerGroupForOrg {
             }
         }
         let account = state.account(&org).unwrap();
-        Ok(ApiResponse::json(
-            201,
-            render_group(request, &org, &account.runner_groups[&id]),
-        ))
+        Ok(ApiResponse::created_json(render_group(
+            request,
+            &org,
+            &account.runner_groups[&id],
+        )))
     }
 }
 
@@ -827,10 +822,7 @@ impl Handler for ops::ActionsDeleteSelfHostedRunnerGroupFromOrg {
             return Err(ApiResponse::not_found());
         };
         if is_default {
-            return Err(ApiResponse::error(
-                403,
-                "Cannot delete the default runner group.",
-            ));
+            return Err(crate::errors::GithubError::CannotDeleteDefaultRunnerGroup.to_response());
         }
         for runner in account.runners.values_mut() {
             if runner.group_id == id {

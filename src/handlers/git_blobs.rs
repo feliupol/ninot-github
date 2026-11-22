@@ -21,10 +21,11 @@ fn decode_content(content: &str, encoding: &str) -> Result<Vec<u8>, ApiResponse>
         "utf-8" => Ok(content.as_bytes().to_vec()),
         "base64" => STANDARD
             .decode(content.split_whitespace().collect::<String>())
-            .map_err(|_| ApiResponse::unprocessable("content is not valid Base64")),
-        _ => Err(ApiResponse::unprocessable(&format!(
-            "The encoding '{encoding}' is not supported"
-        ))),
+            .map_err(|_| crate::errors::GithubError::ContentNotBase64.to_response()),
+        _ => Err(crate::errors::GithubError::UnsupportedEncoding {
+            encoding: encoding.to_owned(),
+        }
+        .to_response()),
     }
 }
 
@@ -39,14 +40,13 @@ impl Handler for ops::GitCreateBlob {
         let bytes = decode_content(&body.content, &body.encoding)?;
         let sha = write_blob(&located.git_dir, &bytes)?;
         let url = blob_url(request, &located, &sha);
-        Ok(ApiResponse::typed(
-            201,
-            &types::GitCreateBlobResponse(types::ShortBlob {
+        Ok(
+            ApiResponse::created(&types::GitCreateBlobResponse(types::ShortBlob {
                 sha: sha.clone(),
                 url: url.clone(),
-            }),
+            }))
+            .with_header("location", url),
         )
-        .with_header("location", url))
     }
 }
 
@@ -77,13 +77,12 @@ impl Handler for ops::GitGetBlob {
         // The raw media type returns the blob data; otherwise content is Base64.
         // Source: <https://docs.github.com/en/rest/git/blobs#get-a-blob>
         if request.accept().contains("application/vnd.github.raw") {
-            return Ok(ApiResponse::bytes(200, "application/octet-stream", bytes));
+            return Ok(ApiResponse::bytes_ok("application/octet-stream", bytes));
         }
         let sha = id.to_string();
         let url = blob_url(request, &located, &sha);
-        Ok(ApiResponse::typed(
-            200,
-            &types::GitGetBlobResponse(types::Blob {
+        Ok(ApiResponse::ok_typed(&types::GitGetBlobResponse(
+            types::Blob {
                 content: wrapped_base64(&bytes),
                 encoding: "base64".to_owned(),
                 highlighted_content: None,
@@ -91,7 +90,7 @@ impl Handler for ops::GitGetBlob {
                 sha,
                 size: Some(bytes.len() as i64),
                 url,
-            }),
-        ))
+            },
+        )))
     }
 }

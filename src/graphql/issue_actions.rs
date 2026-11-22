@@ -7,7 +7,7 @@ use super::issues::issue_location as locate_issue;
 use super::objects::NodeRef;
 use super::pulls::pull_location;
 use super::types::LockReason as GqlLock;
-use super::{Env, Map, MutationArgs, Output, database_id, not_found, read, typed_error};
+use super::{Env, Map, MutationArgs, Output, database_id, read};
 use crate::handlers::issues::{record, rendered_issue};
 use crate::handlers::repos::Found;
 use crate::render::node_id;
@@ -150,19 +150,12 @@ fn set_locked(
     let mut state = lock(&env.state);
     let (owner, name, number) = locate_issue(&state, id)
         .or_else(|| pull_as_issue(&state, id))
-        .ok_or_else(|| {
-            not_found(format!(
-                "Could not resolve to a node with the global id of '{id}'"
-            ))
-        })?;
+        .ok_or_else(|| super::errors::resolve_node(id))?;
     let permission = state
         .permission(Some(&env.caller), &owner, &name)
-        .ok_or_else(|| typed_error("Must have push access to this repository", "FORBIDDEN"))?;
+        .ok_or_else(super::errors::push_access)?;
     if !permission.push {
-        return Err(typed_error(
-            "Must have push access to this repository",
-            "FORBIDDEN",
-        ));
+        return Err(super::errors::push_access());
     }
     let found = Found {
         owner: owner.clone(),
@@ -250,27 +243,21 @@ fn unpin_issue(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
 
 fn set_pinned(env: &Env, issue_id: &str, pinned: bool) -> Result<Output, Error> {
     let mut state = lock(&env.state);
-    let (owner, name, number) = locate_issue(&state, issue_id).ok_or_else(|| {
-        not_found(format!(
-            "Could not resolve to a node with the global id of '{issue_id}'"
-        ))
-    })?;
+    let (owner, name, number) =
+        locate_issue(&state, issue_id).ok_or_else(|| super::errors::resolve_node(issue_id))?;
     let pinned_count = state
         .account(&owner)
         .and_then(|account| account.repo(&name))
         .map(|repo| repo.issues.values().filter(|issue| issue.is_pinned).count())
         .unwrap_or(0);
     if pinned && pinned_count >= 3 {
-        return Err(typed_error(
-            "Repository has reached the maximum of 3 pinned issues.",
-            "UNPROCESSABLE",
-        ));
+        return Err(super::errors::pinned_limit());
     }
     let issue = state
         .account_mut(&owner)
         .and_then(|account| account.repo_mut(&name))
         .and_then(|repo| repo.issues.get_mut(&number))
-        .ok_or_else(|| not_found("issue does not exist".to_owned()))?;
+        .ok_or_else(super::errors::issue_not_found)?;
     issue.is_pinned = pinned;
     issue.updated_at = crate::time::now_utc();
     let id = issue.node_id.clone();
@@ -287,20 +274,13 @@ fn set_pinned(env: &Env, issue_id: &str, pinned: bool) -> Result<Output, Error> 
 fn delete_issue(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
     let MutationArgs { input } = read::<MutationArgs<IssueIdInput>>(args)?;
     let mut state = lock(&env.state);
-    let (owner, name, number) = locate_issue(&state, &input.issue_id).ok_or_else(|| {
-        not_found(format!(
-            "Could not resolve to a node with the global id of '{}'",
-            input.issue_id
-        ))
-    })?;
+    let (owner, name, number) = locate_issue(&state, &input.issue_id)
+        .ok_or_else(|| super::errors::resolve_node(input.issue_id))?;
     let permission = state
         .permission(Some(&env.caller), &owner, &name)
-        .ok_or_else(|| typed_error("Must have admin rights to Repository.", "FORBIDDEN"))?;
+        .ok_or_else(super::errors::admin_required)?;
     if !permission.admin {
-        return Err(typed_error(
-            "Must have admin rights to Repository.",
-            "FORBIDDEN",
-        ));
+        return Err(super::errors::admin_required());
     }
     let repo_id = node_id(
         "Repository",
@@ -311,7 +291,7 @@ fn delete_issue(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
             .unwrap_or(0),
     );
     found_repo_mut(&mut state, &owner, &name)
-        .ok_or_else(|| not_found("repository does not exist".to_owned()))?
+        .ok_or_else(super::errors::repository_not_found)?
         .issues
         .remove(&number);
     #[derive(serde::Serialize)]
@@ -333,25 +313,18 @@ fn delete_issue(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
 fn transfer_issue(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
     let MutationArgs { input } = read::<MutationArgs<TransferInput>>(args)?;
     let mut state = lock(&env.state);
-    let (owner, name, number) = locate_issue(&state, &input.issue_id).ok_or_else(|| {
-        not_found(format!(
-            "Could not resolve to a node with the global id of '{}'",
-            input.issue_id
-        ))
-    })?;
+    let (owner, name, number) = locate_issue(&state, &input.issue_id)
+        .ok_or_else(|| super::errors::resolve_node(input.issue_id))?;
     let (dest_owner, dest_name) = repo_location(&state, &input.repository_id)
-        .ok_or_else(|| not_found("Could not resolve destination repository.".to_owned()))?;
+        .ok_or_else(super::errors::resolve_destination)?;
     if !owner.eq_ignore_ascii_case(&dest_owner) {
-        return Err(typed_error(
-            "Issues can only be transferred to a repository owned by the same user or organization.",
-            "FORBIDDEN",
-        ));
+        return Err(super::errors::transfer_same_owner());
     }
     let mut issue = found_repo_mut(&mut state, &owner, &name)
         .and_then(|repo| repo.issues.remove(&number))
-        .ok_or_else(|| not_found("issue does not exist".to_owned()))?;
+        .ok_or_else(super::errors::issue_not_found)?;
     let dest = found_repo_mut(&mut state, &dest_owner, &dest_name)
-        .ok_or_else(|| not_found("destination repository does not exist".to_owned()))?;
+        .ok_or_else(super::errors::destination_repository_missing)?;
     // Labels and milestones stay only when the destination already defines them.
     issue
         .labels
@@ -384,22 +357,19 @@ fn transfer_issue(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
 fn create_linked_branch(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
     let MutationArgs { input } = read::<MutationArgs<LinkedBranchInput>>(args)?;
     let mut state = lock(&env.state);
-    let (owner, name, number) = locate_issue(&state, &input.issue_id).ok_or_else(|| {
-        not_found(format!(
-            "Could not resolve to a node with the global id of '{}'",
-            input.issue_id
-        ))
-    })?;
+    let (owner, name, number) = locate_issue(&state, &input.issue_id)
+        .ok_or_else(|| super::errors::resolve_node(input.issue_id))?;
     let (repo_owner, repo_name) = match &input.repository_id {
-        Some(id) => repo_location(&state, id)
-            .ok_or_else(|| not_found("Could not resolve repository.".to_owned()))?,
+        Some(id) => {
+            repo_location(&state, id).ok_or_else(super::errors::resolve_repository_short)?
+        }
         None => (owner.clone(), name.clone()),
     };
     let git_dir = state
         .account(&repo_owner)
         .and_then(|account| account.repo(&repo_name))
         .and_then(|repo| repo.git_dir.clone())
-        .ok_or_else(|| Error::new("repository has no git storage"))?;
+        .ok_or_else(super::errors::no_git_storage)?;
     let title = state
         .account(&owner)
         .and_then(|account| account.repo(&name))
@@ -431,7 +401,7 @@ fn create_linked_branch(env: &Env, _: &Map, args: &Map) -> Result<Output, Error>
     let id = state.next_id();
     found_repo_mut(&mut state, &owner, &name)
         .and_then(|repo| repo.issues.get_mut(&number))
-        .ok_or_else(|| not_found("issue does not exist".to_owned()))?
+        .ok_or_else(super::errors::issue_not_found)?
         .linked_branches
         .push(LinkedBranch {
             id,
@@ -494,5 +464,5 @@ pub(super) fn actor(
     state
         .account(login)
         .map(|account| crate::render::simple_user(request, account))
-        .ok_or_else(|| not_found("viewer does not exist".to_owned()))
+        .ok_or_else(super::errors::viewer_not_found)
 }

@@ -70,20 +70,18 @@ impl Handler for ops::GitCreateCommit {
         let tree = object_id(&body.tree)?;
         let header = repo
             .find_header(tree)
-            .map_err(|_| ApiResponse::unprocessable("tree is not a valid git object"))?;
+            .map_err(|_| crate::errors::GithubError::TreeNotObject.to_response())?;
         if header.kind() != gix::objs::Kind::Tree {
-            return Err(ApiResponse::unprocessable("tree is not a valid git object"));
+            return Err(crate::errors::GithubError::TreeNotObject.to_response());
         }
         let mut parents = Vec::new();
         for parent in &body.parents {
             let id = object_id(parent)?;
             let header = repo
                 .find_header(id)
-                .map_err(|_| ApiResponse::unprocessable("parent is not a valid git object"))?;
+                .map_err(|_| crate::errors::GithubError::ParentNotObject.to_response())?;
             if header.kind() != gix::objs::Kind::Commit {
-                return Err(ApiResponse::unprocessable(
-                    "parent is not a valid git object",
-                ));
+                return Err(crate::errors::GithubError::ParentNotObject.to_response());
             }
             parents.push(id);
         }
@@ -132,11 +130,12 @@ impl Handler for ops::GitCreateCommit {
         let stored =
             ninot_common::git::commit(&located.git_dir, &sha).map_err(ApiResponse::internal)?;
         let url = commit_url(request, &located, &sha);
-        Ok(ApiResponse::typed(
-            201,
-            &types::GitCreateCommitResponse(render_git_commit(request, &located, &stored)),
+        Ok(
+            ApiResponse::created(&types::GitCreateCommitResponse(render_git_commit(
+                request, &located, &stored,
+            )))
+            .with_header("location", url),
         )
-        .with_header("location", url))
     }
 }
 
@@ -153,9 +152,8 @@ impl Handler for ops::GitGetCommit {
         drop(repo);
         let stored = ninot_common::git::commit(&located.git_dir, &id.to_string())
             .map_err(ApiResponse::internal)?;
-        Ok(ApiResponse::typed(
-            200,
-            &types::GitGetCommitResponse(render_git_commit(request, &located, &stored)),
-        ))
+        Ok(ApiResponse::ok_typed(&types::GitGetCommitResponse(
+            render_git_commit(request, &located, &stored),
+        )))
     }
 }

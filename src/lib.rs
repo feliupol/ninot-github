@@ -17,6 +17,7 @@
 //!   spec's operations, and [`IMPLEMENTED`] lists those the fake serves.
 
 pub(crate) mod api;
+pub(crate) mod errors;
 pub mod faults;
 mod fixture_git;
 pub mod fixtures;

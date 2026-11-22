@@ -35,10 +35,7 @@ pub(super) fn scoped(request: &ApiRequest, need: Need) -> Result<&Caller, ApiRes
     if allowed.iter().any(|scope| caller.has_scope(scope)) {
         Ok(caller)
     } else {
-        Err(ApiResponse::error(
-            403,
-            "Resource not accessible by personal access token",
-        ))
+        Err(crate::errors::GithubError::PatForbidden.to_response())
     }
 }
 
@@ -67,7 +64,7 @@ pub(super) fn find_team<'s>(
 
 /// The 403 for an operation only organization owners may do.
 pub(super) fn owners_only() -> ApiResponse {
-    ApiResponse::error(403, "You must be an organization owner to do this.")
+    crate::errors::GithubError::OrgOwnerRequired.to_response()
 }
 
 /// A JSON object body, for operations whose body fields are all optional.

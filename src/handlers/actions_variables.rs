@@ -122,7 +122,7 @@ fn remove(map: &mut BTreeMap<String, ActionsVariable>, name: &str) -> Result<(),
 }
 
 fn created() -> ApiResult {
-    Ok(ApiResponse::typed(201, &types::EmptyObject {}))
+    Ok(ApiResponse::created(&types::EmptyObject {}))
 }
 
 impl Handler for ops::ActionsListRepoVariables {
@@ -153,7 +153,7 @@ impl Handler for ops::ActionsGetRepoVariable {
             .variables
             .get(&variable_name(request.param("name")))
             .ok_or_else(ApiResponse::not_found)?;
-        Ok(ApiResponse::typed(200, &render(variable)))
+        Ok(ApiResponse::ok_typed(&render(variable)))
     }
 }
 
@@ -218,7 +218,7 @@ impl Handler for ops::ActionsGetEnvironmentVariable {
         let variable = env_map(&state, request)?
             .get(&variable_name(request.param("name")))
             .ok_or_else(ApiResponse::not_found)?;
-        Ok(ApiResponse::typed(200, &render(variable)))
+        Ok(ApiResponse::ok_typed(&render(variable)))
     }
 }
 

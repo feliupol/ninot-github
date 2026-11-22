@@ -119,10 +119,9 @@ impl Handler for ops::ReposGetRepoRuleset {
             .rulesets
             .get(&id)
             .ok_or_else(ApiResponse::not_found)?;
-        Ok(ApiResponse::typed(
-            200,
-            &types::ReposGetRepoRulesetResponse(render(request, &found, ruleset)),
-        ))
+        Ok(ApiResponse::ok_typed(&types::ReposGetRepoRulesetResponse(
+            render(request, &found, ruleset),
+        )))
     }
 }
 
@@ -159,8 +158,7 @@ impl Handler for ops::ReposCreateRepoRuleset {
             .setup
             .rulesets
             .insert(id, ruleset);
-        Ok(ApiResponse::typed(
-            201,
+        Ok(ApiResponse::created(
             &types::ReposCreateRepoRulesetResponse(rendered),
         ))
     }
@@ -211,8 +209,7 @@ impl Handler for ops::ReposUpdateRepoRuleset {
         }
         ruleset.updated_at = crate::time::now_utc();
         let ruleset = ruleset.clone();
-        Ok(ApiResponse::typed(
-            200,
+        Ok(ApiResponse::ok_typed(
             &types::ReposUpdateRepoRulesetResponse(render(request, &found, &ruleset)),
         ))
     }

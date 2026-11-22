@@ -146,8 +146,7 @@ impl Handler for ops::AppsGetRepoInstallation {
             })
             .cloned()
             .ok_or_else(ApiResponse::not_found)?;
-        Ok(ApiResponse::typed(
-            200,
+        Ok(ApiResponse::ok_typed(
             &types::AppsGetRepoInstallationResponse(installation_model(
                 request,
                 &state,
@@ -190,9 +189,7 @@ impl Handler for ops::AppsCreateInstallationAccessToken {
                 .all(|requested_id| *requested_id == repository_id);
         // Source: <https://docs.github.com/en/rest/apps/apps#create-an-installation-access-token-for-an-app>
         if !repository_is_supported {
-            return Err(ApiResponse::unprocessable(
-                "Requested repositories exceed the installation grant",
-            ));
+            return Err(crate::errors::GithubError::RepositoriesExceedGrant.to_response());
         }
         let requested_secrets = body
             .permissions
@@ -209,9 +206,7 @@ impl Handler for ops::AppsCreateInstallationAccessToken {
             );
             // Source: <https://docs.github.com/en/rest/apps/apps#create-an-installation-access-token-for-an-app>
             if !within_grant {
-                return Err(ApiResponse::unprocessable(
-                    "Requested permissions exceed the installation grant",
-                ));
+                return Err(crate::errors::GithubError::PermissionsExceedGrant.to_response());
             }
         }
         let effective_secrets = requested_secrets.unwrap_or(installation.secrets_permission);
@@ -246,8 +241,7 @@ impl Handler for ops::AppsCreateInstallationAccessToken {
                     .collect(),
             },
         );
-        Ok(ApiResponse::typed(
-            201,
+        Ok(ApiResponse::created(
             &types::AppsCreateInstallationAccessTokenResponse(types::InstallationToken {
                 expires_at: "2099-01-01T00:00:00Z".to_owned(),
                 has_multiple_single_files: None,

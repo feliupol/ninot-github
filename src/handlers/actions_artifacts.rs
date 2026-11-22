@@ -170,16 +170,12 @@ impl Handler for ops::ActionsDownloadArtifact {
             .find(|artifact| artifact.id == id)
             .ok_or_else(ApiResponse::not_found)?;
         if artifact.expired {
-            return Err(ApiResponse::error(410, "Artifact has expired"));
+            return Err(crate::errors::GithubError::ArtifactExpired.to_response());
         }
         let location = request.urls().web(&format!(
             "/_ninot/actions/artifacts/{}/{}/{id}",
             found.owner, found.name
         ));
-        Ok(ApiResponse {
-            status: 302,
-            headers: vec![("location".to_owned(), location)],
-            body: crate::api::Body::Empty,
-        })
+        Ok(ApiResponse::found(location))
     }
 }

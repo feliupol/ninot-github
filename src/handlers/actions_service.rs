@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use http::{HeaderMap, Method};
+use http::{HeaderMap, Method, StatusCode};
 use serde_json::{Value, json};
 
 use crate::api::ApiResponse;
@@ -58,7 +58,8 @@ pub(crate) fn serve(
     let runner_id = token.and_then(|token| lock(state).access_token_runner(token));
     let Some(runner_id) = runner_id else {
         return Some(
-            ApiResponse::error(401, "Bad credentials")
+            crate::errors::GithubError::BadCredentials
+                .to_response()
                 .with_header("www-authenticate", "Bearer".to_owned()),
         );
     };
@@ -133,7 +134,10 @@ fn exchange_token(state: &Mutex<State>, body: &[u8]) -> ApiResponse {
         .and_then(runner_of_client)
         .filter(|id| state.runner_by_id(*id).is_some())
     else {
-        return ApiResponse::json(400, json!({ "error": "invalid_client" }));
+        return ApiResponse::json_status(
+            http::StatusCode::BAD_REQUEST,
+            json!({ "error": "invalid_client" }),
+        );
     };
     let token = access_token(guid(9, state.next_service_id()));
     state.register_access_token(runner_id, token.clone());
@@ -184,8 +188,8 @@ fn poll_message(
         {
             let mut state = lock(state);
             if session_id.is_none_or(|id| state.session_runner(id) != Some(runner_id)) {
-                return ApiResponse::json(
-                    404,
+                return ApiResponse::json_status(
+                    http::StatusCode::NOT_FOUND,
                     json!({ "errorKind": "RunnerSessionInvalid", "message": "unknown session" }),
                 );
             }
@@ -205,18 +209,18 @@ fn poll_message(
             }
         }
         if waited_from.elapsed() >= POLL_TIMEOUT {
-            return ApiResponse::bytes(202, "application/json", Vec::new());
+            return ApiResponse::bytes_accepted("application/json", Vec::new());
         }
         std::thread::sleep(POLL_INTERVAL);
     }
 }
 
-fn service_error(status: u16, message: &str) -> ApiResponse {
-    ApiResponse::json(
+fn service_error(status: StatusCode, message: &str) -> ApiResponse {
+    ApiResponse::json_status(
         status,
         json!({
             "source": "actions-run-service",
-            "statusCode": status,
+            "statusCode": status.as_u16(),
             "errorMessage": message,
         }),
     )
@@ -236,12 +240,16 @@ fn acquire_job(
         .and_then(Value::as_str)
         .and_then(|id| id.parse::<u64>().ok())
     else {
-        return service_error(404, "job message not found");
+        return service_error(StatusCode::NOT_FOUND, "job message not found");
     };
     match lock(state).acquire_job(message_id, runner_id) {
         Ok(job) => ApiResponse::ok(job_message(&job, token, web_url)),
-        Err(AcquireError::NotFound) => service_error(404, "job message not found"),
-        Err(AcquireError::AlreadyAcquired) => service_error(409, "job already acquired"),
+        Err(AcquireError::NotFound) => {
+            service_error(StatusCode::NOT_FOUND, "job message not found")
+        }
+        Err(AcquireError::AlreadyAcquired) => {
+            service_error(StatusCode::CONFLICT, "job already acquired")
+        }
     }
 }
 
@@ -255,7 +263,7 @@ fn renew_job(state: &Mutex<State>, body: &[u8]) -> ApiResponse {
     let body = parse(body);
     let acquired = job_of(&body).and_then(|id| lock(state).acquired_job(id));
     if acquired.is_none() {
-        return service_error(404, "job not found");
+        return service_error(StatusCode::NOT_FOUND, "job not found");
     }
     ApiResponse::ok(json!({ "lockedUntil": locked_until() }))
 }
@@ -264,7 +272,7 @@ fn renew_job(state: &Mutex<State>, body: &[u8]) -> ApiResponse {
 fn complete_job(state: &Mutex<State>, body: &[u8]) -> ApiResponse {
     let body = parse(body);
     let Some(job_id) = job_of(&body) else {
-        return service_error(404, "job not found");
+        return service_error(StatusCode::NOT_FOUND, "job not found");
     };
     let conclusion = match body
         .get("conclusion")
@@ -309,7 +317,7 @@ fn complete_job(state: &Mutex<State>, body: &[u8]) -> ApiResponse {
         .collect();
     match lock(state).complete_job(job_id, conclusion, &steps) {
         Some(_) => ApiResponse::no_content(),
-        None => service_error(404, "job not found"),
+        None => service_error(StatusCode::NOT_FOUND, "job not found"),
     }
 }
 

@@ -137,7 +137,7 @@ impl Handler for ops::TeamsCheckPermissionsForRepoInOrg {
                 body[key] = body.get(from).cloned().unwrap_or(json!(0));
             }
         }
-        Ok(ApiResponse::json(200, body))
+        Ok(ApiResponse::ok(body))
     }
 }
 
@@ -155,10 +155,7 @@ impl Handler for ops::TeamsAddOrUpdateRepoPermissionsInOrg {
         let (repo, permission) = org_repo(&state, request, org)?;
         // Source: <https://docs.github.com/en/rest/teams/teams#add-or-update-team-repository-permissions>
         if !permission.admin {
-            return Err(ApiResponse::error(
-                403,
-                "You must have admin access to the repository.",
-            ));
+            return Err(crate::errors::GithubError::RepoAdmin.to_response());
         }
         let role = body
             .get("permission")
@@ -200,10 +197,7 @@ impl Handler for ops::TeamsRemoveRepoInOrg {
         let (repo, permission) = org_repo(&state, request, org)?;
         // Source: <https://docs.github.com/en/rest/teams/teams#remove-a-repository-from-a-team>
         if !permission.admin && !org.manages_team(&team.slug, &caller.login) {
-            return Err(ApiResponse::error(
-                403,
-                "You must have admin access to the repository or maintain the team.",
-            ));
+            return Err(crate::errors::GithubError::RepoAdminOrTeam.to_response());
         }
         let (org_login, slug, name) = (
             org.login.clone(),

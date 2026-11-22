@@ -21,10 +21,7 @@ use crate::operation::ops;
 use crate::state::{AccountKind, State, Team, lock};
 
 fn forbidden() -> ApiResponse {
-    ApiResponse::error(
-        403,
-        "You must be an organization owner or team maintainer to do this.",
-    )
+    crate::errors::GithubError::OrgOwnerOrMaintainer.to_response()
 }
 
 fn membership(
@@ -104,10 +101,14 @@ impl Handler for ops::TeamsGetMembershipForUserInOrg {
         } else {
             return Err(ApiResponse::not_found());
         };
-        Ok(ApiResponse::json(
-            200,
-            membership(request, &org.login, team, username, membership_state, role),
-        ))
+        Ok(ApiResponse::ok(membership(
+            request,
+            &org.login,
+            team,
+            username,
+            membership_state,
+            role,
+        )))
     }
 }
 
@@ -157,17 +158,14 @@ impl Handler for ops::TeamsAddOrUpdateMembershipForUserInOrg {
         team.updated_at = crate::state::now();
         let role = if maintainer { "maintainer" } else { "member" };
         let org = state.account(&org_login).expect("organization");
-        Ok(ApiResponse::json(
-            200,
-            membership(
-                request,
-                &org_login,
-                org.team(&slug).expect("team"),
-                &user,
-                if active { "active" } else { "pending" },
-                role,
-            ),
-        ))
+        Ok(ApiResponse::ok(membership(
+            request,
+            &org_login,
+            org.team(&slug).expect("team"),
+            &user,
+            if active { "active" } else { "pending" },
+            role,
+        )))
     }
 }
 

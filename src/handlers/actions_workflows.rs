@@ -20,10 +20,7 @@ pub(crate) fn require_actions_write(
     request.require_scope(&["repo", "workflow"])?;
     let found = find_repo(state, request)?;
     if !found.permission.push {
-        return Err(ApiResponse::error(
-            403,
-            "Resource not accessible by integration",
-        ));
+        return Err(crate::errors::GithubError::IntegrationForbidden.to_response());
     }
     Ok(found)
 }
@@ -241,7 +238,7 @@ fn runs_page(
     };
     let response = ApiResponse::conditional_typed(request, &response);
     Ok(match link {
-        Some(link) if response.status == 200 => response.with_header("link", link),
+        Some(link) if crate::errors::is_ok(response.status) => response.with_header("link", link),
         _ => response,
     })
 }
@@ -353,12 +350,10 @@ impl Handler for ops::ActionsCreateWorkflowDispatch {
             )
         };
         if workflow_state != "active" {
-            return Err(ApiResponse::unprocessable("Workflow is disabled"));
+            return Err(crate::errors::GithubError::WorkflowDisabled.to_response());
         }
         if !content.is_empty() && !content.contains("workflow_dispatch") {
-            return Err(ApiResponse::unprocessable(
-                "Workflow does not have 'workflow_dispatch' trigger",
-            ));
+            return Err(crate::errors::GithubError::WorkflowDispatchMissing.to_response());
         }
         let sha = git_dir
             .as_ref()
@@ -367,7 +362,7 @@ impl Handler for ops::ActionsCreateWorkflowDispatch {
                     .ok()
                     .flatten()
             })
-            .ok_or_else(|| ApiResponse::unprocessable("No commit found for the ref"))?;
+            .ok_or_else(|| crate::errors::GithubError::NoCommitForTheRef.to_response())?;
         let id = state.next_id();
         let repo = found.repo_mut(&mut state);
         let run_number = repo
@@ -400,8 +395,7 @@ impl Handler for ops::ActionsCreateWorkflowDispatch {
             .urls()
             .repo(&found.owner, &found.name)
             .workflow_run(id);
-        Ok(ApiResponse::typed(
-            200,
+        Ok(ApiResponse::ok_typed(
             &types::ActionsCreateWorkflowDispatchResponse(types::WorkflowDispatchResponse {
                 html_url: urls.html,
                 run_url: urls.api,

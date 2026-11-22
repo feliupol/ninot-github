@@ -255,10 +255,7 @@ fn require_push(found: &Found) -> Result<(), ApiResponse> {
     if found.permission.push {
         Ok(())
     } else {
-        Err(ApiResponse::error(
-            403,
-            "Must have push access to this repository",
-        ))
+        Err(crate::errors::GithubError::PushAccess.to_response())
     }
 }
 
@@ -315,13 +312,13 @@ fn json_body(request: &ApiRequest) -> Result<Value, ApiResponse> {
     }
     // Source: <https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api#problems-parsing-json>
     serde_json::from_slice(&request.body)
-        .map_err(|_| ApiResponse::error(400, "Problems parsing JSON"))
+        .map_err(|_| crate::errors::GithubError::ProblemsParsingJson.to_response())
 }
 
 fn object_body(request: &ApiRequest) -> Result<serde_json::Map<String, Value>, ApiResponse> {
     match json_body(request)? {
         Value::Object(object) => Ok(object),
-        _ => Err(ApiResponse::unprocessable("Invalid request body")),
+        _ => Err(crate::errors::GithubError::InvalidBody.to_response()),
     }
 }
 

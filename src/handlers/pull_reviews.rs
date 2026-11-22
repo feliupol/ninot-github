@@ -72,7 +72,7 @@ fn locate(pull: &state::PullRequest, id: i64, login: &str) -> Result<usize, ApiR
 }
 
 fn forbidden() -> ApiResponse {
-    ApiResponse::error(403, "Resource not accessible by personal access token")
+    crate::errors::GithubError::PatForbidden.to_response()
 }
 
 impl Handler for ops::PullsGetReview {
@@ -82,7 +82,7 @@ impl Handler for ops::PullsGetReview {
         let found = find_repo(&state, request)?;
         let pull = found.pull_mut(&mut state, number(request)?)?;
         let index = locate(pull, review_id(request)?, login.as_deref().unwrap_or(""))?;
-        Ok(ApiResponse::typed(200, &pull.reviews[index]))
+        Ok(ApiResponse::ok_typed(&pull.reviews[index]))
     }
 }
 
@@ -100,7 +100,7 @@ impl Handler for ops::PullsUpdateReview {
             return Err(forbidden());
         }
         review.body = text;
-        Ok(ApiResponse::typed(200, review))
+        Ok(ApiResponse::ok_typed(review))
     }
 }
 
@@ -115,9 +115,7 @@ impl Handler for ops::PullsDeletePendingReview {
         // Submitted reviews cannot be deleted.
         // Source: <https://docs.github.com/en/rest/pulls/reviews#delete-a-pending-review-for-a-pull-request>
         if pull.reviews[index].state != "PENDING" {
-            return Err(ApiResponse::unprocessable(
-                "Can not delete a non-pending pull request review",
-            ));
+            return Err(crate::errors::GithubError::CannotDeleteNonPendingReview.to_response());
         }
         let review = pull.reviews.remove(index);
         pull.review_comments
@@ -125,7 +123,7 @@ impl Handler for ops::PullsDeletePendingReview {
         if let Some(data) = &mut pull.data {
             data.review_comments = pull.review_comments.len() as i64;
         }
-        Ok(ApiResponse::typed(200, &review))
+        Ok(ApiResponse::ok_typed(&review))
     }
 }
 
@@ -166,19 +164,13 @@ impl Handler for ops::PullsDismissReview {
         let review = &mut pull.reviews[index];
         match review.state.as_str() {
             "PENDING" => {
-                return Err(ApiResponse::unprocessable(
-                    "Can not dismiss a pending pull request review",
-                ));
+                return Err(crate::errors::GithubError::CannotDismissPendingReview.to_response());
             }
             "COMMENTED" => {
-                return Err(ApiResponse::unprocessable(
-                    "Can not dismiss a commented pull request review",
-                ));
+                return Err(crate::errors::GithubError::CannotDismissCommentedReview.to_response());
             }
             "DISMISSED" => {
-                return Err(ApiResponse::unprocessable(
-                    "Can not dismiss a dismissed pull request review",
-                ));
+                return Err(crate::errors::GithubError::CannotDismissDismissedReview.to_response());
             }
             _ => {}
         }
@@ -187,7 +179,7 @@ impl Handler for ops::PullsDismissReview {
         if let Some(data) = &mut pull.data {
             data.updated_at = crate::time::now_utc();
         }
-        Ok(ApiResponse::typed(200, &review))
+        Ok(ApiResponse::ok_typed(&review))
     }
 }
 
@@ -215,27 +207,21 @@ impl Handler for ops::PullsSubmitReview {
             return Err(forbidden());
         }
         if review.state != "PENDING" {
-            return Err(ApiResponse::unprocessable(
-                "Can not submit a non-pending pull request review",
-            ));
+            return Err(crate::errors::GithubError::CannotSubmitNonPendingReview.to_response());
         }
         let data = pull
             .data
             .as_mut()
             .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?;
         if review_state != "COMMENTED" && data.user.login.eq_ignore_ascii_case(&caller.login) {
-            return Err(ApiResponse::unprocessable(
-                "A pull request author cannot approve or request changes on their own pull request",
-            ));
+            return Err(crate::errors::GithubError::AuthorCannotApprove.to_response());
         }
         let review = &mut pull.reviews[index];
         if let Some(new_body) = new_body {
             review.body = new_body;
         }
         if review_state != "APPROVED" && review.body.is_empty() {
-            return Err(ApiResponse::unprocessable(
-                "body is required for this review event",
-            ));
+            return Err(crate::errors::GithubError::ReviewBodyRequired.to_response());
         }
         let now = crate::time::now_utc();
         review.state = review_state.to_owned();
@@ -258,7 +244,7 @@ impl Handler for ops::PullsSubmitReview {
         for comment in &comments {
             events::pull_request_review_comment::created(&mut ctx, &data, comment)?;
         }
-        Ok(ApiResponse::typed(200, &review))
+        Ok(ApiResponse::ok_typed(&review))
     }
 }
 

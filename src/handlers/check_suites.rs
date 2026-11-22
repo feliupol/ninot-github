@@ -35,11 +35,12 @@ impl Handler for ops::ChecksCreateSuite {
             crate::webhooks::events::check_suite::requested_suite(&mut ctx, &suite)?;
         }
         // Source: OpenAPI checks/create-suite 200
-        let status = if created { 201 } else { 200 };
-        Ok(ApiResponse::typed(
-            status,
-            &types::ChecksCreateSuiteResponse(suite),
-        ))
+        let body = types::ChecksCreateSuiteResponse(suite);
+        Ok(if created {
+            ApiResponse::created(&body)
+        } else {
+            ApiResponse::ok_typed(&body)
+        })
     }
 }
 
@@ -51,10 +52,7 @@ impl Handler for ops::ChecksSetSuitesPreferences {
         let found = find_repo(&state, request)?;
         // Source: <https://docs.github.com/en/rest/checks/suites#update-repository-preferences-for-check-suites>
         if !found.permission.admin {
-            return Err(ApiResponse::error(
-                403,
-                "Must have admin rights to Repository.",
-            ));
+            return Err(crate::errors::GithubError::AdminRequired.to_response());
         }
         if let Some(items) = body.auto_trigger_checks {
             let repo = state
@@ -67,8 +65,7 @@ impl Handler for ops::ChecksSetSuitesPreferences {
             }
         }
         let preference = preference_response(&state, request, &found);
-        Ok(ApiResponse::typed(
-            200,
+        Ok(ApiResponse::ok_typed(
             &types::ChecksSetSuitesPreferencesResponse(preference),
         ))
     }
@@ -80,10 +77,7 @@ impl Handler for ops::ChecksGetSuite {
         let found = find_repo(&state, request)?;
         let id = parse_id(request.param("check_suite_id"))?;
         let suite = render_suite(&state, request, &found, id)?;
-        Ok(ApiResponse::typed(
-            200,
-            &types::ChecksGetSuiteResponse(suite),
-        ))
+        Ok(ApiResponse::ok_typed(&types::ChecksGetSuiteResponse(suite)))
     }
 }
 
@@ -146,10 +140,9 @@ impl Handler for ops::ChecksRerequestSuite {
         let mut ctx =
             crate::webhooks::events::Ctx::new(&mut state, request, &found.owner, &found.name);
         crate::webhooks::events::check_suite::rerequested(&mut ctx, &suite)?;
-        Ok(ApiResponse::typed(
-            201,
-            &types::ChecksRerequestSuiteResponse(types::EmptyObject {}),
-        ))
+        Ok(ApiResponse::created(&types::ChecksRerequestSuiteResponse(
+            types::EmptyObject {},
+        )))
     }
 }
 

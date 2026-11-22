@@ -58,7 +58,7 @@ fn render(request: &ApiRequest, found: &Found, hook: &Hook, state: &State) -> ty
                 code: Some(i64::from(code)),
                 message: None,
                 status: Some(
-                    if (200..300).contains(&code) {
+                    if crate::errors::is_success(code) {
                         "active"
                     } else {
                         "failed"
@@ -173,7 +173,7 @@ fn host_refused(policy: webhooks::TargetPolicy, url: &Url) -> bool {
 impl Handler for ops::ReposCreateWebhook {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let body: Option<types::ReposCreateWebhookRequestBody> = request.json_as()?;
-        let body = body.ok_or_else(|| ApiResponse::unprocessable("Invalid request body"))?;
+        let body = body.ok_or_else(|| crate::errors::GithubError::InvalidBody.to_response())?;
         let config = body.config.unwrap_or_default();
         let mut state = lock(state);
         let found = find_admin(&state, request)?;
@@ -230,7 +230,7 @@ impl Handler for ops::ReposCreateWebhook {
                 return Err(error.into());
             }
         }
-        Ok(ApiResponse::typed(201, &rendered))
+        Ok(ApiResponse::created(&rendered))
     }
 }
 
@@ -255,10 +255,9 @@ impl Handler for ops::ReposGetWebhook {
             .iter()
             .find(|hook| hook.id == id)
             .ok_or_else(ApiResponse::not_found)?;
-        Ok(ApiResponse::typed(
-            200,
-            &render(request, &found, hook, &state),
-        ))
+        Ok(ApiResponse::ok_typed(&render(
+            request, &found, hook, &state,
+        )))
     }
 }
 
@@ -307,10 +306,9 @@ impl Handler for ops::ReposUpdateWebhook {
             .iter()
             .find(|hook| hook.id == id)
             .unwrap();
-        Ok(ApiResponse::typed(
-            200,
-            &render(request, &found, hook, &state),
-        ))
+        Ok(ApiResponse::ok_typed(&render(
+            request, &found, hook, &state,
+        )))
     }
 }
 
@@ -388,7 +386,7 @@ impl Handler for ops::ReposListWebhookDeliveries {
             .filter(|delivery| delivery.hook_id == id)
             .map(|delivery| {
                 let (status, code) = match (delivery.status_code, &delivery.error) {
-                    (Some(code), _) if (200..300).contains(&code) => ("OK".to_owned(), code),
+                    (Some(code), _) if crate::errors::is_success(code) => ("OK".to_owned(), code),
                     (Some(code), _) => (format!("Invalid HTTP Response: {code}"), code),
                     (None, Some(error)) => (error.clone(), 0),
                     (None, None) => ("Pending".to_owned(), 0),
@@ -409,6 +407,6 @@ impl Handler for ops::ReposListWebhookDeliveries {
                 }
             })
             .collect::<Vec<_>>();
-        Ok(ApiResponse::typed(200, &items))
+        Ok(ApiResponse::ok_typed(&items))
     }
 }

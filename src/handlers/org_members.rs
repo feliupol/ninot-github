@@ -20,7 +20,7 @@ use super::Handler;
 use super::org_support::{
     Need, find_org, object_body, organization_simple, owners_only, scoped, user_json,
 };
-use crate::api::{ApiRequest, ApiResponse, ApiResult, Body, paginate};
+use crate::api::{ApiRequest, ApiResponse, ApiResult, paginate};
 use crate::operation::ops;
 use crate::state::{Account, AccountKind, OrgRole, State, lock};
 
@@ -95,11 +95,7 @@ impl Handler for ops::OrgsCheckMembershipForUser {
                 .urls()
                 .org(&org.login)
                 .public_member(request.param("username"));
-            return Ok(ApiResponse {
-                status: 302,
-                headers: vec![("location".to_owned(), location)],
-                body: Body::Empty,
-            });
+            return Ok(ApiResponse::found(location));
         }
         if org.members.contains(&username) {
             Ok(ApiResponse::no_content())
@@ -158,13 +154,10 @@ impl Handler for ops::OrgsGetMembershipForUser {
         let own = caller.login.eq_ignore_ascii_case(request.param("username"));
         // Source: <https://docs.github.com/en/rest/orgs/members#get-organization-membership-for-a-user>
         if org.role_of(&caller.login) == OrgRole::Outsider && !own {
-            return Err(ApiResponse::error(
-                403,
-                "You must be an organization member to see its memberships.",
-            ));
+            return Err(crate::errors::GithubError::OrgMemberSeeMemberships.to_response());
         }
         membership_json(request, &state, org, request.param("username"))
-            .map(|body| ApiResponse::json(200, body))
+            .map(ApiResponse::ok)
             .ok_or_else(ApiResponse::not_found)
     }
 }
@@ -200,7 +193,7 @@ impl Handler for ops::OrgsSetMembershipForUser {
         }
         let org = state.account(request.param("org")).expect("organization");
         let body = membership_json(request, &state, org, &user).expect("membership was just set");
-        Ok(ApiResponse::json(200, body))
+        Ok(ApiResponse::ok(body))
     }
 }
 

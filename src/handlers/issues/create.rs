@@ -17,15 +17,12 @@ impl Handler for ops::IssuesCreate {
         let body: types::IssuesCreateRequest = request.json_as()?;
         let title = body.title.to_string();
         if title.is_empty() {
-            return Err(ApiResponse::unprocessable("title is required"));
+            return Err(crate::errors::GithubError::TitleRequired.to_response());
         }
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         if !found.permission.push {
-            return Err(ApiResponse::error(
-                403,
-                "Resource not accessible by personal access token",
-            ));
+            return Err(crate::errors::GithubError::PatForbidden.to_response());
         }
         let milestone = milestone_number(&state, &found, body.milestone.as_ref())?;
         let assignee_users = super::assignees::resolve_assignees(
@@ -138,7 +135,7 @@ impl Handler for ops::IssuesCreate {
         if let Some(milestone) = &issue.milestone {
             events::issues::milestoned(&mut ctx, &issue, milestone)?;
         }
-        Ok(ApiResponse::typed(201, &issue))
+        Ok(ApiResponse::created(&issue))
     }
 }
 

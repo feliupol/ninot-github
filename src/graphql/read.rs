@@ -45,7 +45,7 @@ pub(super) fn account_created_at(account: &Account) -> String {
 /// A schema enum value spelled `text`.
 fn schema_enum<T: serde::de::DeserializeOwned>(text: &str, what: &str) -> Result<T, Error> {
     serde_json::from_value(serde_json::Value::from(text))
-        .map_err(|_| Error::new(format!("{what} has the unknown state {text:?}")))
+        .map_err(|_| super::errors::unknown_state(what, text))
 }
 
 /// The commit statuses on `sha`, latest record of each context.

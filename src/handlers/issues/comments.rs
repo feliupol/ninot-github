@@ -36,7 +36,7 @@ impl Handler for ops::IssuesGetComment {
         let comment = locate(found.repo(&state), id)
             .map(|place| rendered(&state, request, &found, &place))
             .ok_or_else(ApiResponse::not_found)?;
-        Ok(ApiResponse::typed(200, &comment))
+        Ok(ApiResponse::ok_typed(&comment))
     }
 }
 
@@ -52,10 +52,7 @@ impl Handler for ops::IssuesUpdateComment {
         let before = rendered(&state, request, &found, &place);
         let author = before.user.as_ref().map(|user| user.login.clone());
         if !may_change(&found, author.as_deref(), &caller.login) {
-            return Err(ApiResponse::error(
-                403,
-                "Must have admin rights to Repository.",
-            ));
+            return Err(crate::errors::GithubError::AdminRequired.to_response());
         }
         let number = place_number(&place);
         let old_body = before.body.unwrap_or_default();
@@ -63,7 +60,7 @@ impl Handler for ops::IssuesUpdateComment {
         let comment = rendered(&state, request, &found, &place);
         let mut ctx = super::webhook_ctx(&mut state, request, &found);
         events::issue_comment::edited(&mut ctx, number, &comment, &old_body)?;
-        Ok(ApiResponse::typed(200, &comment))
+        Ok(ApiResponse::ok_typed(&comment))
     }
 }
 
@@ -77,10 +74,7 @@ impl Handler for ops::IssuesDeleteComment {
         let comment = rendered(&state, request, &found, &place);
         let author = comment.user.as_ref().map(|user| user.login.clone());
         if !may_change(&found, author.as_deref(), &caller.login) {
-            return Err(ApiResponse::error(
-                403,
-                "Must have admin rights to Repository.",
-            ));
+            return Err(crate::errors::GithubError::AdminRequired.to_response());
         }
         let number = place_number(&place);
         remove_comment(found.repo_mut(&mut state), &place);

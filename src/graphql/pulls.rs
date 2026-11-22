@@ -47,15 +47,14 @@ pub(super) fn pull_request(env: &Env, parent: &Map, args: &Map) -> Result<Output
     let state = lock(&env.state);
     let account = state
         .account(&owner.login)
-        .ok_or_else(|| Error::new("repository does not exist"))?;
+        .ok_or_else(super::errors::repository_missing)?;
     let repo = account
         .repo(&name)
-        .ok_or_else(|| Error::new("repository does not exist"))?;
-    let pull = repo.pull_requests.get(&number).ok_or_else(|| {
-        Error::new(format!(
-            "Could not resolve to a PullRequest with the number of {number}."
-        ))
-    })?;
+        .ok_or_else(super::errors::repository_missing)?;
+    let pull = repo
+        .pull_requests
+        .get(&number)
+        .ok_or_else(|| super::errors::resolve_pull_number(number))?;
     Output::of(match pull_object(env, account, repo, number, pull)? {
         Some(full) => FoundPullRequest::Full(Box::new(full)),
         None => FoundPullRequest::Number(Box::new(objects::PullRequestNumber {
@@ -145,18 +144,18 @@ fn latest_opinionated_reviews(env: &Env, parent: &Map, _: &Map) -> Result<Output
     let state = lock(&env.state);
     let account = state
         .account(&repository.owner.login)
-        .ok_or_else(|| Error::new("repository does not exist"))?;
+        .ok_or_else(super::errors::repository_missing)?;
     let repo = account
         .repo(&repository.name)
-        .ok_or_else(|| Error::new("repository does not exist"))?;
+        .ok_or_else(super::errors::repository_missing)?;
     let pull = repo
         .pull_requests
         .get(&number)
-        .ok_or_else(|| Error::new("pull request does not exist"))?;
+        .ok_or_else(super::errors::pull_missing)?;
     let data = pull
         .data
         .as_ref()
-        .ok_or_else(|| Error::new("pull request REST model does not exist"))?;
+        .ok_or_else(super::errors::pull_rest_missing)?;
     let (reviews, opinions) = review_objects(env, account, repo, number, pull, &data.head.sha)?;
     let latest = latest_opinions(&opinions);
     let mut reviews: Vec<Option<Review>> = reviews.into_iter().map(Some).collect();
@@ -180,10 +179,10 @@ fn author_can_push_to_repository(env: &Env, parent: &Map, _: &Map) -> Result<Out
     let state = lock(&env.state);
     let account = state
         .account(&repository.owner.login)
-        .ok_or_else(|| Error::new("repository does not exist"))?;
+        .ok_or_else(super::errors::repository_missing)?;
     let repo = account
         .repo(&repository.name)
-        .ok_or_else(|| Error::new("repository does not exist"))?;
+        .ok_or_else(super::errors::repository_missing)?;
     Output::of(author.is_some_and(|author| super::read::can_push(account, repo, &author.login)))
 }
 
@@ -208,7 +207,7 @@ pub(super) fn stored_commit(
         return Ok(None);
     };
     let read_error =
-        |error: &dyn std::fmt::Display| Error::new(format!("could not read commit {sha}: {error}"));
+        |error: &dyn std::fmt::Display| super::errors::could_not_read_commit(sha, error);
     let Ok(id) = gix::ObjectId::from_hex(sha.as_bytes()) else {
         return Ok(None);
     };

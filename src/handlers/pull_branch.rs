@@ -62,10 +62,7 @@ impl Handler for ops::PullsUpdateBranch {
         let found = find_repo(&state, request)?;
         // The status only. Source: OpenAPI pulls/update-branch 403
         if !found.permission.push {
-            return Err(ApiResponse::error(
-                403,
-                "Resource not accessible by personal access token",
-            ));
+            return Err(crate::errors::GithubError::PatForbidden.to_response());
         }
         let number = request
             .param("pull_number")
@@ -85,40 +82,34 @@ impl Handler for ops::PullsUpdateBranch {
             .and_then(|pull| pull.data.as_ref())
             .ok_or_else(ApiResponse::not_found)?;
         if data.state != crate::types::PullRequestState::Open {
-            return Err(ApiResponse::unprocessable("pull request is not open"));
+            return Err(crate::errors::GithubError::PullNotOpen.to_response());
         }
         if data.head.user.login != found.owner || data.base.user.login != found.owner {
-            return Err(ApiResponse::unprocessable(
-                "only pull requests whose head branch is in this repository can be updated",
-            ));
+            return Err(crate::errors::GithubError::HeadMustBeInRepository.to_response());
         }
         let (head_ref, base_ref) = (data.head.ref_.clone(), data.base.ref_.clone());
         let head = git::resolve_commit(&git_dir, &format!("refs/heads/{head_ref}"))
             .map_err(ApiResponse::internal)?
-            .ok_or_else(|| ApiResponse::unprocessable("head branch does not exist"))?;
+            .ok_or_else(|| crate::errors::GithubError::HeadBranchMissing.to_response())?;
         let base = git::resolve_commit(&git_dir, &format!("refs/heads/{base_ref}"))
             .map_err(ApiResponse::internal)?
-            .ok_or_else(|| ApiResponse::unprocessable("base branch does not exist"))?;
+            .ok_or_else(|| crate::errors::GithubError::BaseBranchMissing.to_response())?;
         // Source: <https://docs.github.com/en/rest/pulls/pulls#update-a-pull-request-branch>
         if expected.is_some_and(|sha| sha != head) {
-            return Err(ApiResponse::unprocessable(
-                "expected head sha didn't match current head ref.",
-            ));
+            return Err(crate::errors::GithubError::HeadShaNotCurrent.to_response());
         }
         if git::new_commits(&git_dir, &base, &[&head])
             .map_err(ApiResponse::internal)?
             .is_empty()
         {
-            return Err(ApiResponse::unprocessable(
-                "There are no new commits on the base branch.",
-            ));
+            return Err(crate::errors::GithubError::NoNewCommits.to_response());
         }
         let sha =
             super::pull_git::merge_base_into_head(&git_dir, &head, &base, &head_ref, &base_ref)
                 .map_err(|fail| match fail {
                     // A content or tree conflict answers 422, matching `git merge-tree --write-tree` failing.
                     super::pull_git::GitFail::Conflict => {
-                        ApiResponse::unprocessable("merge conflict between base and head")
+                        crate::errors::GithubError::MergeConflictBaseHead.to_response()
                     }
                     other => ApiResponse::unprocessable(&other.text()),
                 })?;
@@ -146,12 +137,9 @@ impl Handler for ops::PullsUpdateBranch {
                 &actor,
             )?;
         }
-        Ok(ApiResponse::json(
-            202,
-            json!({
-                "message": "Updating pull request branch.",
-                "url": request.urls().repo(&found.owner, &found.name).pull(number).api,
-            }),
-        ))
+        Ok(ApiResponse::accepted_json(json!({
+            "message": "Updating pull request branch.",
+            "url": request.urls().repo(&found.owner, &found.name).pull(number).api,
+        })))
     }
 }

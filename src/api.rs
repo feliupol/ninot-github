@@ -129,9 +129,9 @@ impl ApiRequest {
         serde_json::from_slice(body).map_err(|error| {
             if !error.is_data() || serde_json::from_slice::<serde::de::IgnoredAny>(body).is_err() {
                 // Source: <https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api#problems-parsing-json>
-                ApiResponse::error(400, "Problems parsing JSON")
+                crate::errors::GithubError::ProblemsParsingJson.to_response()
             } else {
-                ApiResponse::unprocessable("Invalid request body")
+                crate::errors::GithubError::InvalidBody.to_response()
             }
         })
     }
@@ -140,7 +140,7 @@ impl ApiRequest {
     pub fn require_caller(&self) -> Result<&Caller, ApiResponse> {
         self.caller
             .as_ref()
-            .ok_or_else(|| ApiResponse::error(401, "Requires authentication"))
+            .ok_or_else(|| crate::errors::GithubError::RequiresAuthentication.to_response())
     }
 
     /// The caller, or a 401; with a token lacking every scope in `any_of`, a 403.
@@ -161,10 +161,7 @@ impl ApiRequest {
         if own_repository || any_of.iter().any(|scope| caller.has_scope(scope)) {
             Ok(caller)
         } else {
-            Err(ApiResponse::error(
-                403,
-                "Resource not accessible by personal access token",
-            ))
+            Err(crate::errors::GithubError::PatForbidden.to_response())
         }
     }
 
@@ -194,16 +191,8 @@ pub struct ApiResponse {
 }
 
 impl ApiResponse {
-    pub fn json(status: u16, value: Value) -> Self {
-        Self {
-            status,
-            headers: Vec::new(),
-            body: Body::Json(value),
-        }
-    }
-
     pub fn ok(value: Value) -> Self {
-        Self::json(200, value)
+        Self::json_status(http::StatusCode::OK, value)
     }
 
     /// Serve a JSON representation with its content-derived conditional validator.
@@ -223,11 +212,7 @@ impl ApiResponse {
             .is_some_and(|condition| !condition.precondition_passes(&etag));
         // Source: <https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api#use-conditional-requests>
         let response = if unchanged {
-            Self {
-                status: 304,
-                headers: Vec::new(),
-                body: Body::Empty,
-            }
+            Self::not_modified()
         } else {
             Self::ok(value)
         };
@@ -244,23 +229,108 @@ impl ApiResponse {
         }
     }
 
-    /// A JSON body serialized from one of the spec's response types.
-    pub fn typed(status: u16, value: &impl serde::Serialize) -> Self {
-        Self::json(
+    fn with_status(status: http::StatusCode, value: &impl serde::Serialize) -> Self {
+        Self::json_status(
             status,
             serde_json::to_value(value).expect("response types serialize to JSON"),
         )
     }
 
+    /// `200` with a JSON body serialized from one of the spec's response types.
+    pub fn ok_typed(value: &impl serde::Serialize) -> Self {
+        Self::with_status(http::StatusCode::OK, value)
+    }
+
+    /// `201` with a JSON body serialized from one of the spec's response types.
+    pub fn created(value: &impl serde::Serialize) -> Self {
+        Self::with_status(http::StatusCode::CREATED, value)
+    }
+
+    /// `202` with a JSON body serialized from one of the spec's response types.
+    pub fn accepted(value: &impl serde::Serialize) -> Self {
+        Self::with_status(http::StatusCode::ACCEPTED, value)
+    }
+
+    /// `301` with a JSON body. Callers add the `Location` header.
+    pub fn moved_permanently(value: &impl serde::Serialize) -> Self {
+        Self::with_status(http::StatusCode::MOVED_PERMANENTLY, value)
+    }
+
+    /// `201` with a JSON value.
+    pub fn created_json(value: Value) -> Self {
+        Self::json_status(http::StatusCode::CREATED, value)
+    }
+
+    /// `202` with a JSON value.
+    pub fn accepted_json(value: Value) -> Self {
+        Self::json_status(http::StatusCode::ACCEPTED, value)
+    }
+
+    /// JSON at `status`.
+    pub fn json_status(status: http::StatusCode, value: Value) -> Self {
+        Self {
+            status: status.as_u16(),
+            headers: Vec::new(),
+            body: Body::Json(value),
+        }
+    }
+
     pub fn no_content() -> Self {
         Self {
-            status: 204,
+            status: http::StatusCode::NO_CONTENT.as_u16(),
             headers: Vec::new(),
             body: Body::Empty,
         }
     }
 
-    pub fn bytes(status: u16, content_type: &str, bytes: Vec<u8>) -> Self {
+    /// `304` with an empty body.
+    pub fn not_modified() -> Self {
+        Self {
+            status: http::StatusCode::NOT_MODIFIED.as_u16(),
+            headers: Vec::new(),
+            body: Body::Empty,
+        }
+    }
+
+    /// `302` with an empty body and a `Location` header.
+    pub fn found(location: String) -> Self {
+        Self {
+            status: http::StatusCode::FOUND.as_u16(),
+            headers: vec![("location".to_owned(), location)],
+            body: Body::Empty,
+        }
+    }
+
+    /// `303` with an empty body.
+    pub fn see_other() -> Self {
+        Self {
+            status: http::StatusCode::SEE_OTHER.as_u16(),
+            headers: Vec::new(),
+            body: Body::Empty,
+        }
+    }
+
+    /// `200` with a raw body.
+    pub fn bytes_ok(content_type: &str, bytes: Vec<u8>) -> Self {
+        Self::bytes_status(http::StatusCode::OK, content_type, bytes)
+    }
+
+    /// `202` with a raw body.
+    pub fn bytes_accepted(content_type: &str, bytes: Vec<u8>) -> Self {
+        Self::bytes_status(http::StatusCode::ACCEPTED, content_type, bytes)
+    }
+
+    /// A raw body at `status`.
+    pub fn bytes_status(status: http::StatusCode, content_type: &str, bytes: Vec<u8>) -> Self {
+        Self {
+            status: status.as_u16(),
+            headers: vec![("content-type".to_owned(), content_type.to_owned())],
+            body: Body::Bytes(bytes),
+        }
+    }
+
+    /// A raw body at a status chosen outside this process, such as git's smart HTTP reply.
+    pub fn bytes_raw(status: u16, content_type: &str, bytes: Vec<u8>) -> Self {
         Self {
             status,
             headers: vec![("content-type".to_owned(), content_type.to_owned())],
@@ -268,38 +338,32 @@ impl ApiResponse {
         }
     }
 
-    /// A GitHub-shaped error body.
-    pub fn error(status: u16, message: &str) -> Self {
-        Self::typed(
-            status,
-            &types::BasicError {
-                documentation_url: Some(DOCS_URL.to_owned()),
+    /// A GitHub basic-error body. `status` is the numeric code stored in the body.
+    pub(crate) fn basic_error_raw(status: u16, documentation_url: &str, message: &str) -> Self {
+        Self::json_status(
+            http::StatusCode::from_u16(status).unwrap_or(http::StatusCode::INTERNAL_SERVER_ERROR),
+            serde_json::to_value(&types::BasicError {
+                documentation_url: Some(documentation_url.to_owned()),
                 message: Some(message.to_owned()),
                 status: Some(status.to_string()),
                 url: None,
-            },
+            })
+            .expect("response types serialize to JSON"),
         )
+        .with_raw_status(status)
     }
 
-    pub fn not_found() -> Self {
-        Self::error(404, "Not Found")
-    }
-
-    /// A 500 whose message is `error`.
-    pub(crate) fn internal(error: impl std::fmt::Display) -> Self {
-        Self::error(500, &error.to_string())
-    }
-
-    /// A 422 with a plain message, for failures that are not about one field.
-    pub(crate) fn unprocessable(message: &str) -> Self {
-        Self::error(422, message)
+    fn with_raw_status(mut self, status: u16) -> Self {
+        self.status = status;
+        self
     }
 
     /// A 422 validation failure naming the offending field.
     // Source: <https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api#validation-failed>
-    pub fn validation_failed(resource: &str, field: &str, code: &str) -> Self {
-        Self::typed(
-            422,
+    pub(crate) fn validation_body(resource: &str, field: &str, code: &str) -> Self {
+        let status = http::StatusCode::UNPROCESSABLE_ENTITY;
+        Self::with_status(
+            status,
             &types::ValidationError {
                 documentation_url: DOCS_URL.to_owned(),
                 errors: vec![types::ValidationErrorErrorsItem {
@@ -311,9 +375,34 @@ impl ApiResponse {
                     value: None,
                 }],
                 message: "Validation Failed".to_owned(),
-                status: "422".to_owned(),
+                status: status.as_str().to_owned(),
             },
         )
+    }
+
+    pub fn not_found() -> Self {
+        crate::errors::GithubError::NotFound.to_response()
+    }
+
+    /// A 500 whose message is `error`.
+    pub(crate) fn internal(error: impl std::fmt::Display) -> Self {
+        crate::errors::GithubError::Internal(error.to_string().into()).to_response()
+    }
+
+    /// A 422 with a plain message, for failures that are not about one field.
+    pub(crate) fn unprocessable(message: &str) -> Self {
+        crate::errors::GithubError::Unprocessable(message.to_owned().into()).to_response()
+    }
+
+    /// A 422 validation failure naming the offending field.
+    // Source: <https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api#validation-failed>
+    pub fn validation_failed(resource: &str, field: &str, code: &str) -> Self {
+        crate::errors::GithubError::ValidationFailed {
+            resource: resource.to_owned().into(),
+            field: field.to_owned().into(),
+            code: code.to_owned().into(),
+        }
+        .to_response()
     }
 
     pub fn with_header(mut self, name: &str, value: String) -> Self {
@@ -348,7 +437,7 @@ pub fn paginate_with<T: serde::Serialize, R: serde::Serialize>(
 ) -> ApiResponse {
     let total_count = i64::try_from(items.len()).unwrap_or(i64::MAX);
     let (body, link) = page(request, path, items);
-    let response = ApiResponse::typed(200, &wrap(total_count, body));
+    let response = ApiResponse::ok_typed(&wrap(total_count, body));
     match link {
         Some(link) => response.with_header("link", link),
         None => response,

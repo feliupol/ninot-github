@@ -98,7 +98,7 @@ impl Handler for ops::IssuesCreateMilestone {
         };
         repo.milestones.insert(number, milestone);
         let rendered = render_number(repo, request, &found.owner, number);
-        Ok(ApiResponse::typed(201, &rendered).with_header("location", rendered.url.clone()))
+        Ok(ApiResponse::created(&rendered).with_header("location", rendered.url.clone()))
     }
 }
 
@@ -113,7 +113,7 @@ impl Handler for ops::IssuesGetMilestone {
             .get(&number)
             .ok_or_else(ApiResponse::not_found)?;
         let rendered = super::render_stored(repo, request, &found.owner, milestone);
-        Ok(ApiResponse::typed(200, &rendered))
+        Ok(ApiResponse::ok_typed(&rendered))
     }
 }
 
@@ -159,7 +159,7 @@ impl Handler for ops::IssuesUpdateMilestone {
         milestone.updated_at = crate::time::now_utc();
         super::sync_milestones(repo, request, &found.owner);
         let rendered = render_number(repo, request, &found.owner, number);
-        Ok(ApiResponse::typed(200, &rendered))
+        Ok(ApiResponse::ok_typed(&rendered))
     }
 }
 

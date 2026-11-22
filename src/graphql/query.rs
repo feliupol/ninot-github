@@ -11,7 +11,7 @@ use super::types::{
 };
 use super::{
     AccountKey, Env, IdArgs, LoginArgs, Map, MutationArgs, NameArgs, Output, RepositoriesArgs,
-    RepositoryArgs, RepositoryKey, database_id, not_found, typed_error,
+    RepositoryArgs, RepositoryKey, database_id,
 };
 use crate::handlers::repos::init_storage;
 use crate::render::node_id;
@@ -116,7 +116,7 @@ pub(super) fn account_of_kind(
 /// `Query.viewer`.
 pub(super) fn viewer(env: &Env, _: &Map, _: &Map) -> Result<Output, Error> {
     let viewer = account_of_kind(env, &env.caller.login, AccountKind::User)
-        .ok_or_else(|| Error::new("viewer does not exist"))?;
+        .ok_or_else(super::errors::viewer_missing)?;
     Output::of(viewer)
 }
 
@@ -131,11 +131,8 @@ pub(super) fn query_repository(env: &Env, _: &Map, args: &Map) -> Result<Output,
         _ => (owner, name),
     };
     // Source: cli/cli v2.101.0 api/queries_repo.go:309
-    let repository = visible_repository(env, &state, &owner, &name).ok_or_else(|| {
-        not_found(format!(
-            "Could not resolve to a Repository with the name '{owner}/{name}'."
-        ))
-    })?;
+    let repository = visible_repository(env, &state, &owner, &name)
+        .ok_or_else(|| super::errors::resolve_repository_name(&owner, &name))?;
     Output::of(repository)
 }
 
@@ -154,11 +151,8 @@ pub(super) fn repository_owner(env: &Env, _: &Map, args: &Map) -> Result<Output,
 pub(super) fn user(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
     let LoginArgs { login } = super::read(args)?;
     // Source: cli/cli v2.101.0 pkg/cmd/project/shared/queries/queries.go:1270
-    let user = account_of_kind(env, &login, AccountKind::User).ok_or_else(|| {
-        not_found(format!(
-            "Could not resolve to a User with the login of '{login}'."
-        ))
-    })?;
+    let user = account_of_kind(env, &login, AccountKind::User)
+        .ok_or_else(|| super::errors::resolve_user_login(&login))?;
     Output::of(user)
 }
 
@@ -167,12 +161,8 @@ pub(super) fn organization(env: &Env, _: &Map, args: &Map) -> Result<Output, Err
     let LoginArgs { login } = super::read(args)?;
     // Source: cli/cli v2.101.0 api/queries_repo.go:25
     // Source: cli/cli v2.101.0 pkg/cmd/project/shared/queries/queries.go:1270
-    let organization =
-        account_of_kind(env, &login, AccountKind::Organization).ok_or_else(|| {
-            not_found(format!(
-                "Could not resolve to an Organization with the login of '{login}'."
-            ))
-        })?;
+    let organization = account_of_kind(env, &login, AccountKind::Organization)
+        .ok_or_else(|| super::errors::resolve_org_login(&login))?;
     Output::of(organization)
 }
 
@@ -321,7 +311,7 @@ pub(super) fn viewer_permission(env: &Env, parent: &Map, _: &Map) -> Result<Outp
 /// `Repository.autoMergeAllowed`.
 pub(super) fn auto_merge_allowed(env: &Env, parent: &Map, _: &Map) -> Result<Output, Error> {
     let allowed = stored_repo(&lock(&env.state), parent)?
-        .ok_or_else(|| Error::new("repository does not exist"))?
+        .ok_or_else(super::errors::repository_missing)?
         .settings
         .allow_auto_merge;
     Output::of(allowed)
@@ -349,20 +339,13 @@ pub(super) fn create_repository(env: &Env, _: &Map, args: &Map) -> Result<Output
         &["repo", "public_repo"]
     };
     if !scopes.iter().any(|scope| env.caller.has_scope(scope)) {
-        return Err(typed_error(
-            "Your token has not been granted the required scopes to execute this query.",
-            "INSUFFICIENT_SCOPES",
-        ));
+        return Err(super::errors::insufficient_scopes());
     }
     let mut state = lock(&env.state);
     let owner = match &input.owner_id {
         None => env.caller.login.clone(),
         Some(owner_id) => {
-            let unresolved = || {
-                not_found(format!(
-                    "Could not resolve to a node with the global id of '{owner_id}'"
-                ))
-            };
+            let unresolved = || super::errors::resolve_node(owner_id);
             let id = database_id(owner_id).ok_or_else(unresolved)?;
             state
                 .accounts()
@@ -375,17 +358,13 @@ pub(super) fn create_repository(env: &Env, _: &Map, args: &Map) -> Result<Output
         .account(&owner)
         .is_some_and(|account| account.is_administered_by(&env.caller.login))
     {
-        return Err(typed_error(
-            format!(
-                "{} does not have the correct permissions to execute `CreateRepository`",
-                env.caller.login
-            ),
-            "FORBIDDEN",
+        return Err(super::errors::create_repository_permission(
+            &env.caller.login,
         ));
     }
     let repo = state
         .create_repo(&owner, name, private, input.description.clone())
-        .map_err(|_| typed_error("Name already exists on this account", "UNPROCESSABLE"))?;
+        .map_err(|_| super::errors::name_exists())?;
     let storage = repo
         .git_dir
         .clone()

@@ -10,7 +10,7 @@ use super::objects::{Connection, GitObject, Issue, Label, Milestone, Ref};
 use super::page::page;
 use super::query::stored_repo;
 use super::types::{IssueState, LabelOrderField, MilestoneState, OrderDirection};
-use super::{Env, Map, NumberArgs, Output, PageArgs, RepositoryKey, not_found, read};
+use super::{Env, Map, NumberArgs, Output, PageArgs, RepositoryKey, read};
 use crate::render::node_id;
 use crate::state::{Issue as Stored, State, lock};
 use ninot_common::git;
@@ -133,10 +133,10 @@ fn repository_issues_field(env: &Env, parent: &Map, args: &Map) -> Result<Output
     let state = lock(&env.state);
     let account = state
         .account(&owner.login)
-        .ok_or_else(|| Error::new("repository does not exist"))?;
+        .ok_or_else(super::errors::repository_missing)?;
     let repo = account
         .repo(&name)
-        .ok_or_else(|| Error::new("repository does not exist"))?;
+        .ok_or_else(super::errors::repository_missing)?;
     let mut issues: Vec<&Stored> = repo.issues.values().collect();
     let states = args
         .filter_by
@@ -202,9 +202,7 @@ fn repository_issue_field(env: &Env, parent: &Map, args: &Map) -> Result<Output,
     let number = u64::try_from(number).unwrap_or_default();
     match load_issue(env, parent, number)? {
         Some(issue) => Output::of(issue),
-        None => Err(not_found(format!(
-            "Could not resolve to an issue with the number of {number}."
-        ))),
+        None => Err(super::errors::resolve_issue_number(number)),
     }
 }
 
@@ -216,9 +214,7 @@ fn issue_or_pull_request(env: &Env, parent: &Map, args: &Map) -> Result<Output, 
     }
     match super::pulls::pull_request(env, parent, args) {
         Ok(output) => Ok(output),
-        Err(_) => Err(not_found(format!(
-            "Could not resolve to an Issue or PullRequest with the number of {number}."
-        ))),
+        Err(_) => Err(super::errors::resolve_issue_or_pull(number)),
     }
 }
 
@@ -323,12 +319,12 @@ fn issue_parent<'a>(
 fn issue_labels_field(env: &Env, parent: &Map, args: &Map) -> Result<Output, Error> {
     let PageArgs { first, last, after } = read(args)?;
     let (state, owner, name, number) = issue_parent(env, parent)?;
-    let account = state.account(&owner).ok_or_else(|| Error::new("missing"))?;
-    let repo = account.repo(&name).ok_or_else(|| Error::new("missing"))?;
+    let account = state.account(&owner).ok_or_else(super::errors::missing)?;
+    let repo = account.repo(&name).ok_or_else(super::errors::missing)?;
     let issue = repo
         .issues
         .get(&number)
-        .ok_or_else(|| Error::new("missing"))?;
+        .ok_or_else(super::errors::missing)?;
     let request = env.request();
     let labels = repo_labels(&state, &request, account, repo)
         .into_iter()
@@ -340,12 +336,12 @@ fn issue_labels_field(env: &Env, parent: &Map, args: &Map) -> Result<Output, Err
 fn issue_comments_field(env: &Env, parent: &Map, args: &Map) -> Result<Output, Error> {
     let PageArgs { first, last, after } = read(args)?;
     let (state, owner, name, number) = issue_parent(env, parent)?;
-    let account = state.account(&owner).ok_or_else(|| Error::new("missing"))?;
-    let repo = account.repo(&name).ok_or_else(|| Error::new("missing"))?;
+    let account = state.account(&owner).ok_or_else(super::errors::missing)?;
+    let repo = account.repo(&name).ok_or_else(super::errors::missing)?;
     let issue = repo
         .issues
         .get(&number)
-        .ok_or_else(|| Error::new("missing"))?;
+        .ok_or_else(super::errors::missing)?;
     let comments = issue
         .comments
         .iter()
@@ -357,11 +353,11 @@ fn issue_comments_field(env: &Env, parent: &Map, args: &Map) -> Result<Output, E
 fn issue_assignees_field(env: &Env, parent: &Map, args: &Map) -> Result<Output, Error> {
     let PageArgs { first, last, after } = read(args)?;
     let (state, owner, name, number) = issue_parent(env, parent)?;
-    let repo = super::read::repo(&state, &owner, &name).ok_or_else(|| Error::new("missing"))?;
+    let repo = super::read::repo(&state, &owner, &name).ok_or_else(super::errors::missing)?;
     let issue = repo
         .issues
         .get(&number)
-        .ok_or_else(|| Error::new("missing"))?;
+        .ok_or_else(super::errors::missing)?;
     let assignees = issue
         .assignees
         .iter()
@@ -373,12 +369,12 @@ fn issue_assignees_field(env: &Env, parent: &Map, args: &Map) -> Result<Output, 
 fn issue_linked_branches_field(env: &Env, parent: &Map, args: &Map) -> Result<Output, Error> {
     let PageArgs { first, last, after } = read(args)?;
     let (state, owner, name, number) = issue_parent(env, parent)?;
-    let account = state.account(&owner).ok_or_else(|| Error::new("missing"))?;
-    let repo = account.repo(&name).ok_or_else(|| Error::new("missing"))?;
+    let account = state.account(&owner).ok_or_else(super::errors::missing)?;
+    let repo = account.repo(&name).ok_or_else(super::errors::missing)?;
     let issue = repo
         .issues
         .get(&number)
-        .ok_or_else(|| Error::new("missing"))?;
+        .ok_or_else(super::errors::missing)?;
     let branches = issue
         .linked_branches
         .iter()

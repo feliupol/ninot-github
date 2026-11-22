@@ -49,10 +49,7 @@ impl Handler for ops::PullsUpdate {
             .and_then(|pull| pull.data.as_ref())
             .ok_or_else(ApiResponse::not_found)?;
         if !found.permission.push && !data.user.login.eq_ignore_ascii_case(&caller.login) {
-            return Err(ApiResponse::error(
-                403,
-                "Must have write access or be the pull request author",
-            ));
+            return Err(crate::errors::GithubError::WriteOrAuthor.to_response());
         }
         // The status only. Source: OpenAPI pulls/update 422
         if data.merged && matches!(body.state, Some(types::PullsUpdateRequestState::Open)) {
@@ -153,6 +150,6 @@ impl Handler for ops::PullsUpdate {
             _ => {}
         }
         events::pull_request::edited(&mut ctx, &data, changes)?;
-        Ok(ApiResponse::typed(200, &types::PullsUpdateResponse(data)))
+        Ok(ApiResponse::ok_typed(&types::PullsUpdateResponse(data)))
     }
 }

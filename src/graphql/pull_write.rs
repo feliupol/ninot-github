@@ -7,7 +7,7 @@ use super::issue_actions::webhook_err;
 use super::pull_fields::owned_pull;
 use super::pulls::review_objects;
 use super::types::PullRequestReviewEvent;
-use super::{Env, Json, Map, MutationArgs, Output, not_found, read, typed_error};
+use super::{Env, Json, Map, MutationArgs, Output, read, typed_error};
 use crate::api::{ApiResponse, Body};
 use crate::handlers::Handler;
 use crate::render::node_id;
@@ -41,7 +41,7 @@ fn create_pull(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
     let MutationArgs { input } = read::<MutationArgs<CreateInput>>(args)?;
     let state = lock(&env.state);
     let (owner, name) = super::issue_actions::repo_location(&state, &input.repository_id)
-        .ok_or_else(|| not_found("Could not resolve to a Repository.".to_owned()))?;
+        .ok_or_else(super::errors::resolve_repository)?;
     drop(state);
     let spec = crate::types::PullsCreateRequest {
         base: input.base_ref_name,
@@ -103,18 +103,12 @@ fn add_review(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
         Some(PullRequestReviewEvent::RequestChanges) => "REQUEST_CHANGES",
         Some(PullRequestReviewEvent::Comment) => "COMMENT",
         Some(PullRequestReviewEvent::Dismiss) => {
-            return Err(typed_error(
-                "dismiss a review through its own mutation",
-                "UNPROCESSABLE",
-            ));
+            return Err(super::errors::dismiss_own_mutation());
         }
         None => "PENDING",
     };
     if !matches!(event, "APPROVE" | "PENDING") && input.body.as_deref().unwrap_or("").is_empty() {
-        return Err(typed_error(
-            "body is required for this review event",
-            "UNPROCESSABLE",
-        ));
+        return Err(super::errors::review_body_required());
     }
     let mut state = lock(&env.state);
     let (owner, name, number) = locate(&state, &input.pull_request_id)?;
@@ -123,12 +117,7 @@ fn add_review(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
     let author = state
         .account(&env.caller.login)
         .map(|account| crate::render::simple_user(&request, account))
-        .ok_or_else(|| {
-            not_found(format!(
-                "Could not resolve to a User '{}'",
-                env.caller.login
-            ))
-        })?;
+        .ok_or_else(|| super::errors::resolve_user(&env.caller.login))?;
     let id = state.next_id();
     let review_state = match event {
         "APPROVE" => "APPROVED",
@@ -144,14 +133,11 @@ fn add_review(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
         let data = pull
             .data
             .as_ref()
-            .ok_or_else(|| not_found("pull request REST model does not exist".to_owned()))?;
+            .ok_or_else(super::errors::pull_rest_not_found)?;
         if matches!(event, "APPROVE" | "REQUEST_CHANGES")
             && data.user.login.eq_ignore_ascii_case(&env.caller.login)
         {
-            return Err(typed_error(
-                "A pull request author cannot approve or request changes on their own pull request",
-                "UNPROCESSABLE",
-            ));
+            return Err(super::errors::author_cannot_approve());
         }
         data.head.sha.clone()
     };
@@ -201,9 +187,7 @@ fn add_review(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
         let repo = account.repo(&name).expect("located");
         let pull = repo.pull_requests.get(&number).expect("located");
         let (mut reviews, _) = review_objects(env, account, repo, number, pull, &head)?;
-        let stored = reviews
-            .pop()
-            .ok_or_else(|| Error::new("review was not stored"))?;
+        let stored = reviews.pop().ok_or_else(super::errors::review_not_stored)?;
         (stored, pull.data.clone())
     };
     if let Some(pull_data) = pull_data {
@@ -244,7 +228,7 @@ fn update_pull(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
         .as_ref()
         .is_some_and(|title| title.trim().is_empty())
     {
-        return Err(typed_error("title is required", "UNPROCESSABLE"));
+        return Err(super::errors::title_required());
     }
     let mut state = lock(&env.state);
     let (owner, name, number) = locate(&state, &input.pull_request_id)?;
@@ -274,7 +258,7 @@ fn update_pull(env: &Env, _: &Map, args: &Map) -> Result<Output, Error> {
                 let git_dir = repo
                     .git_dir
                     .as_deref()
-                    .ok_or_else(|| typed_error("repository has no git storage", "UNPROCESSABLE"))?;
+                    .ok_or_else(super::errors::no_git_storage_unprocessable)?;
                 git_tip(git_dir, branch)
             })
             .transpose()?;
@@ -351,7 +335,7 @@ fn set_closed(env: &Env, args: &Map, close: bool, typename: &'static str) -> Res
         .and_then(|repo| repo.pull_requests.get(&number))
         .and_then(|pull| pull.data.as_ref())
         .map(|data| data.user.login.clone())
-        .ok_or_else(|| not_found("pull request does not exist".to_owned()))?;
+        .ok_or_else(super::errors::pull_not_found)?;
     author_or_push(&state, env, &owner, &name, &login)?;
     let event_id = state.next_id();
     let pull = state
@@ -405,18 +389,14 @@ fn pull_by_id(env: &Env, id: &str) -> Result<super::objects::PullRequest, Error>
 }
 
 fn locate(state: &crate::state::State, id: &str) -> Result<(String, String, u64), Error> {
-    super::pulls::pull_location(state, id).ok_or_else(|| {
-        not_found(format!(
-            "Could not resolve to a node with the global id of '{id}'"
-        ))
-    })
+    super::pulls::pull_location(state, id).ok_or_else(|| super::errors::resolve_node(id))
 }
 
 fn visible(state: &crate::state::State, env: &Env, owner: &str, name: &str) -> Result<(), Error> {
     state
         .permission(Some(&env.caller), owner, name)
         .map(|_| ())
-        .ok_or_else(|| typed_error("Resource not accessible by integration", "FORBIDDEN"))
+        .ok_or_else(super::errors::integration_forbidden)
 }
 
 fn author_or_push(
@@ -428,14 +408,11 @@ fn author_or_push(
 ) -> Result<(), Error> {
     let permission = state
         .permission(Some(&env.caller), owner, name)
-        .ok_or_else(|| typed_error("Resource not accessible by integration", "FORBIDDEN"))?;
+        .ok_or_else(super::errors::integration_forbidden)?;
     if permission.push || author.eq_ignore_ascii_case(&env.caller.login) {
         Ok(())
     } else {
-        Err(typed_error(
-            "Must have write access or be the pull request author",
-            "FORBIDDEN",
-        ))
+        Err(super::errors::write_or_author())
     }
 }
 
@@ -447,18 +424,13 @@ fn actor_user(
     state
         .account(&env.caller.login)
         .map(|account| crate::render::simple_user(request, account))
-        .ok_or_else(|| {
-            not_found(format!(
-                "Could not resolve to a User '{}'",
-                env.caller.login
-            ))
-        })
+        .ok_or_else(|| super::errors::resolve_user(&env.caller.login))
 }
 
 fn git_tip(git_dir: &std::path::Path, branch: &str) -> Result<String, Error> {
     ninot_common::git::resolve_commit(git_dir, &format!("refs/heads/{branch}"))
         .map_err(|error| Error::new(error.to_string()))?
-        .ok_or_else(|| typed_error("base branch does not exist", "UNPROCESSABLE"))
+        .ok_or_else(super::errors::base_branch_missing)
 }
 
 fn rest_error(response: ApiResponse) -> Error {
@@ -470,11 +442,7 @@ fn rest_error(response: ApiResponse) -> Error {
             .to_owned(),
         _ => "request failed".to_owned(),
     };
-    let kind = match response.status {
-        403 => "FORBIDDEN",
-        404 => "NOT_FOUND",
-        _ => "UNPROCESSABLE",
-    };
+    let kind = super::errors::rest_kind(response.status);
     typed_error(message, kind)
 }
 

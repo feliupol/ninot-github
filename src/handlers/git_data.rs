@@ -95,10 +95,7 @@ impl Handler for ops::GitGetRef {
             .iter()
             .find(|found| found.name == name)
             .ok_or_else(ApiResponse::not_found)?;
-        Ok(ApiResponse::typed(
-            200,
-            &render_ref(request, &located, found),
-        ))
+        Ok(ApiResponse::ok_typed(&render_ref(request, &located, found)))
     }
 }
 
@@ -120,10 +117,7 @@ impl Handler for ops::GitCreateRef {
         let mut state = lock(state);
         let found = find_repo(&state, request)?;
         if !found.permission.push {
-            return Err(ApiResponse::error(
-                403,
-                "Resource not accessible by integration",
-            ));
+            return Err(crate::errors::GithubError::IntegrationForbidden.to_response());
         }
         let (git_dir, default_branch) = {
             let repo = state
@@ -147,7 +141,7 @@ impl Handler for ops::GitCreateRef {
             .iter()
             .any(|reference| reference.name == body.ref_)
         {
-            return Err(ApiResponse::error(409, "Reference already exists"));
+            return Err(crate::errors::GithubError::ReferenceAlreadyExists.to_response());
         }
         git::create_ref(&git_dir, &body.ref_, &object, &super::BOT)
             .map_err(ApiResponse::internal)?;
@@ -171,7 +165,7 @@ impl Handler for ops::GitCreateRef {
             );
             crate::webhooks::events::create::reference(&mut ctx, short, kind)?;
         }
-        Ok(ApiResponse::typed(201, &response))
+        Ok(ApiResponse::created(&response))
     }
 }
 
@@ -190,7 +184,7 @@ impl Handler for ops::GitListMatchingRefs {
             .filter(|found| found.name.starts_with(&prefix))
             .map(|found| render_ref(request, &located, found))
             .collect::<Vec<_>>();
-        Ok(ApiResponse::typed(200, &items))
+        Ok(ApiResponse::ok_typed(&items))
     }
 }
 
@@ -253,7 +247,10 @@ fn read_commit(located: &Located, reference: &str) -> Result<git::Commit, ApiRes
     let sha = git::resolve_commit(&located.git_dir, reference)
         .map_err(ApiResponse::internal)?
         .ok_or_else(|| {
-            ApiResponse::unprocessable(&format!("No commit found for SHA: {reference}"))
+            crate::errors::GithubError::NoCommitForSha {
+                reference: reference.to_owned(),
+            }
+            .to_response()
         })?;
     git::commit(&located.git_dir, &sha).map_err(ApiResponse::internal)
 }
@@ -265,10 +262,10 @@ impl Handler for ops::ReposGetCommit {
         if let Some(response) = super::diff_media::commit(request, &located.git_dir, &commit.sha)? {
             return Ok(response);
         }
-        Ok(ApiResponse::typed(
-            200,
-            &render_commit(&located.urls(request), &commit),
-        ))
+        Ok(ApiResponse::ok_typed(&render_commit(
+            &located.urls(request),
+            &commit,
+        )))
     }
 }
 
@@ -303,25 +300,22 @@ impl Handler for ops::ReposGetBranch {
             .map_err(ApiResponse::internal)?
             .into_iter()
             .find(|found| found.name == name)
-            .ok_or_else(|| ApiResponse::error(404, "Branch not found"))?;
+            .ok_or_else(|| crate::errors::GithubError::BranchNotFound.to_response())?;
         let commit = git::commit(&located.git_dir, &found.sha).map_err(ApiResponse::internal)?;
         let repo = located.urls(request);
-        Ok(ApiResponse::typed(
-            200,
-            &types::BranchWithProtection {
-                commit: render_commit(&repo, &commit),
-                links: types::BranchWithProtectionLinks {
-                    html: repo.tree_html(branch),
-                    self_: repo.branch(branch),
-                },
-                name: branch.to_owned(),
-                pattern: None,
-                protected: false,
-                protection: unprotected(),
-                protection_url: repo.branch_protection(branch),
-                required_approving_review_count: None,
+        Ok(ApiResponse::ok_typed(&types::BranchWithProtection {
+            commit: render_commit(&repo, &commit),
+            links: types::BranchWithProtectionLinks {
+                html: repo.tree_html(branch),
+                self_: repo.branch(branch),
             },
-        ))
+            name: branch.to_owned(),
+            pattern: None,
+            protected: false,
+            protection: unprotected(),
+            protection_url: repo.branch_protection(branch),
+            required_approving_review_count: None,
+        }))
     }
 }
 
@@ -469,7 +463,7 @@ impl Handler for ops::ReposGetContent {
     fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
         let located = locate(state, request)?;
         if git::is_empty(&located.git_dir).map_err(ApiResponse::internal)? {
-            return Err(ApiResponse::error(404, "This repository is empty."));
+            return Err(crate::errors::GithubError::RepositoryEmpty.to_response());
         }
         let reference = request
             .query("ref")
@@ -478,7 +472,10 @@ impl Handler for ops::ReposGetContent {
         let sha = git::resolve_commit(&located.git_dir, &reference)
             .map_err(ApiResponse::internal)?
             .ok_or_else(|| {
-                ApiResponse::error(404, &format!("No commit found for the ref {reference}"))
+                crate::errors::GithubError::NoCommitForRef {
+                    reference: reference.to_owned(),
+                }
+                .to_response()
             })?;
         let rel = request.param("path");
         let content = if rel == "." {
@@ -489,8 +486,7 @@ impl Handler for ops::ReposGetContent {
                 .ok_or_else(ApiResponse::not_found)?
         };
         match content {
-            PathContent::Directory(entries) => Ok(ApiResponse::typed(
-                200,
+            PathContent::Directory(entries) => Ok(ApiResponse::ok_typed(
                 &entries
                     .iter()
                     .map(|entry| directory_item(request, &located, &reference, &sha, entry))
@@ -499,65 +495,37 @@ impl Handler for ops::ReposGetContent {
             PathContent::File(tree_entry) if tree_entry.kind == "commit" => {
                 let gitlink = gitlink(request, &located, &sha, &tree_entry)?;
                 let entry = entry(request, &located, &reference, &tree_entry);
-                Ok(ApiResponse::typed(
-                    200,
-                    &types::ContentSubmodule {
-                        download_url: None,
-                        git_url: gitlink.git_url.clone(),
-                        html_url: gitlink.html_url.clone(),
-                        links: types::ContentSubmoduleLinks {
-                            git: gitlink.git_url,
-                            html: gitlink.html_url,
-                            self_: entry.self_url.clone(),
-                        },
-                        name: entry.name.to_owned(),
-                        path: tree_entry.path.clone(),
-                        sha: tree_entry.sha.clone(),
-                        size: tree_entry.size as i64,
-                        submodule_git_url: gitlink.url,
-                        type_: types::ContentSubmoduleType::Submodule,
-                        url: entry.self_url,
+                Ok(ApiResponse::ok_typed(&types::ContentSubmodule {
+                    download_url: None,
+                    git_url: gitlink.git_url.clone(),
+                    html_url: gitlink.html_url.clone(),
+                    links: types::ContentSubmoduleLinks {
+                        git: gitlink.git_url,
+                        html: gitlink.html_url,
+                        self_: entry.self_url.clone(),
                     },
-                ))
+                    name: entry.name.to_owned(),
+                    path: tree_entry.path.clone(),
+                    sha: tree_entry.sha.clone(),
+                    size: tree_entry.size as i64,
+                    submodule_git_url: gitlink.url,
+                    type_: types::ContentSubmoduleType::Submodule,
+                    url: entry.self_url,
+                }))
             }
             PathContent::File(tree_entry) => {
                 let bytes =
                     git::blob(&located.git_dir, &tree_entry.sha).map_err(ApiResponse::internal)?;
                 if request.accept().contains("application/vnd.github.raw") {
-                    return Ok(ApiResponse::bytes(200, "application/octet-stream", bytes));
+                    return Ok(ApiResponse::bytes_ok("application/octet-stream", bytes));
                 }
                 let entry = entry(request, &located, &reference, &tree_entry);
                 if entry.kind == types::ContentDirectoryItemType::Symlink {
-                    return Ok(ApiResponse::typed(
-                        200,
-                        &types::ContentSymlink {
-                            download_url: entry.download_url,
-                            git_url: Some(entry.git_url.clone()),
-                            html_url: Some(entry.html_url.clone()),
-                            links: types::ContentSymlinkLinks {
-                                git: Some(entry.git_url),
-                                html: Some(entry.html_url),
-                                self_: entry.self_url.clone(),
-                            },
-                            name: entry.name.to_owned(),
-                            path: tree_entry.path.clone(),
-                            sha: tree_entry.sha.clone(),
-                            size: tree_entry.size as i64,
-                            target: String::from_utf8_lossy(&bytes).into_owned(),
-                            type_: types::ContentSymlinkType::Symlink,
-                            url: entry.self_url,
-                        },
-                    ));
-                }
-                Ok(ApiResponse::typed(
-                    200,
-                    &types::ContentFile {
-                        content: wrapped_base64(&bytes),
+                    return Ok(ApiResponse::ok_typed(&types::ContentSymlink {
                         download_url: entry.download_url,
-                        encoding: "base64".to_owned(),
                         git_url: Some(entry.git_url.clone()),
                         html_url: Some(entry.html_url.clone()),
-                        links: types::ContentFileLinks {
+                        links: types::ContentSymlinkLinks {
                             git: Some(entry.git_url),
                             html: Some(entry.html_url),
                             self_: entry.self_url.clone(),
@@ -566,12 +534,31 @@ impl Handler for ops::ReposGetContent {
                         path: tree_entry.path.clone(),
                         sha: tree_entry.sha.clone(),
                         size: tree_entry.size as i64,
-                        submodule_git_url: None,
-                        target: None,
-                        type_: types::ContentFileType::File,
+                        target: String::from_utf8_lossy(&bytes).into_owned(),
+                        type_: types::ContentSymlinkType::Symlink,
                         url: entry.self_url,
+                    }));
+                }
+                Ok(ApiResponse::ok_typed(&types::ContentFile {
+                    content: wrapped_base64(&bytes),
+                    download_url: entry.download_url,
+                    encoding: "base64".to_owned(),
+                    git_url: Some(entry.git_url.clone()),
+                    html_url: Some(entry.html_url.clone()),
+                    links: types::ContentFileLinks {
+                        git: Some(entry.git_url),
+                        html: Some(entry.html_url),
+                        self_: entry.self_url.clone(),
                     },
-                ))
+                    name: entry.name.to_owned(),
+                    path: tree_entry.path.clone(),
+                    sha: tree_entry.sha.clone(),
+                    size: tree_entry.size as i64,
+                    submodule_git_url: None,
+                    target: None,
+                    type_: types::ContentFileType::File,
+                    url: entry.self_url,
+                }))
             }
         }
     }
@@ -693,7 +680,7 @@ impl Handler for ops::ReposCreateOrUpdateFileContents {
         let body: types::ReposCreateOrUpdateFileContentsRequest = request.json_as()?;
         let bytes = STANDARD
             .decode(body.content.split_whitespace().collect::<String>())
-            .map_err(|_| ApiResponse::unprocessable("content is not valid Base64"))?;
+            .map_err(|_| crate::errors::GithubError::ContentNotBase64.to_response())?;
         // The lock is held until the commit lands so concurrent writes see each other's sha.
         let state = lock(state);
         let found = find_repo(&state, request)?;
@@ -746,7 +733,12 @@ impl Handler for ops::ReposCreateOrUpdateFileContents {
         } else {
             let head = git::resolve_commit(&located.git_dir, &format!("refs/heads/{branch}"))
                 .map_err(ApiResponse::internal)?
-                .ok_or_else(|| ApiResponse::error(404, &format!("Branch {branch} not found")))?;
+                .ok_or_else(|| {
+                    crate::errors::GithubError::BranchMissing {
+                        branch: branch.to_owned(),
+                    }
+                    .to_response()
+                })?;
             match git::path_content(&located.git_dir, &head, path).map_err(ApiResponse::internal)? {
                 Some(PathContent::File(file)) => Some(file.sha),
                 Some(PathContent::Directory(_)) => {
@@ -757,15 +749,14 @@ impl Handler for ops::ReposCreateOrUpdateFileContents {
         };
         match (&existing, body.sha.as_deref()) {
             (Some(_), None) => {
-                return Err(ApiResponse::unprocessable(
-                    "Invalid request.\n\n\"sha\" wasn't supplied.",
-                ));
+                return Err(crate::errors::GithubError::ShaNotSupplied.to_response());
             }
             (Some(current), Some(sha)) if current != sha => {
-                return Err(ApiResponse::error(
-                    409,
-                    &format!("{path} does not match {sha}"),
-                ));
+                return Err(crate::errors::GithubError::ShaMismatch {
+                    path: path.to_owned(),
+                    sha: sha.to_owned(),
+                }
+                .to_response());
             }
             _ => {}
         }
@@ -832,13 +823,14 @@ impl Handler for ops::ReposCreateOrUpdateFileContents {
         else {
             return Err(ApiResponse::internal("committed file could not be read"));
         };
-        let status = if existing.is_some() { 200 } else { 201 };
-        Ok(ApiResponse::typed(
-            status,
-            &types::ReposCreateOrUpdateFileContentsResponse(file_commit(
-                request, &located, branch, &commit, &file,
-            )),
-        ))
+        let body = types::ReposCreateOrUpdateFileContentsResponse(file_commit(
+            request, &located, branch, &commit, &file,
+        ));
+        Ok(if existing.is_some() {
+            ApiResponse::ok_typed(&body)
+        } else {
+            ApiResponse::created(&body)
+        })
     }
 }
 
@@ -848,11 +840,11 @@ impl Handler for ops::ReposCompareCommits {
         let (base, head) = request
             .param("basehead")
             .split_once("...")
-            .ok_or_else(|| ApiResponse::unprocessable("base and head must be separated by ..."))?;
+            .ok_or_else(|| crate::errors::GithubError::BaseHeadSeparator.to_response())?;
         let head_branch = head.split_once(':').map_or(head, |(_, branch)| branch);
         let base_sha = git::resolve_commit(&located.git_dir, base)
             .map_err(ApiResponse::internal)?
-            .ok_or_else(|| ApiResponse::error(404, "base commit not found"))?;
+            .ok_or_else(|| crate::errors::GithubError::BaseCommitNotFound.to_response())?;
         // `owner:branch` names a branch elsewhere in the repository network.
         // Source: <https://docs.github.com/en/rest/commits/commits#compare-two-commits>
         let head_sha = if let Some((owner, branch)) = head.split_once(':') {
@@ -862,7 +854,7 @@ impl Handler for ops::ReposCompareCommits {
         } else {
             git::resolve_commit(&located.git_dir, head_branch).map_err(ApiResponse::internal)?
         }
-        .ok_or_else(|| ApiResponse::error(404, "head commit not found"))?;
+        .ok_or_else(|| crate::errors::GithubError::HeadCommitNotFound.to_response())?;
         if let Some(response) =
             super::diff_media::compare(request, &located.git_dir, &base_sha, &head_sha)?
         {
@@ -918,7 +910,7 @@ impl Handler for ops::ReposCompareCommits {
                 .collect(),
             files: Vec::new(),
         };
-        Ok(ApiResponse::typed(200, &response))
+        Ok(ApiResponse::ok_typed(&response))
     }
 }
 
@@ -927,14 +919,11 @@ impl Handler for ops::GitDeleteRef {
         request.require_scope(&["repo"])?;
         let located = locate(state, request)?;
         if !located.found.permission.push {
-            return Err(ApiResponse::error(
-                403,
-                "Resource not accessible by personal access token",
-            ));
+            return Err(crate::errors::GithubError::PatForbidden.to_response());
         }
         let reference = format!("refs/{}", request.param("ref"));
         let Ok(name) = gix::refs::FullName::try_from(reference.clone()) else {
-            return Err(ApiResponse::error(422, "invalid ref"));
+            return Err(crate::errors::GithubError::InvalidRef.to_response());
         };
         let repo = super::git_store::open_repo(&located.git_dir)?;
         let deleted = repo.edit_reference(gix::refs::transaction::RefEdit {
@@ -970,10 +959,7 @@ impl Handler for ops::GitUpdateRef {
         let mut state = lock(mutex);
         let found = find_repo(&state, request)?;
         if !found.permission.push {
-            return Err(ApiResponse::error(
-                403,
-                "Resource not accessible by integration",
-            ));
+            return Err(crate::errors::GithubError::IntegrationForbidden.to_response());
         }
         let repo = state
             .account(&found.owner)
@@ -989,7 +975,7 @@ impl Handler for ops::GitUpdateRef {
         }
         let reference = format!("refs/{}", request.param("ref"));
         if gix::refs::FullName::try_from(reference.clone()).is_err() {
-            return Err(ApiResponse::unprocessable("invalid ref"));
+            return Err(crate::errors::GithubError::InvalidRef.to_response());
         }
         let current = git::refs(&git_dir, &reference)
             .map_err(ApiResponse::internal)?
@@ -1005,7 +991,7 @@ impl Handler for ops::GitUpdateRef {
         let force = body.force.unwrap_or(false);
         if !force && !super::git_store::is_ancestor(&git_dir, &current.sha, &new_sha)? {
             // Source: cli/cli v2.101.0 pkg/cmd/repo/sync/sync.go:20
-            return Err(ApiResponse::unprocessable("Update is not a fast forward"));
+            return Err(crate::errors::GithubError::NotFastForward.to_response());
         }
         git::create_ref(&git_dir, &reference, &new_sha, &super::BOT)
             .map_err(ApiResponse::internal)?;
@@ -1035,10 +1021,9 @@ impl Handler for ops::GitUpdateRef {
             .into_iter()
             .find(|found| found.name == reference)
             .ok_or_else(|| ApiResponse::internal("updated reference could not be read"))?;
-        let response = ApiResponse::typed(
-            200,
-            &types::GitUpdateRefResponse(render_ref(request, &located, &updated)),
-        );
+        let response = ApiResponse::ok_typed(&types::GitUpdateRefResponse(render_ref(
+            request, &located, &updated,
+        )));
         let owner = located.found.owner.clone();
         let name = located.found.name.clone();
         let old_sha = current.sha.clone();

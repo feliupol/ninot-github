@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 use super::issue_actions::webhook_err;
 use super::issues::issue_location as locate_issue;
-use super::{Env, Map, MutationArgs, Output, not_found, read, typed_error};
+use super::{Env, Map, MutationArgs, Output, read};
 use crate::handlers::repos::Found;
 use crate::render::node_id;
 use crate::state::{Comment, Name, lock};
@@ -60,7 +60,7 @@ fn add_issue_comment(
 ) -> Result<Output, Error> {
     let permission = state
         .permission(Some(&env.caller), &owner, &name)
-        .ok_or_else(|| typed_error("Resource not accessible by integration", "FORBIDDEN"))?;
+        .ok_or_else(super::errors::integration_forbidden)?;
     let found = Found {
         owner: owner.clone(),
         name: name.clone(),
@@ -80,7 +80,7 @@ fn add_issue_comment(
         .repo_mut(state)
         .issues
         .get_mut(&number)
-        .ok_or_else(|| not_found("issue does not exist".to_owned()))?
+        .ok_or_else(super::errors::issue_not_found)?
         .comments
         .push(record.clone());
     let comment = crate::render::issue_comment(
@@ -109,20 +109,15 @@ fn add_pull_comment(
     body: String,
 ) -> Result<Output, Error> {
     let Some((owner, name, number)) = super::pulls::pull_location(state, subject_id) else {
-        return Err(not_found(format!(
-            "Could not resolve comment subject '{subject_id}'"
-        )));
+        return Err(super::errors::resolve_comment_subject(subject_id));
     };
     state
         .permission(Some(&env.caller), &owner, &name)
-        .ok_or_else(|| typed_error("Resource not accessible by integration", "FORBIDDEN"))?;
+        .ok_or_else(super::errors::integration_forbidden)?;
     let request = env.request();
-    let account = state.account(&env.caller.login).ok_or_else(|| {
-        not_found(format!(
-            "Could not resolve to a User '{}'",
-            env.caller.login
-        ))
-    })?;
+    let account = state
+        .account(&env.caller.login)
+        .ok_or_else(|| super::errors::resolve_user(&env.caller.login))?;
     let user = crate::render::simple_user(&request, account);
     let id = state.next_id();
     let created_at = crate::time::now_utc();

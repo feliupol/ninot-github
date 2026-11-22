@@ -40,10 +40,7 @@ fn text(body: &Map<String, Value>, key: &str) -> Option<String> {
 
 // Source: <https://docs.github.com/en/rest/teams/teams#update-a-team>
 fn forbidden() -> ApiResponse {
-    ApiResponse::error(
-        403,
-        "You must be an organization owner or team maintainer to do this.",
-    )
+    crate::errors::GithubError::OrgOwnerOrMaintainer.to_response()
 }
 
 impl Handler for ops::TeamsList {
@@ -92,10 +89,7 @@ impl Handler for ops::TeamsCreate {
         let org = find_org(&state, request.param("org"))?;
         // Source: <https://docs.github.com/en/rest/teams/teams#create-a-team>
         if org.role_of(&caller.login) == OrgRole::Outsider {
-            return Err(ApiResponse::error(
-                403,
-                "You must be an organization member to create a team.",
-            ));
+            return Err(crate::errors::GithubError::OrgMemberCreateTeam.to_response());
         }
         let name = text(&body, "name").unwrap_or_default().trim().to_owned();
         let slug = slugify(&name);
@@ -194,14 +188,11 @@ impl Handler for ops::TeamsCreate {
             .expect("organization was found");
         org.teams.insert(slug.clone(), team);
         let org = state.account(request.param("org")).expect("organization");
-        Ok(ApiResponse::json(
-            201,
-            team_full_json(
-                request,
-                org,
-                org.team(&slug).expect("team was just created"),
-            ),
-        ))
+        Ok(ApiResponse::created_json(team_full_json(
+            request,
+            org,
+            org.team(&slug).expect("team was just created"),
+        )))
     }
 }
 
@@ -215,7 +206,7 @@ impl Handler for ops::TeamsGetByName {
             request.param("team_slug"),
             &caller.login,
         )?;
-        Ok(ApiResponse::json(200, team_full_json(request, org, team)))
+        Ok(ApiResponse::ok(team_full_json(request, org, team)))
     }
 }
 
@@ -297,10 +288,11 @@ impl Handler for ops::TeamsUpdateInOrg {
         team.updated_at = now();
         org.teams.insert(new_slug.clone(), team);
         let org = state.account(&org_login).expect("organization");
-        Ok(ApiResponse::json(
-            200,
-            team_full_json(request, org, org.team(&new_slug).expect("team")),
-        ))
+        Ok(ApiResponse::ok(team_full_json(
+            request,
+            org,
+            org.team(&new_slug).expect("team"),
+        )))
     }
 }
 

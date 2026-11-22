@@ -23,7 +23,7 @@ pub(super) fn variable_name(name: &str) -> String {
 /// What `gh variable set` treats as "create the variable again".
 // Source: cli/cli v2.104.0 pkg/cmd/variable/set/set.go `setVariable` retries HTTP 409 with PATCH.
 pub(super) fn already_exists() -> ApiResponse {
-    ApiResponse::error(409, "Variable already exists")
+    crate::errors::GithubError::VariableAlreadyExists.to_response()
 }
 
 /// The organization when the caller owns it. Organization Actions configuration is

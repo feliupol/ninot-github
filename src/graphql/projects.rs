@@ -6,7 +6,7 @@ use super::issue_view::issue_from_stored;
 use super::objects::{Connection, Issue, NodeRef, SubIssuesSummary};
 use super::query::repository_object;
 use super::types::ProjectV2ItemType;
-use super::{Env, Map, MutationArgs, Output, database_id, not_found};
+use super::{Env, Map, MutationArgs, Output, database_id};
 use crate::render::node_id;
 use crate::state::{ProjectItem, State, lock};
 
@@ -275,29 +275,21 @@ fn update_project_item_field_value(
         database_id(&input.field_id),
         database_id(option_id),
     ) else {
-        return Err(not_found(
-            "Could not resolve project item field value".to_owned(),
-        ));
+        return Err(super::errors::resolve_project_field_value());
     };
     let mut state = lock(&env.state);
     let Some(project) = state.projects.get_mut(&project_id) else {
-        return Err(not_found(format!(
-            "Could not resolve project '{project_id}'"
-        )));
+        return Err(super::errors::resolve_project(project_id));
     };
     let Some(item) = project.items.get_mut(&item_id) else {
-        return Err(not_found(format!(
-            "Could not resolve project item '{item_id}'"
-        )));
+        return Err(super::errors::resolve_project_item(item_id));
     };
     if !project
         .fields
         .get(&field_id)
         .is_some_and(|field| field.options.contains_key(&option_id))
     {
-        return Err(not_found(format!(
-            "Could not resolve project option '{option_id}'"
-        )));
+        return Err(super::errors::resolve_project_option(option_id));
     }
     item.single_select_values.insert(field_id, option_id);
     let item = NodeRef {

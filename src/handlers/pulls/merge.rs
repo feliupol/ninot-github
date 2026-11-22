@@ -43,10 +43,7 @@ pub(crate) fn land_pull(
         .ok_or_else(ApiResponse::not_found)?;
     // The status only. Source: OpenAPI pulls/merge 403
     if !permission.push {
-        return Err(ApiResponse::error(
-            403,
-            "Resource not accessible by personal access token",
-        ));
+        return Err(crate::errors::GithubError::PatForbidden.to_response());
     }
     let (head, base_ref, git_dir) = {
         let repo = state
@@ -59,7 +56,7 @@ pub(crate) fn land_pull(
             LandMethod::Rebase => repo.settings.allow_rebase_merge,
         };
         if !allowed {
-            return Err(ApiResponse::error(405, "merge method is not allowed"));
+            return Err(crate::errors::GithubError::MergeMethodNotAllowed.to_response());
         }
         let data = repo
             .pull_requests
@@ -68,14 +65,14 @@ pub(crate) fn land_pull(
             .ok_or_else(ApiResponse::not_found)?;
         // Source: OpenAPI pulls/merge 409
         if spec.expected_head.is_some_and(|sha| data.head.sha != sha) {
-            return Err(ApiResponse::error(409, "head SHA does not match"));
+            return Err(crate::errors::GithubError::HeadShaMismatch.to_response());
         }
         // Source: OpenAPI pulls/merge 405
         if data.state != types::PullRequestState::Open
             || data.mergeable == Some(false)
             || data.draft == Some(true)
         {
-            return Err(ApiResponse::error(405, "pull request is not mergeable"));
+            return Err(crate::errors::GithubError::PullNotMergeable.to_response());
         }
         (
             data.head.sha.clone(),
@@ -93,7 +90,9 @@ pub(crate) fn land_pull(
             spec.body,
         )
         .map_err(|fail| match fail {
-            pull_git::GitFail::Conflict => ApiResponse::error(405, "pull request is not mergeable"),
+            pull_git::GitFail::Conflict => {
+                crate::errors::GithubError::PullNotMergeable.to_response()
+            }
             other => other.rest(),
         })?,
         None => head,
@@ -124,7 +123,9 @@ pub(crate) fn land_pull(
             requested_reviewer: None,
             requested_team: None,
         })
-        .map_err(|message| ApiResponse::error(405, &message))?;
+        .map_err(|message| {
+            crate::errors::GithubError::NotAllowed(message.to_owned().into()).to_response()
+        })?;
     }
     let data = pull
         .data
@@ -176,14 +177,11 @@ impl Handler for ops::PullsMerge {
             },
         )?;
         let sha = merged.merge_commit_sha.clone().unwrap_or(merged.head.sha);
-        Ok(ApiResponse::typed(
-            200,
-            &types::PullRequestMergeResult {
-                merged: true,
-                message: "Pull Request successfully merged".to_owned(),
-                sha,
-            },
-        ))
+        Ok(ApiResponse::ok_typed(&types::PullRequestMergeResult {
+            merged: true,
+            message: "Pull Request successfully merged".to_owned(),
+            sha,
+        }))
     }
 }
 

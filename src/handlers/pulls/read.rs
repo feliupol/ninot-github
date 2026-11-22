@@ -39,12 +39,12 @@ impl Handler for ops::PullsGet {
         let commits = super::super::timeline::pull_commits(repo.git_dir.as_deref(), data)
             .map_err(ApiResponse::internal)?;
         if commits.is_empty() {
-            return Ok(ApiResponse::typed(200, data));
+            return Ok(ApiResponse::ok_typed(data));
         }
         // The count agrees with `/pulls/{number}/commits` whenever git knows the head.
         let mut data = data.clone();
         data.commits = i64::try_from(commits.len()).expect("commit counts fit in i64");
-        Ok(ApiResponse::typed(200, &data))
+        Ok(ApiResponse::ok_typed(&data))
     }
 }
 impl Handler for ops::PullsList {
@@ -101,10 +101,7 @@ impl Handler for ops::PullsList {
             "updated" => rows.sort_by_key(|data| (data.updated_at, data.number)),
             "popularity" => rows.sort_by_key(|data| (data.comments, data.number)),
             "long-running" => {
-                return Err(ApiResponse::error(
-                    501,
-                    "sort=long-running is not implemented by ninot-github",
-                ));
+                return Err(crate::errors::GithubError::SortLongRunning.to_response());
             }
             _ => {
                 return Err(ApiResponse::validation_failed(
@@ -188,7 +185,7 @@ impl Handler for ops::IssuesGet {
             .map_err(|_| ApiResponse::not_found())?;
         // A stored issue wins when a pull request was seeded with the same number.
         if let Some(issue) = super::super::issues::rendered_issue(&state, request, &found, number) {
-            return Ok(ApiResponse::typed(200, &issue));
+            return Ok(ApiResponse::ok_typed(&issue));
         }
         let pull = found
             .repo(&state)
@@ -199,10 +196,7 @@ impl Handler for ops::IssuesGet {
             .data
             .as_ref()
             .ok_or_else(|| ApiResponse::internal("Pull request REST model is not seeded"))?;
-        Ok(ApiResponse::typed(
-            200,
-            &crate::render::issue_from_pull(data),
-        ))
+        Ok(ApiResponse::ok_typed(&crate::render::issue_from_pull(data)))
     }
 }
 
@@ -249,10 +243,10 @@ impl Handler for ops::PullsListRequestedReviewers {
             .map(full_team)
             .collect::<Vec<_>>();
 
-        Ok(ApiResponse::typed(
-            200,
-            &types::PullRequestReviewRequest { teams, users },
-        ))
+        Ok(ApiResponse::ok_typed(&types::PullRequestReviewRequest {
+            teams,
+            users,
+        }))
     }
 }
 

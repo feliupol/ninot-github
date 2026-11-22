@@ -33,7 +33,7 @@ impl GitFail {
     /// The REST response for this failure.
     pub(crate) fn rest(self) -> ApiResponse {
         match self {
-            Self::Conflict => ApiResponse::unprocessable("merge conflict"),
+            Self::Conflict => crate::errors::GithubError::MergeConflict.to_response(),
             Self::Missing(what) => ApiResponse::unprocessable(what),
             Self::Message(text) => ApiResponse::internal(text),
         }

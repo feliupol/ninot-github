@@ -22,7 +22,6 @@ use winnow::token::{literal, take_till, take_while};
 
 use crate::api::{ApiResponse, DOCS_URL};
 use crate::operation::OperationInfo;
-use crate::types;
 
 /// The pinned spec with `spec/overrides.json` applied and OpenAPI's `nullable` rewritten as
 /// JSON Schema. `build.rs` writes the patched spec, which is embedded in the binary.
@@ -188,7 +187,7 @@ fn errors(validator: &Validator, what: &str, body: &Value) -> Result<(), String>
 
 /// Checks a successful JSON response of `info` against the spec.
 pub(crate) fn check(info: &'static OperationInfo, status: u16, body: &Value) -> Result<(), String> {
-    if !(200..300).contains(&status) {
+    if !crate::errors::is_success(status) {
         return Ok(());
     }
     let Some(schema) = response_schema(info, status)? else {
@@ -221,22 +220,23 @@ pub(crate) fn check_request(info: &'static OperationInfo, body: &[u8]) -> Result
     let documentation_url = operation["externalDocs"]["url"]
         .as_str()
         .unwrap_or(DOCS_URL);
-    let refusal = |status: u16, message: String| {
-        ApiResponse::typed(
+    let refusal = |status: http::StatusCode, message: String| {
+        crate::errors::GithubError::Documented {
             status,
-            &types::BasicError {
-                documentation_url: Some(documentation_url.to_owned()),
-                message: Some(message),
-                status: Some(status.to_string()),
-                url: None,
-            },
-        )
+            documentation_url: documentation_url.to_owned().into(),
+            message: message.into(),
+        }
+        .to_response()
     };
     let body: Value = if body.is_empty() {
         json!({})
     } else {
-        serde_json::from_slice(body)
-            .map_err(|_| refusal(400, "Problems parsing JSON".to_owned()))?
+        serde_json::from_slice(body).map_err(|_| {
+            refusal(
+                http::StatusCode::BAD_REQUEST,
+                "Problems parsing JSON".to_owned(),
+            )
+        })?
     };
     let validator = validator(format!("{} request", info.id), schema)
         .map_err(|error| ApiResponse::internal(&error))?;
@@ -261,7 +261,7 @@ pub(crate) fn check_request(info: &'static OperationInfo, body: &[u8]) -> Result
         Ok(())
     } else {
         Err(refusal(
-            422,
+            http::StatusCode::UNPROCESSABLE_ENTITY,
             format!("Invalid request.\n\n{}", lines.join("\n")),
         ))
     }
@@ -609,7 +609,13 @@ mod tests {
             Body::Json(body) => body,
             _ => panic!("not a JSON body"),
         };
-        for response in [ApiResponse::not_found(), ApiResponse::error(501, "x")] {
+        for response in [
+            ApiResponse::not_found(),
+            crate::errors::GithubError::NotImplemented {
+                operation: "x".into(),
+            }
+            .to_response(),
+        ] {
             check_component("basic-error", &json(response)).unwrap();
         }
         let failed = ApiResponse::validation_failed("Repository", "name", "custom");
