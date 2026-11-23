@@ -1,0 +1,106 @@
+AdminRequired	403	Must have admin rights to Repository.
+ArtifactExpired	410	Artifact has expired
+AuthorCannotApprove	422	A pull request author cannot approve or request changes on their own pull request
+BadCredentials	401	Bad credentials
+BaseBranchMissing	422	base branch does not exist
+BaseCommitNotFound	404	base commit not found
+BaseHeadSeparator	422	base and head must be separated by ...
+BaseTreeInvalid	422	The base_tree is not a valid git tree
+BodyRequired	422	body is required
+BodyTooLarge	413	Request body too large
+BranchMissing	404	Branch branch not found
+BranchNotFound	404	Branch not found
+CannotDeleteDefaultRunnerGroup	403	Cannot delete the default runner group.
+CannotDeleteNonPendingReview	422	Can not delete a non-pending pull request review
+CannotDismissCommentedReview	422	Can not dismiss a commented pull request review
+CannotDismissDismissedReview	422	Can not dismiss a dismissed pull request review
+CannotDismissPendingReview	422	Can not dismiss a pending pull request review
+CannotReadBody	400	cannot read request body
+CannotRemoveDefaultGroupRunners	422	Runners cannot be removed from the default runner group.
+CannotSubmitNonPendingReview	422	Can not submit a non-pending pull request review
+CheckNotRerequestable	422	Check run is not rerequestable
+ContentNotBase64	422	content is not valid Base64
+CouldNotAddRunner	422	could not add the runner
+Documented	400	message
+EmptyRepository	422	Repository is empty.
+FilesRequired	422	files is required
+GitObjectMissing	422	The git object does not exist.
+GitRepositoryEmpty	409	Git Repository is empty.
+GraphqlUnauthenticated	401	This endpoint requires you to be authenticated.
+HeadBranchMissing	422	head branch does not exist
+HeadCommitNotFound	404	head commit not found
+HeadMustBeInRepository	422	only pull requests whose head branch is in this repository can be updated
+HeadNotInForkNetwork	422	head branch does not exist in this fork network
+HeadShaMismatch	409	head SHA does not match
+HeadShaNotCurrent	422	expected head sha didn't match current head ref.
+Injected	418	Injected fault
+Injected	503	Server Error
+IntegrationForbidden	403	Resource not accessible by integration
+Internal	500	Internal
+InvalidBody	422	Invalid request body
+InvalidRef	422	invalid ref
+JobCannotBeRerun	403	Job cannot be rerun
+KeyRequired	422	key is required
+LabelsRequired	422	labels must contain at least one label
+MergeConflict	422	merge conflict
+MergeConflictBaseHead	422	merge conflict between base and head
+MergeMethodNotAllowed	405	merge method is not allowed
+NameRequired	422	name is required
+NoCommitForRef	404	No commit found for the ref reference
+NoCommitForSha	422	No commit found for SHA: reference
+NoCommitForTheRef	422	No commit found for the ref
+NoNewCommits	422	There are no new commits on the base branch.
+NotAllowed	405	NotAllowed
+NotFastForward	422	Update is not a fast forward
+NotFound	404	Not Found
+NotImplemented	501	Not implemented by ninot-github: operation
+ObjectMissing	422	object does not exist
+ObjectTypeMismatch	422	object type does not match the provided type
+OrgAdminBeforeAdding	403	You need admin access to the organization before adding a repository to it.
+OrgMemberCreateTeam	403	You must be an organization member to create a team.
+OrgMemberSeeMemberships	403	You must be an organization member to see its memberships.
+OrgOwnerOrMaintainer	403	You must be an organization owner or team maintainer to do this.
+OrgOwnerRequired	403	You must be an organization owner to do this.
+OrgUrlRequired	422	url must name an organization
+ParentNotObject	422	parent is not a valid git object
+PatForbidden	403	Resource not accessible by personal access token
+PathMissing	422	The path path does not exist in the tree
+PermissionsExceedGrant	422	Requested permissions exceed the installation grant
+PlanLimit	403	Upgrade to GitHub Pro or make this repository public to enable this feature.
+ProblemsParsingJson	400	Problems parsing JSON
+ProblemsParsingJsonDetail	400	Problems parsing JSON: detail
+PullNotMergeable	405	pull request is not mergeable
+PullNotOpen	422	pull request is not open
+PushAccess	403	Must have push access to this repository
+PushRepository	403	Must have push access to repository
+RateLimitExceeded	403	API rate limit exceeded for who.
+ReferenceAlreadyExists	409	Reference already exists
+RepoAdmin	403	You must have admin access to the repository.
+RepoAdminOrTeam	403	You must have admin access to the repository or maintain the team.
+RepositoriesExceedGrant	422	Requested repositories exceed the installation grant
+RepositoryEmpty	404	This repository is empty.
+RequiresAuthentication	401	Requires authentication
+ReviewBodyRequired	422	body is required for this review event
+ReviewersPlanLimit	422	Failed to create the environment protection rule. Please ensure the billing plan supports the required reviewers protection rule.
+ReviewersRequired	422	reviewers or team_reviewers is required
+RunnerEventRequired	422	runner_event must be register or remove
+RunnerNameExists	409	A runner with this name already exists.
+SecondaryRateLimit	403	You have exceeded a secondary rate limit. Please wait a few minutes before you try again. If you reach out to GitHub Support for help, please include the request ID.
+ShaAndContent	422	Cannot specify both sha and content for a tree entry
+ShaMismatch	409	path does not match sha
+ShaNotSupplied	422	Invalid request.\n\n"sha" wasn't supplied.
+SortLongRunning	501	sort=long-running is not implemented by ninot-github
+TitleHeadBaseRequired	422	title, head and base are required
+TitleRequired	422	title is required
+TreeNotObject	422	tree is not a valid git object
+Unprocessable	422	Unprocessable
+UnsupportedEncoding	422	The encoding 'encoding' is not supported
+ValidationFailed	422	Validation Failed
+VariableAlreadyExists	409	Variable already exists
+VisibilityMustBeSelected	409	Visibility must be selected
+WorkflowDisabled	422	Workflow is disabled
+WorkflowDispatchMissing	422	Workflow does not have 'workflow_dispatch' trigger
+WorkflowRunAlreadyCompleted	409	Cannot cancel a workflow run that is completed
+WorkflowRunNoFailedJobs	409	Workflow run has no failed jobs
+WorkflowRunNotCompleted	409	Workflow run is not completed
+WriteOrAuthor	403	Must have write access or be the pull request author
