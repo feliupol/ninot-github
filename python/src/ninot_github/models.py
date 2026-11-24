@@ -1,6 +1,6 @@
 """Typed Python inputs and outputs for the Ninot GitHub fixture API."""
 
-from typing import Literal, Optional, TypedDict, Union
+from typing import Any, Literal, Optional, TypedDict, Union
 
 ActionsSecretsPermission = Literal["read", "write"]
 
@@ -95,6 +95,30 @@ class IssueSeed(TypedDict, total=False):
     locked: bool
     assignee: Optional[UserSeed]
     assignees: list[UserSeed]
+
+
+class ReleaseAssetSeed(TypedDict, total=False):
+    """A file attached to a seeded release."""
+
+    name: str
+    label: Optional[str]
+    content_type: Optional[str]
+    content_base64: str
+
+
+class ReleaseSeed(TypedDict, total=False):
+    """A release seeded with Repository.add_release."""
+
+    tag_name: str
+    target_commitish: Optional[str]
+    name: Optional[str]
+    body: Optional[str]
+    draft: bool
+    prerelease: bool
+    author: Optional[str]
+    created_at: Optional[str]
+    published_at: Optional[str]
+    assets: list[ReleaseAssetSeed]
 
 
 class TeamSeed(TypedDict):
@@ -410,9 +434,28 @@ class StatusFault(TypedDict):
     status: int
 
 
+class _ReplyRequired(TypedDict):
+    status: int
+
+
+class Reply(_ReplyRequired, total=False):
+    """The response of a respond fault."""
+
+    headers: dict[str, str]
+    body: str
+    content_type: str
+
+
+class RespondFault(TypedDict):
+    """A fault that answers with a chosen status, headers and body."""
+
+    respond: Reply
+
+
 FaultValue = Union[
     LatencyFault,
     StatusFault,
+    RespondFault,
     Literal["secondary_rate_limit", "drop", "truncate"],
 ]
 
@@ -465,6 +508,24 @@ class Profile(TypedDict):
     hits: list[ProfileHit]
     labels: list[ProfileLabel]
     repeats: list[ProfileRepeat]
+
+
+class Delivery(TypedDict):
+    """A webhook delivery attempt, as listed by Server.deliveries."""
+
+    id: int
+    guid: str
+    hook_id: int
+    repository_id: int
+    event: str
+    url: str
+    headers: dict[str, str]
+    payload: Any
+    delivered_at: str
+    status_code: Optional[int]
+    error: Optional[str]
+    duration_ms: int
+    finished: bool
 
 
 class AppliedFault(TypedDict):

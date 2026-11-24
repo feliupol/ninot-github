@@ -341,3 +341,157 @@ fn installation_secrets_permission_bounds_and_scopes_its_tokens() {
         .unwrap();
     assert_eq!(put.status(), 403);
 }
+
+const APP_JWT: &str = "eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiIxIn0.signature";
+
+#[test]
+fn an_app_jwt_lists_the_installations_of_its_app() {
+    let server = Server::start().unwrap();
+    server.add_user("alice");
+    server.add_user("bob");
+    for (owner, id, app) in [("alice", 5, 1), ("bob", 6, 1), ("alice", 7, 2)] {
+        let name = format!("tool{id}");
+        server
+            .add_repository(owner, &name, true, None, None, "main")
+            .unwrap()
+            .add_app_installation(id, app)
+            .unwrap();
+    }
+    let list = |path: &str, token: &str| send(&server, token, reqwest::Method::GET, path, None);
+
+    let (status, body) = list("/app/installations", APP_JWT);
+    assert_eq!(status, 200);
+    let ids: Vec<_> = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["id"].clone())
+        .collect();
+    assert_eq!(ids, [json!(5), json!(6)]);
+    assert_eq!(body[0]["account"]["login"], "alice");
+    assert!(body[0]["permissions"].is_object());
+
+    let (_, since) = list("/app/installations?since=5", APP_JWT);
+    assert_eq!(since.as_array().unwrap().len(), 1);
+    let (_, paged) = list("/app/installations?per_page=1&page=2", APP_JWT);
+    assert_eq!(paged[0]["id"], 6);
+    let (_, other_app) = list(
+        "/app/installations",
+        "eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiIyIn0.signature",
+    );
+    assert_eq!(other_app[0]["id"], 7);
+
+    let anonymous = Client::new()
+        .get(format!("{}/app/installations", server.url()))
+        .send()
+        .unwrap();
+    assert_eq!(anonymous.status(), 401);
+    let token = server.user("alice").unwrap().add_token(&["repo"]);
+    assert_eq!(list("/app/installations", &token).0, 403);
+}
+
+#[test]
+fn an_installation_token_lists_the_repository_it_can_access() {
+    let server = Server::start().unwrap();
+    server.add_user("alice");
+    server
+        .add_repository("alice", "tool", true, None, None, "main")
+        .unwrap()
+        .add_installation(5)
+        .unwrap();
+    server
+        .add_repository("alice", "other", true, None, None, "main")
+        .unwrap();
+    let token = installation_token(&server, 5);
+    let (status, body) = send(
+        &server,
+        &token,
+        reqwest::Method::GET,
+        "/installation/repositories",
+        None,
+    );
+    assert_eq!(status, 200);
+    assert_eq!(body["total_count"], 1);
+    assert_eq!(body["repository_selection"], "selected");
+    assert_eq!(body["repositories"][0]["full_name"], "alice/tool");
+
+    let pat = server.user("alice").unwrap().add_token(&["repo"]);
+    let (status, _) = send(
+        &server,
+        &pat,
+        reqwest::Method::GET,
+        "/installation/repositories",
+        None,
+    );
+    assert_eq!(status, 403);
+    let (status, _) = send(
+        &server,
+        APP_JWT,
+        reqwest::Method::GET,
+        "/installation/repositories",
+        None,
+    );
+    assert_eq!(status, 403);
+}
+
+#[test]
+fn a_user_token_lists_the_installations_and_repositories_it_can_access() {
+    let server = Server::start().unwrap();
+    let alice = server.add_user("alice");
+    server.add_user("bob");
+    server.add_org("acme", &["alice"]);
+    for (owner, name, id, app) in [
+        ("alice", "mine", 5, 1),
+        ("acme", "shared", 6, 1),
+        ("bob", "private", 7, 1),
+        ("alice", "elsewhere", 8, 2),
+    ] {
+        server
+            .add_repository(owner, name, true, None, None, "main")
+            .unwrap()
+            .add_app_installation(id, app)
+            .unwrap();
+    }
+    let token = alice.add_app_token(1);
+    let get = |path: &str| send(&server, &token, reqwest::Method::GET, path, None);
+
+    let (status, body) = get("/user/installations");
+    assert_eq!(status, 200);
+    assert_eq!(body["total_count"], 2);
+    let ids: Vec<_> = body["installations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["id"].clone())
+        .collect();
+    assert_eq!(ids, [json!(5), json!(6)]);
+    assert_eq!(
+        get("/user/installations?per_page=1&page=2").1["installations"][0]["id"],
+        6
+    );
+
+    let (status, body) = get("/user/installations/6/repositories");
+    assert_eq!(status, 200);
+    assert_eq!(body["total_count"], 1);
+    assert_eq!(body["repositories"][0]["full_name"], "acme/shared");
+    assert_eq!(body["repositories"][0]["permissions"]["admin"], true);
+    // An installation of another account or another app is not the user's to see.
+    assert_eq!(get("/user/installations/7/repositories").0, 404);
+    assert_eq!(get("/user/installations/8/repositories").0, 404);
+    assert_eq!(get("/user/installations/x/repositories").0, 404);
+
+    let pat = alice.add_token(&["repo"]);
+    let (status, _) = send(
+        &server,
+        &pat,
+        reqwest::Method::GET,
+        "/user/installations",
+        None,
+    );
+    assert_eq!(status, 403);
+    let anonymous = Client::new()
+        .get(format!("{}/user/installations", server.url()))
+        .send()
+        .unwrap();
+    assert_eq!(anonymous.status(), 401);
+}

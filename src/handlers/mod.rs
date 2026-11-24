@@ -44,6 +44,7 @@ mod git_trees;
 mod hooks;
 pub(crate) mod issues;
 mod meta;
+pub(crate) mod oauth;
 mod org_members;
 mod org_support;
 mod orgs;
@@ -116,6 +117,10 @@ registry![
     ops::GistsCreate,
     ops::AppsGetRepoInstallation,
     ops::AppsCreateInstallationAccessToken,
+    ops::AppsListInstallations,
+    ops::AppsListReposAccessibleToInstallation,
+    ops::AppsListInstallationsForAuthenticatedUser,
+    ops::AppsListInstallationReposForAuthenticatedUser,
     ops::MetaRoot,
     ops::MetaGetZen,
     ops::RateLimitGet,

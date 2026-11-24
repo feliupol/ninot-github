@@ -206,6 +206,7 @@ struct PageArgs {
     first: Option<i64>,
     last: Option<i64>,
     after: Option<String>,
+    before: Option<String>,
 }
 
 /// The numeric id inside a node id produced by [`node_id`].

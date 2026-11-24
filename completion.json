@@ -1,7 +1,7 @@
 {
   "matrices": [
     {
-      "done": 282,
+      "done": 286,
       "name": "rest-operations",
       "total": 1231
     },
@@ -11,9 +11,9 @@
       "total": 204
     },
     {
-      "done": 70,
+      "done": 74,
       "name": "python-api",
-      "total": 80
+      "total": 84
     }
   ],
   "schema": 1

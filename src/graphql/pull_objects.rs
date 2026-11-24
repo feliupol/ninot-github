@@ -170,6 +170,8 @@ pub(super) struct IssueCommentLink {
     pub author: Option<Actor>,
     pub author_association: CommentAuthorAssociation,
     pub created_at: String,
+    pub updated_at: String,
+    pub last_edited_at: Option<String>,
     pub includes_created_edit: bool,
     pub is_minimized: bool,
     pub minimized_reason: Option<String>,

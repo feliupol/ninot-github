@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use common::{Api, TempDir, clone_url, commit_file, git, git_ok};
 use ninot_github::Server;
-use ninot_github::faults::{Fault, Rule, Target};
+use ninot_github::faults::{Fault, Reply, Rule, Target};
 use reqwest::blocking::Client;
 use serde_json::json;
 
@@ -119,4 +119,54 @@ fn seeded_probabilities_are_reproducible() {
     let first = run(42);
     assert_eq!(first, run(42));
     assert!(first.contains(&500) && first.contains(&200), "{first:?}");
+}
+
+#[test]
+fn a_reply_fault_sets_the_status_headers_and_body() {
+    let server = server_with_repo();
+    let reply =
+        |status, headers: &[(&str, &str)], body: Option<&str>, content_type: Option<&str>| {
+            Fault::Respond(Reply {
+                status,
+                headers: headers
+                    .iter()
+                    .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+                    .collect(),
+                body: body.map(str::to_owned),
+                content_type: content_type.map(str::to_owned),
+            })
+        };
+    server.add_fault(
+        Rule::new(
+            operation("repos/get"),
+            reply(
+                429,
+                &[("retry-after", "7")],
+                Some("{\"message\":\"slow down\"}"),
+                None,
+            ),
+        )
+        .times(1),
+    );
+    let limited = get_repo(&server).unwrap();
+    assert_eq!(limited.status(), 429);
+    assert_eq!(limited.headers()["retry-after"], "7");
+    assert_eq!(
+        limited.headers()["content-type"],
+        "application/json; charset=utf-8"
+    );
+    assert_eq!(limited.text().unwrap(), "{\"message\":\"slow down\"}");
+
+    server.add_fault(
+        Rule::new(
+            operation("repos/get"),
+            reply(200, &[], Some("<html>proxy</html>"), Some("text/html")),
+        )
+        .times(1),
+    );
+    let page = get_repo(&server).unwrap();
+    assert_eq!(page.status(), 200);
+    assert_eq!(page.headers()["content-type"], "text/html");
+    assert_eq!(page.text().unwrap(), "<html>proxy</html>");
+    assert_eq!(get_repo(&server).unwrap().status(), 200);
 }

@@ -460,6 +460,47 @@ pub struct TimelineEventSeed {
     pub commit_id: SeedField<String>,
 }
 
+/// A release for [`crate::server::Repository::add_release`]. A published release tags
+/// `target_commitish` when the tag does not exist yet, which needs a commit there.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ReleaseSeed {
+    /// Tag the release is for; required and unique within the repository.
+    pub tag_name: String,
+    /// Branch or commit to tag; the default branch when absent.
+    pub target_commitish: Option<String>,
+    /// Release title.
+    pub name: Option<String>,
+    /// Markdown description.
+    pub body: Option<String>,
+    /// Whether the release is a draft.
+    pub draft: bool,
+    /// Whether the release is a prerelease.
+    pub prerelease: bool,
+    /// Login of the release author; `admin` when absent.
+    pub author: Option<String>,
+    /// RFC 3339 creation time; now when absent.
+    pub created_at: Option<String>,
+    /// RFC 3339 publication time of a non-draft release; the creation time when absent.
+    pub published_at: Option<String>,
+    /// Files attached to the release.
+    pub assets: Vec<ReleaseAssetSeed>,
+}
+
+/// A file attached to a seeded release.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ReleaseAssetSeed {
+    /// File name, unique within the release.
+    pub name: String,
+    /// Label shown instead of the name.
+    pub label: Option<String>,
+    /// Media type; `application/octet-stream` when absent.
+    pub content_type: Option<String>,
+    /// File content, base64 encoded.
+    pub content_base64: String,
+}
+
 /// The author or committer of a fixture commit.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

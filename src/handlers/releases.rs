@@ -132,7 +132,7 @@ fn id_param(request: &ApiRequest, name: &str) -> Result<u64, ApiResponse> {
 /// Creates `refs/tags/{tag}` at `target` unless the tag exists.
 ///
 /// Returns whether this call created the tag ref. A missing git directory creates nothing.
-fn ensure_tag(repo: &Repo, tag: &str, target: &str) -> Result<bool, ApiResponse> {
+pub(crate) fn ensure_tag(repo: &Repo, tag: &str, target: &str) -> Result<bool, ApiResponse> {
     let Some(git_dir) = &repo.git_dir else {
         return Ok(false);
     };

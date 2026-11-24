@@ -100,6 +100,10 @@ pub struct State {
     /// Checks every webhook payload against its octokit/webhooks schema before delivery.
     pub validate_payloads: bool,
     pub faults: crate::faults::Faults,
+    /// OAuth credentials of GitHub Apps, by client id.
+    pub oauth_apps: BTreeMap<String, OauthApp>,
+    /// Authorization codes the OAuth web flow issued and has not exchanged yet, by code.
+    pub oauth_codes: HashMap<String, OauthGrant>,
     pub(crate) rate_limits: crate::rate_limit::RateLimits,
 }
 
@@ -167,6 +171,21 @@ impl ActionsSecretsPermission {
     }
 }
 
+/// The OAuth credentials of a GitHub App.
+#[derive(Clone)]
+pub struct OauthApp {
+    pub client_secret: String,
+    pub app_id: u64,
+}
+
+/// A user's authorization of a GitHub App, waiting to be exchanged for a token.
+#[derive(Clone)]
+pub struct OauthGrant {
+    pub client_id: String,
+    pub login: String,
+    pub redirect_uri: String,
+}
+
 /// A GitHub App installation scoped to one repository.
 #[derive(Clone)]
 pub struct Installation {
@@ -196,7 +215,13 @@ impl State {
         self.insert_installation(owner, repository, id, app_id, None);
     }
 
-    fn insert_installation(
+    /// Seeds an installation of `app_id` on one existing repository, with its explicit
+    /// repository Actions secrets permission.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the repository does not exist.
+    pub(crate) fn insert_installation(
         &mut self,
         owner: &str,
         repository: &str,
@@ -318,6 +343,37 @@ impl State {
             },
         );
         token
+    }
+
+    /// Issues a GitHub App user access token acting as `login`, which must be an existing user.
+    pub fn add_user_to_server_token(&mut self, login: &str, app_id: u64) -> String {
+        let account = self
+            .account(login)
+            .unwrap_or_else(|| panic!("no user {login}"));
+        assert_eq!(account.kind, AccountKind::User, "{login} is not a user");
+        let token = ninot_common::token::new_token(crate::api::USER_TOKEN_PREFIX);
+        self.tokens.insert(
+            token.clone(),
+            Caller {
+                login: account.login.clone(),
+                scopes: vec![
+                    "repo".to_owned(),
+                    format!("{}{app_id}", crate::api::USER_TO_SERVER_SCOPE),
+                ],
+            },
+        );
+        token
+    }
+
+    /// Registers the OAuth credentials of GitHub App `app_id`.
+    pub fn add_oauth_app(&mut self, client_id: &str, client_secret: &str, app_id: u64) {
+        self.oauth_apps.insert(
+            client_id.to_owned(),
+            OauthApp {
+                client_secret: client_secret.to_owned(),
+                app_id,
+            },
+        );
     }
 
     pub fn account(&self, login: &str) -> Option<&Account> {

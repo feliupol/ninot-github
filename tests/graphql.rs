@@ -474,3 +474,336 @@ fn searched_issues_are_graphql_issues() {
         })
     );
 }
+
+#[test]
+fn node_resolves_project_items_with_field_values_and_content_labels() {
+    let server = Server::start().unwrap();
+    let repository = server
+        .add_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+    let issue = repository
+        .add_issue(
+            3,
+            IssueSeed {
+                title: SeedField::present("Labelled".to_owned()),
+                labels: SeedField::present(vec![LabelSeed {
+                    name: SeedField::present("bug".to_owned()),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let project = repository.add_project("Board").unwrap();
+    project
+        .add_field("Status", vec!["Todo".to_owned(), "Done".to_owned()])
+        .unwrap();
+    project
+        .add_issue_item(&issue, [("Status".to_owned(), "Done".to_owned())].into())
+        .unwrap();
+    let reply = query(
+        &Api::admin(&server),
+        "query($id: ID!){node(id: $id){... on ProjectV2{title items(first: 10){totalCount nodes{id fieldValues(first: 10){nodes{... on ProjectV2ItemFieldSingleSelectValue{name field{... on ProjectV2SingleSelectField{name}}}}} content{... on Issue{number labels(first: 10){nodes{name}}}}}}}}}",
+        json!({"id": project.node_id()}),
+    );
+    assert!(reply.get("errors").is_none(), "{reply}");
+    let items = &reply["data"]["node"]["items"];
+    assert_eq!(items["totalCount"], 1);
+    assert_eq!(
+        items["nodes"][0]["fieldValues"]["nodes"],
+        json!([{"name": "Done", "field": {"name": "Status"}}])
+    );
+    assert_eq!(
+        items["nodes"][0]["content"],
+        json!({"number": 3, "labels": {"nodes": [{"name": "bug"}]}})
+    );
+}
+
+#[test]
+fn add_project_item_by_id_adds_an_issue_once() {
+    let server = Server::start().unwrap();
+    let repository = server
+        .add_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+    repository
+        .add_issue(
+            4,
+            IssueSeed {
+                title: SeedField::present("Plan".to_owned()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let project = repository.add_project("Board").unwrap();
+    let admin = Api::admin(&server);
+    let add = |content: &str| {
+        query(
+            &admin,
+            "mutation($input: AddProjectV2ItemByIdInput!){addProjectV2ItemById(input: $input){item{id type content{... on Issue{number title}}}}}",
+            json!({"input": {"projectId": project.node_id(), "contentId": content}}),
+        )
+    };
+    let first = add("I_admin_project_4");
+    assert!(first.get("errors").is_none(), "{first}");
+    let item = &first["data"]["addProjectV2ItemById"]["item"];
+    assert_eq!(item["type"], "ISSUE");
+    assert_eq!(item["content"], json!({"number": 4, "title": "Plan"}));
+    let again = add("I_admin_project_4");
+    assert_eq!(
+        again["data"]["addProjectV2ItemById"]["item"]["id"],
+        item["id"]
+    );
+
+    let listed = query(
+        &admin,
+        "query($id: ID!){node(id: $id){... on ProjectV2{items(first: 10){totalCount}}}}",
+        json!({"id": project.node_id()}),
+    );
+    assert_eq!(listed["data"]["node"]["items"]["totalCount"], 1);
+
+    let missing = add("I_admin_project_99");
+    assert_eq!(missing["errors"][0]["type"], "NOT_FOUND");
+    let bad_project = query(
+        &admin,
+        "mutation($input: AddProjectV2ItemByIdInput!){addProjectV2ItemById(input: $input){item{id}}}",
+        json!({"input": {"projectId": "PVT_x", "contentId": "I_admin_project_4"}}),
+    );
+    assert_eq!(bad_project["errors"][0]["type"], "NOT_FOUND");
+}
+
+#[test]
+fn pull_requests_resolve_review_threads() {
+    let server = Server::start().unwrap();
+    server.add_org("acme", &["admin"]);
+    let repository = server
+        .add_repository("acme", "project", false, None, None, "main")
+        .unwrap();
+    let pull = repository
+        .add_pull_request(
+            9,
+            PullRequestSeed {
+                title: SeedField::present("Change".to_owned()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let thread = pull
+        .add_review_thread(ninot_github::fixtures::ReviewThreadSeed {
+            is_resolved: SeedField::present(true),
+            path: SeedField::present(Some("src/lib.rs".to_owned())),
+            line: SeedField::present(Some(12)),
+            comments: SeedField::present(vec![ninot_github::fixtures::ReviewThreadCommentSeed {
+                body: SeedField::present("Rename this".to_owned()),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        })
+        .unwrap();
+    let reply = query(
+        &Api::admin(&server),
+        "{repository(owner: \"acme\", name: \"project\"){pullRequest(number: 9){reviewThreads(first: 10){totalCount nodes{id isResolved path line comments(first: 10){nodes{body}}}}}}}",
+        json!({}),
+    );
+    assert!(reply.get("errors").is_none(), "{reply}");
+    let threads = &reply["data"]["repository"]["pullRequest"]["reviewThreads"];
+    assert_eq!(threads["totalCount"], 1);
+    assert_eq!(
+        threads["nodes"][0],
+        json!({
+            "id": thread,
+            "isResolved": true,
+            "path": "src/lib.rs",
+            "line": 12,
+            "comments": {"nodes": [{"body": "Rename this"}]}
+        })
+    );
+}
+
+#[test]
+fn last_pages_report_the_items_before_them() {
+    let server = Server::start().unwrap();
+    reviewed_pull(
+        &server,
+        &[
+            ("alice", "COMMENTED"),
+            ("bob", "APPROVED"),
+            ("alice", "APPROVED"),
+        ],
+    );
+    let admin = Api::admin(&server);
+    let reviews = |args: &str| {
+        let reply = query(
+            &admin,
+            &format!(
+                "{{repository(owner: \"acme\", name: \"project\"){{pullRequest(number: 9){{reviews({args}){{totalCount nodes{{state author{{login}}}} pageInfo{{hasPreviousPage hasNextPage}}}}}}}}}}"
+            ),
+            json!({}),
+        );
+        assert!(reply.get("errors").is_none(), "{reply}");
+        reply["data"]["repository"]["pullRequest"]["reviews"].clone()
+    };
+    let last = reviews("last: 2");
+    assert_eq!(last["totalCount"], 3);
+    assert_eq!(
+        last["nodes"],
+        json!([
+            {"state": "APPROVED", "author": {"login": "bob"}},
+            {"state": "APPROVED", "author": {"login": "alice"}}
+        ])
+    );
+    assert_eq!(
+        last["pageInfo"],
+        json!({"hasPreviousPage": true, "hasNextPage": false})
+    );
+    let all = reviews("last: 10");
+    assert_eq!(all["nodes"].as_array().unwrap().len(), 3);
+    assert_eq!(all["pageInfo"]["hasPreviousPage"], false);
+    let first = reviews("first: 1");
+    assert_eq!(
+        first["pageInfo"],
+        json!({"hasPreviousPage": false, "hasNextPage": true})
+    );
+}
+
+#[test]
+fn last_takes_the_final_comments_of_an_issue() {
+    let server = Server::start().unwrap();
+    let repository = server
+        .add_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+    let issue = repository
+        .add_issue(
+            1,
+            IssueSeed {
+                title: SeedField::present("Talk".to_owned()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    for body in ["one", "two", "three"] {
+        issue
+            .add_comment(ninot_github::fixtures::IssueCommentSeed {
+                body: SeedField::present(body.to_owned()),
+                ..Default::default()
+            })
+            .unwrap();
+    }
+    let reply = query(
+        &Api::admin(&server),
+        "{repository(owner: \"admin\", name: \"project\"){issue(number: 1){comments(last: 2){nodes{body} pageInfo{hasPreviousPage hasNextPage}}}}}",
+        json!({}),
+    );
+    assert!(reply.get("errors").is_none(), "{reply}");
+    let comments = &reply["data"]["repository"]["issue"]["comments"];
+    assert_eq!(
+        comments["nodes"],
+        json!([{"body": "two"}, {"body": "three"}])
+    );
+    assert_eq!(
+        comments["pageInfo"],
+        json!({"hasPreviousPage": true, "hasNextPage": false})
+    );
+}
+
+#[test]
+fn pull_comments_carry_edit_times_and_page_backwards() {
+    let server = Server::start().unwrap();
+    let repository = server
+        .add_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+    let pull = repository
+        .add_pull_request(9, PullRequestSeed::default())
+        .unwrap();
+    for body in ["one", "two", "three"] {
+        pull.add_issue_comment(ninot_github::fixtures::IssueCommentSeed {
+            body: SeedField::present(body.to_owned()),
+            created_at: SeedField::present("2026-01-01T00:00:00Z".to_owned()),
+            updated_at: SeedField::present("2026-01-01T00:00:00Z".to_owned()),
+            ..Default::default()
+        })
+        .unwrap();
+    }
+    let api = Api::admin(&server);
+    let fields = "id createdAt updatedAt lastEditedAt author{login} body";
+    let read = |args: &str| {
+        let reply = query(
+            &api,
+            &format!(
+                "{{repository(owner: \"admin\", name: \"project\"){{pullRequest(number: 9){{comments({args}){{nodes{{{fields}}} pageInfo{{hasPreviousPage hasNextPage startCursor}}}}}}}}}}"
+            ),
+            json!({}),
+        );
+        assert!(reply.get("errors").is_none(), "{reply}");
+        reply["data"]["repository"]["pullRequest"]["comments"].clone()
+    };
+    let last = read("last: 2");
+    let nodes = last["nodes"].as_array().unwrap();
+    assert_eq!(nodes[0]["body"], "two");
+    assert_eq!(nodes[0]["createdAt"], "2026-01-01T00:00:00Z");
+    assert_eq!(nodes[0]["updatedAt"], "2026-01-01T00:00:00Z");
+    assert_eq!(nodes[0]["lastEditedAt"], Value::Null);
+    assert!(nodes[0]["id"].as_str().is_some_and(|id| !id.is_empty()));
+    let before = read(&format!(
+        "last: 1, before: \"{}\"",
+        last["pageInfo"]["startCursor"].as_str().unwrap()
+    ));
+    assert_eq!(before["nodes"].as_array().unwrap().len(), 1);
+    assert_eq!(before["nodes"][0]["body"], "one");
+    assert_eq!(before["pageInfo"]["hasPreviousPage"], false);
+    assert_eq!(before["pageInfo"]["hasNextPage"], true);
+
+    let id = nodes[0]["id"].as_str().unwrap();
+    assert!(!id.is_empty());
+    let listed = api.get("/repos/admin/project/issues/9/comments");
+    let database_id = listed.body[1]["id"].as_u64().unwrap();
+    let edited = api.patch(
+        &format!("/repos/admin/project/issues/comments/{database_id}"),
+        json!({"body": "two!"}),
+    );
+    assert_eq!(edited.status, 200, "{}", edited.body);
+    let now = read("last: 2");
+    let node = &now["nodes"][0];
+    assert_eq!(node["body"], "two!");
+    assert_ne!(node["updatedAt"], "2026-01-01T00:00:00Z");
+    assert_eq!(node["lastEditedAt"], node["updatedAt"]);
+}
+
+#[test]
+fn issue_comments_carry_edit_times_and_page_backwards() {
+    let server = Server::start().unwrap();
+    let repository = server
+        .add_repository("admin", "project", false, None, None, "main")
+        .unwrap();
+    let issue = repository.add_issue(1, IssueSeed::default()).unwrap();
+    for body in ["one", "two", "three"] {
+        issue
+            .add_comment(ninot_github::fixtures::IssueCommentSeed {
+                body: SeedField::present(body.to_owned()),
+                ..Default::default()
+            })
+            .unwrap();
+    }
+    let reply = query(
+        &Api::admin(&server),
+        "{repository(owner: \"admin\", name: \"project\"){issue(number: 1){comments(last: 2){pageInfo{startCursor}}}}}",
+        json!({}),
+    );
+    let cursor = reply["data"]["repository"]["issue"]["comments"]["pageInfo"]["startCursor"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let reply = query(
+        &Api::admin(&server),
+        &format!(
+            "{{repository(owner: \"admin\", name: \"project\"){{issue(number: 1){{comments(last: 5, before: \"{cursor}\"){{nodes{{body updatedAt lastEditedAt}} pageInfo{{hasPreviousPage}}}}}}}}}}"
+        ),
+        json!({}),
+    );
+    assert!(reply.get("errors").is_none(), "{reply}");
+    let comments = &reply["data"]["repository"]["issue"]["comments"];
+    assert_eq!(comments["nodes"].as_array().unwrap().len(), 1);
+    assert_eq!(comments["nodes"][0]["body"], "one");
+    assert_eq!(comments["nodes"][0]["lastEditedAt"], Value::Null);
+    assert!(comments["nodes"][0]["updatedAt"].is_string());
+    assert_eq!(comments["pageInfo"]["hasPreviousPage"], false);
+}

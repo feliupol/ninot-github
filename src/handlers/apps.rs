@@ -8,7 +8,7 @@ use crate::api::{
 };
 use crate::operation::ops;
 use crate::permissions::Access;
-use crate::state::{ActionsSecretsPermission, State, lock};
+use crate::state::{ActionsSecretsPermission, Installation, Permission, State, lock};
 use crate::types;
 
 fn app_slug(app_id: u64) -> String {
@@ -252,6 +252,211 @@ impl Handler for ops::AppsCreateInstallationAccessToken {
                 single_file_paths: Vec::new(),
                 token,
             }),
+        ))
+    }
+}
+
+/// The envelope of a list of repositories an installation can access.
+#[derive(serde::Serialize)]
+struct RepositoryList {
+    total_count: i64,
+    repository_selection: &'static str,
+    repositories: Vec<types::Repository>,
+}
+
+/// The claims of an App JWT that name the app.
+#[derive(serde::Deserialize)]
+struct AppClaims {
+    iss: Issuer,
+}
+
+/// `iss` is the app's id or client id; only an id selects an app.
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum Issuer {
+    Id(u64),
+    Text(String),
+}
+
+/// The id of the app an App JWT was issued for, when its `iss` claim names one.
+fn jwt_app_id(request: &ApiRequest) -> Option<u64> {
+    use base64::Engine as _;
+    let token = crate::server::token_from_authorization(&request.headers)?;
+    let payload = token.split('.').nth(1)?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload.trim_end_matches('='))
+        .ok()?;
+    match serde_json::from_slice::<AppClaims>(&bytes).ok()?.iss {
+        Issuer::Id(id) => Some(id),
+        Issuer::Text(text) => text.parse().ok(),
+    }
+}
+
+/// What `login` may do in the installation's repository, by an explicit grant: ownership,
+/// organization administration or a collaboration, but not the read access every public
+/// repository gives.
+fn explicit_permission(
+    state: &State,
+    login: &str,
+    installation: &Installation,
+) -> Option<Permission> {
+    let account = state.account(&installation.owner)?;
+    account.repo(&installation.repository)?;
+    if account.is_administered_by(login) {
+        return Some(Permission::ADMIN);
+    }
+    account
+        .member_permission(login, &installation.repository)
+        .filter(|permission| permission.pull || permission.push || permission.admin)
+}
+
+/// The installations of the app behind a user access token that its user can access.
+fn user_installations<'a>(
+    state: &'a State,
+    login: &str,
+    app_id: u64,
+) -> Vec<(&'a Installation, Permission)> {
+    state
+        .installations
+        .values()
+        .filter(|installation| installation.app_id == app_id)
+        .filter_map(|installation| {
+            explicit_permission(state, login, installation)
+                .map(|permission| (installation, permission))
+        })
+        .collect()
+}
+
+/// The id of the app behind a user access token, or the error of any other caller.
+// Source: <https://docs.github.com/en/rest/apps/installations#list-app-installations-accessible-to-the-user-access-token>
+fn user_token_app(request: &ApiRequest) -> Result<(&crate::api::Caller, u64), ApiResponse> {
+    let caller = request.require_caller()?;
+    let app_id = caller
+        .user_to_server_app()
+        .ok_or_else(|| crate::errors::GithubError::PatForbidden.to_response())?;
+    Ok((caller, app_id))
+}
+
+fn installation_repository(
+    request: &ApiRequest,
+    state: &State,
+    installation: &Installation,
+    permission: Permission,
+) -> Result<types::Repository, ApiResponse> {
+    let account = state
+        .account(&installation.owner)
+        .ok_or_else(ApiResponse::not_found)?;
+    let repo = account
+        .repo(&installation.repository)
+        .ok_or_else(ApiResponse::not_found)?;
+    Ok(crate::render::repository_for_pull(
+        request, account, repo, permission,
+    ))
+}
+
+impl Handler for ops::AppsListInstallations {
+    fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
+        // Source: <https://docs.github.com/en/rest/apps/apps#list-installations-for-the-authenticated-app>
+        request.require_scope(&["app"])?;
+        let since = request
+            .query("since")
+            .and_then(|since| since.parse::<u64>().ok())
+            .unwrap_or(0);
+        let app_id = jwt_app_id(request);
+        let state = lock(state);
+        let installations = state
+            .installations
+            .values()
+            .filter(|installation| {
+                installation.id > since && app_id.is_none_or(|app| installation.app_id == app)
+            })
+            .map(|installation| installation_model(request, &state, installation))
+            .collect();
+        Ok(crate::api::paginate(request, &request.path, installations))
+    }
+}
+
+impl Handler for ops::AppsListReposAccessibleToInstallation {
+    fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
+        // Source: <https://docs.github.com/en/rest/apps/installations#list-repositories-accessible-to-the-app-installation>
+        let caller = request.require_caller()?;
+        let (owner, repository) = caller
+            .installation()
+            .and_then(|installation| installation.split_once('/'))
+            .ok_or_else(|| crate::errors::GithubError::PatForbidden.to_response())?;
+        let state = lock(state);
+        let account = state.account(owner).ok_or_else(ApiResponse::not_found)?;
+        let repo = account
+            .repo(repository)
+            .ok_or_else(ApiResponse::not_found)?;
+        let repositories = vec![crate::render::repository_for_pull(
+            request,
+            account,
+            repo,
+            Permission::ADMIN,
+        )];
+        Ok(crate::api::paginate_with(
+            request,
+            &request.path,
+            repositories,
+            |total_count, repositories| RepositoryList {
+                total_count,
+                repository_selection: "selected",
+                repositories,
+            },
+        ))
+    }
+}
+
+impl Handler for ops::AppsListInstallationsForAuthenticatedUser {
+    fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
+        // Source: <https://docs.github.com/en/rest/apps/installations#list-app-installations-accessible-to-the-user-access-token>
+        let (caller, app_id) = user_token_app(request)?;
+        let state = lock(state);
+        let installations = user_installations(&state, &caller.login, app_id)
+            .into_iter()
+            .map(|(installation, _)| installation_model(request, &state, installation))
+            .collect();
+        Ok(crate::api::paginate_with(
+            request,
+            &request.path,
+            installations,
+            |total_count, installations| types::AppsListInstallationsForAuthenticatedUserResponse {
+                installations,
+                total_count,
+            },
+        ))
+    }
+}
+
+impl Handler for ops::AppsListInstallationReposForAuthenticatedUser {
+    fn handle(state: &Mutex<State>, request: &ApiRequest) -> ApiResult {
+        // Source: <https://docs.github.com/en/rest/apps/installations#list-repositories-accessible-to-the-user-access-token>
+        let (caller, app_id) = user_token_app(request)?;
+        let id = request
+            .param("installation_id")
+            .parse::<u64>()
+            .map_err(|_| ApiResponse::not_found())?;
+        let state = lock(state);
+        let (installation, permission) = user_installations(&state, &caller.login, app_id)
+            .into_iter()
+            .find(|(installation, _)| installation.id == id)
+            .ok_or_else(ApiResponse::not_found)?;
+        let repositories = vec![installation_repository(
+            request,
+            &state,
+            installation,
+            permission,
+        )?];
+        Ok(crate::api::paginate_with(
+            request,
+            &request.path,
+            repositories,
+            |total_count, repositories| RepositoryList {
+                total_count,
+                repository_selection: "selected",
+                repositories,
+            },
         ))
     }
 }

@@ -115,6 +115,9 @@ pub(super) fn pull_object(
                     .map(|user| Actor::of_login(&user.login, &user.type_)),
                 author_association: super::issue_view::association(account, login.unwrap_or("")),
                 created_at: time::format(&comment.created_at),
+                updated_at: time::format(&comment.updated_at),
+                last_edited_at: (comment.updated_at != comment.created_at)
+                    .then(|| time::format(&comment.updated_at)),
                 includes_created_edit: false,
                 is_minimized: false,
                 minimized_reason: None,

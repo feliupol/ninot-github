@@ -206,6 +206,10 @@ pub(super) struct IssueComment {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+    /// Null until the comment is edited. Always present so the field resolves.
+    pub last_edited_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub author: Option<Actor>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub author_association: Option<super::types::CommentAuthorAssociation>,

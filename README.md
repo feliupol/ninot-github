@@ -85,6 +85,50 @@ secondary rate limit, a dropped connection, or a truncated body. `clear_faults` 
 rules, `seed_faults` restarts the random sequence, and `applied_faults` lists what fired.
 See [`examples/faults.rs`](examples/faults.rs).
 
+A `Fault::Respond` rule answers with a status, headers and body of its own, such as a `200` with an
+HTML body or a `429` with `Retry-After`:
+
+```json
+{"target": "any", "fault": {"respond": {"status": 429, "headers": {"retry-after": "7"}, "body": "{\"message\":\"slow down\"}"}}}
+```
+
+`content_type` defaults to `application/json; charset=utf-8`.
+
+## Fixture state
+
+Seed and inspect the fake through the Rust handles of `Server` or the `ninot_github` Python
+models; the simulated service's network surface carries only GitHub's own protocol. Each
+fixture operation has both forms: `Server::add_fault` and `add_fault`, `add_user` and
+`User::add_token` / `User::add_app_token`, `add_org`, `add_repository`,
+`Repository::add_app_installation` / `add_installation(..., app_id=...)`,
+`Repository::add_release` and `ReleaseSeed`, `Server::add_oauth_app`, and `Server::deliveries`.
+
+## GitHub Apps and OAuth
+
+An App JWT lists its installations (`GET /app/installations`, filtered by the `iss` claim, with
+`since`) and finds one by repository. `GET /installation/repositories` serves an installation
+access token. A user access token, issued by the OAuth flow below or by
+`User::add_app_token`, lists the
+installations of its app that the user owns, administers or collaborates on
+(`GET /user/installations`, `GET /user/installations/{id}/repositories`); any other token gets `403`.
+
+The OAuth web flow lives at the server root, as it does on github.com. Register the app's
+credentials first with `Server::add_oauth_app`.
+
+- `GET /login/oauth/authorize?client_id=...&redirect_uri=...&state=...` approves at once as the
+  user named by `login` (the `admin` user when absent) and redirects with `302` to
+  `redirect_uri?code=...&state=...`. `redirect_uri` is required.
+- `POST /login/oauth/access_token` with `client_id`, `client_secret`, `code` and optionally
+  `redirect_uri` (form, JSON or query) answers `access_token`, `scope` and `token_type` as a
+  form-encoded body, or as JSON with `Accept: application/json`. A code is single-use. Failures
+  answer `200` with `error` (`incorrect_client_credentials`, `bad_verification_code`,
+  `redirect_uri_mismatch`), `error_description` and `error_uri`. Tokens do not expire and there
+  is no refresh token.
+
+To point a client at the fake, set its OAuth base URL to the server URL (for example
+`http://127.0.0.1:PORT`), so that it requests `{url}/login/oauth/authorize` and
+`{url}/login/oauth/access_token`; point its API base URL at `{url}` or `{url}/api/v3`.
+
 ## Rate limits and the clock
 
 The default limits are GitHub's: core 5000 per hour authenticated and 60 anonymous, search
@@ -161,7 +205,7 @@ limits.
 
 ## Status
 
-REST operations: 282 / 1231 (22.9%).
+REST operations: 286 / 1231 (23.2%).
 
 | Tag | Implemented | Total | % |
 | --- | ---: | ---: | ---: |
@@ -169,7 +213,7 @@ REST operations: 282 / 1231 (22.9%).
 | activity | 0 | 34 | 0.0% |
 | agent-tasks | 0 | 5 | 0.0% |
 | agents | 0 | 30 | 0.0% |
-| apps | 2 | 37 | 5.4% |
+| apps | 6 | 37 | 16.2% |
 | billing | 0 | 13 | 0.0% |
 | campaigns | 0 | 5 | 0.0% |
 | checks | 12 | 12 | 100.0% |
@@ -212,9 +256,9 @@ REST operations: 282 / 1231 (22.9%).
 
 GitHub CLI leaf commands: 79 / 204 (38.7%).
 
-GraphQL resolvers: 75 / 5577 schema fields (1.3%). The published schema is served. A field without a resolver reads the same-named key of its parent object and returns the error `Not implemented by ninot-github: Type.field` when that key is absent.
+GraphQL resolvers: 76 / 5577 schema fields (1.4%). The published schema is served. A field without a resolver reads the same-named key of its parent object and returns the error `Not implemented by ninot-github: Type.field` when that key is absent.
 
-Python bindings: 70 / 80 public methods.
+Python bindings: 74 / 84 public methods.
 
 | Type | Exposed | Total | Missing |
 | --- | ---: | ---: | --- |
@@ -224,12 +268,12 @@ Python bindings: 70 / 80 public methods.
 | Org | 5 | 5 | none |
 | Project | 3 | 3 | none |
 | PullRequest | 8 | 8 | none |
-| Repository | 16 | 22 | `add_actions_cache`, `add_app_installation`, `add_artifact`, `add_installation_with_secrets_permission`, `commit_file_by`, `queue_script_job` |
+| Repository | 17 | 24 | `add_actions_cache`, `add_app_installation`, `add_app_installation_with_secrets_permission`, `add_artifact`, `add_installation_with_secrets_permission`, `commit_file_by`, `queue_script_job` |
 | Review | 2 | 2 | none |
 | Runner | 2 | 2 | none |
-| Server | 19 | 23 | `deliveries`, `hits`, `wait`, `wait_for_deliveries` |
+| Server | 21 | 24 | `hits`, `wait`, `wait_for_deliveries` |
 | Team | 2 | 2 | none |
-| User | 3 | 3 | none |
+| User | 4 | 4 | none |
 | WorkflowRun | 2 | 2 | none |
 
 <!-- end-doc-gen -->

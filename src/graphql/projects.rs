@@ -10,10 +10,13 @@ use super::{Env, Map, MutationArgs, Output, database_id};
 use crate::render::node_id;
 use crate::state::{ProjectItem, State, lock};
 
-pub(super) const RESOLVERS: &[(&str, super::Resolver)] = &[(
-    "Mutation.updateProjectV2ItemFieldValue",
-    update_project_item_field_value,
-)];
+pub(super) const RESOLVERS: &[(&str, super::Resolver)] = &[
+    (
+        "Mutation.updateProjectV2ItemFieldValue",
+        update_project_item_field_value,
+    ),
+    ("Mutation.addProjectV2ItemById", add_project_item_by_id),
+];
 
 /// A `ProjectV2` board.
 #[derive(Serialize)]
@@ -187,6 +190,44 @@ fn empty_repository(owner: &str, name: &str) -> super::objects::Repository {
     }
 }
 
+/// A `ProjectV2Item` of `project` with its issue and single-select values.
+fn project_item_object(
+    env: &Env,
+    state: &State,
+    project: &crate::state::Project,
+    item: &ProjectItem,
+) -> ProjectV2Item {
+    let field_values = item
+        .single_select_values
+        .iter()
+        .filter_map(|(field_id, option_id)| {
+            let field = project.fields.get(field_id)?;
+            let option = field.options.get(option_id)?;
+            Some(ProjectV2ItemFieldSingleSelectValue {
+                typename: "ProjectV2ItemFieldSingleSelectValue",
+                id: node_id(
+                    "ProjectV2ItemFieldSingleSelectValue",
+                    item.id.wrapping_shl(32).wrapping_add(*field_id),
+                ),
+                name: option.clone(),
+                option_id: node_id("ProjectV2SingleSelectFieldOption", *option_id),
+                field: FieldName {
+                    typename: "ProjectV2SingleSelectField",
+                    name: field.name.clone(),
+                },
+            })
+        })
+        .collect();
+    ProjectV2Item {
+        typename: "ProjectV2Item",
+        id: node_id("ProjectV2Item", item.id),
+        type_: ProjectV2ItemType::Issue,
+        content: issue_object(env, state, item),
+        field_values: Connection::complete(field_values),
+        is_archived: false,
+    }
+}
+
 /// A `ProjectV2` board with its single-select fields and issue items.
 pub(super) fn project_object(
     env: &Env,
@@ -213,37 +254,7 @@ pub(super) fn project_object(
     let items = project
         .items
         .values()
-        .map(|item| {
-            let field_values = item
-                .single_select_values
-                .iter()
-                .filter_map(|(field_id, option_id)| {
-                    let field = project.fields.get(field_id)?;
-                    let option = field.options.get(option_id)?;
-                    Some(ProjectV2ItemFieldSingleSelectValue {
-                        typename: "ProjectV2ItemFieldSingleSelectValue",
-                        id: node_id(
-                            "ProjectV2ItemFieldSingleSelectValue",
-                            item.id.wrapping_shl(32).wrapping_add(*field_id),
-                        ),
-                        name: option.clone(),
-                        option_id: node_id("ProjectV2SingleSelectFieldOption", *option_id),
-                        field: FieldName {
-                            typename: "ProjectV2SingleSelectField",
-                            name: field.name.clone(),
-                        },
-                    })
-                })
-                .collect();
-            ProjectV2Item {
-                typename: "ProjectV2Item",
-                id: node_id("ProjectV2Item", item.id),
-                type_: ProjectV2ItemType::Issue,
-                content: issue_object(env, state, item),
-                field_values: Connection::complete(field_values),
-                is_archived: false,
-            }
-        })
+        .map(|item| project_item_object(env, state, project, item))
         .collect();
     ProjectV2 {
         typename: "ProjectV2",
@@ -299,5 +310,50 @@ fn update_project_item_field_value(
     Output::of(ProjectItemPayload {
         typename: "UpdateProjectV2ItemFieldValuePayload",
         project_v2_item: item,
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AddProjectItemPayload {
+    #[serde(rename = "__typename")]
+    typename: &'static str,
+    item: ProjectV2Item,
+}
+
+/// `Mutation.addProjectV2ItemById` for an issue; the item an issue already has is returned
+/// as it is.
+fn add_project_item_by_id(env: &Env, _: &Map, args: &Map) -> Result<Output, async_graphql::Error> {
+    let MutationArgs { input } =
+        super::read::<MutationArgs<super::types::AddProjectV2ItemByIdInput>>(args)?;
+    let Some(project_id) = database_id(&input.project_id) else {
+        return Err(super::errors::resolve_project(&input.project_id));
+    };
+    let mut state = lock(&env.state);
+    if !state.projects.contains_key(&project_id) {
+        return Err(super::errors::resolve_project(project_id));
+    }
+    let Some((owner, repository, number)) =
+        super::issues::issue_location(&state, &input.content_id)
+    else {
+        return Err(super::errors::resolve_node(&input.content_id));
+    };
+    let existing = state.projects[&project_id].items.values().find_map(|item| {
+        (item.owner == owner && item.repository == repository && item.issue_number == number)
+            .then_some(item.id)
+    });
+    let item_id = existing.unwrap_or_else(|| {
+        state.add_project_item(
+            project_id,
+            &owner,
+            &repository,
+            number,
+            std::collections::BTreeMap::new(),
+        )
+    });
+    let project = &state.projects[&project_id];
+    Output::of(AddProjectItemPayload {
+        typename: "AddProjectV2ItemByIdPayload",
+        item: project_item_object(env, &state, project, &project.items[&item_id]),
     })
 }

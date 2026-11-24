@@ -224,6 +224,46 @@ impl Server {
             .collect()
     }
 
+    /// Registers the OAuth credentials of GitHub App `app_id`, which the web flow checks.
+    fn add_oauth_app(&self, client_id: &str, client_secret: &str, app_id: u64) -> PyResult<()> {
+        self.server()?
+            .add_oauth_app(client_id, client_secret, app_id);
+        Ok(())
+    }
+
+    /// Every webhook delivery so far, oldest first, optionally of one event.
+    #[pyo3(signature = (event = None))]
+    fn deliveries<'py>(
+        &self,
+        py: Python<'py>,
+        event: Option<&str>,
+    ) -> PyResult<Vec<Bound<'py, PyAny>>> {
+        let json = pyo3::types::PyModule::import_bound(py, "json")?;
+        self.server()?
+            .deliveries()
+            .into_iter()
+            .filter(|delivery| event.is_none_or(|event| delivery.event == event))
+            .map(|delivery| {
+                let encoded = serde_json::json!({
+                    "id": delivery.id,
+                    "guid": delivery.guid,
+                    "hook_id": delivery.hook_id,
+                    "repository_id": delivery.repository_id,
+                    "event": delivery.event,
+                    "url": delivery.url,
+                    "headers": delivery.headers.pairs().into_iter().collect::<std::collections::BTreeMap<_, _>>(),
+                    "payload": delivery.payload(),
+                    "delivered_at": delivery.delivered_at,
+                    "status_code": delivery.status_code,
+                    "error": delivery.error,
+                    "duration_ms": delivery.duration_ms,
+                    "finished": delivery.finished(),
+                });
+                json.call_method1("loads", (encoded.to_string(),))
+            })
+            .collect()
+    }
+
     /// Advances the rate-limit clock without waiting.
     fn advance_clock(&self, milliseconds: u64) -> PyResult<()> {
         self.server()?
@@ -397,11 +437,12 @@ impl Repository {
     }
 
     /// Seeds the GitHub App installation associated with this repository.
-    #[pyo3(signature = (installation_id, secrets_permission = None))]
+    #[pyo3(signature = (installation_id, secrets_permission = None, app_id = None))]
     fn add_installation(
         &self,
         installation_id: u64,
         secrets_permission: Option<&str>,
+        app_id: Option<u64>,
     ) -> PyResult<()> {
         let permission = match secrets_permission {
             None => None,
@@ -413,9 +454,17 @@ impl Repository {
                 )));
             }
         };
-        self.inner
-            .add_installation_with_secrets_permission(installation_id, permission)
-            .map_err(|error| PyRuntimeError::new_err(error.to_string()))
+        match app_id {
+            Some(app_id) => self.inner.add_app_installation_with_secrets_permission(
+                installation_id,
+                app_id,
+                permission,
+            ),
+            None => self
+                .inner
+                .add_installation_with_secrets_permission(installation_id, permission),
+        }
+        .map_err(|error| PyRuntimeError::new_err(error.to_string()))
     }
 
     /// Seeds the public key used for repository Actions secrets.
@@ -464,6 +513,14 @@ impl Repository {
             .add_issue(number, seed)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         Ok(Issue { inner })
+    }
+
+    /// Seeds a release and its assets from a typed seed, and returns the release id.
+    fn add_release(&self, py: Python<'_>, seed: &Bound<'_, PyAny>) -> PyResult<u64> {
+        let seed: fixtures::ReleaseSeed = extract_seed(py, seed)?;
+        self.inner
+            .add_release(seed)
+            .map_err(|error| PyValueError::new_err(error.to_string()))
     }
 
     /// Creates a pull request from a sparse typed seed.
@@ -724,6 +781,11 @@ impl User {
     fn add_token(&self, scopes: Vec<String>) -> PyResult<String> {
         let scope_refs = scopes.iter().map(String::as_str).collect::<Vec<_>>();
         Ok(self.inner.add_token(&scope_refs))
+    }
+
+    /// Issues a GitHub App user access token of app `app_id`, acting as this user.
+    fn add_app_token(&self, app_id: u64) -> String {
+        self.inner.add_app_token(app_id)
     }
 
     /// Sets the display name returned by public user endpoints.

@@ -35,12 +35,29 @@ pub enum Fault {
     LatencyMs(u64),
     /// Answers with this status and a GitHub-shaped error body instead of serving the request.
     Status(u16),
+    /// Answers with exactly this response instead of serving the request.
+    Respond(Reply),
     /// GitHub's secondary rate limit: `403` with `retry-after`.
     SecondaryRateLimit,
     /// Closes the connection without sending a response.
     Drop,
     /// Serves the request but closes the connection halfway through the response body.
     Truncate,
+}
+
+/// A response a fault sends in place of serving the request.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Reply {
+    pub status: u16,
+    /// Response headers by name, such as `retry-after`.
+    #[serde(default)]
+    pub headers: std::collections::BTreeMap<String, String>,
+    /// The body as text; empty when absent.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// The `Content-Type` of the body; `application/json; charset=utf-8` when absent.
+    #[serde(default)]
+    pub content_type: Option<String>,
 }
 
 impl ninot_common::faults::Fault for Fault {

@@ -23,6 +23,10 @@ actions/set-self-hosted-runners-in-group-for-org: not reached by a gh_cli test y
 actions/update-self-hosted-runner-group-for-org: not reached by a gh_cli test yet
 apps/create-installation-access-token: needs a GitHub App JWT, and gh authenticates as a user
 apps/get-repo-installation: needs a GitHub App JWT, and gh authenticates as a user
+apps/list-installation-repos-for-authenticated-user: needs a GitHub App user access token, and gh never calls it
+apps/list-installations: needs a GitHub App JWT, and gh authenticates as a user
+apps/list-installations-for-authenticated-user: needs a GitHub App user access token, and gh never calls it
+apps/list-repos-accessible-to-installation: needs an installation access token, and gh authenticates as a user
 checks/create: only a GitHub App may write checks, and gh authenticates as a user
 checks/create-suite: only a GitHub App may write checks, and gh authenticates as a user
 checks/get: not reached by a gh_cli test yet

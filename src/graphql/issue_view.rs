@@ -192,6 +192,9 @@ pub(super) fn comment_object(
         id: Some(rendered.node_id.clone()),
         url: Some(rendered.html_url.clone()),
         created_at: Some(crate::time::format(&comment.created_at)),
+        updated_at: Some(crate::time::format(&comment.updated_at)),
+        last_edited_at: (comment.updated_at != comment.created_at)
+            .then(|| crate::time::format(&comment.updated_at)),
         author: author_login.and_then(|login| actor_for(env, state, login)),
         author_association: Some(
             author_login.map_or(CommentAuthorAssociation::None, |login| {

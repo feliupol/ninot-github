@@ -30,6 +30,12 @@ pub struct Caller {
 /// Scope prefix naming the repository, as `owner/repo`, of an installation token.
 pub const INSTALLATION_SCOPE: &str = "installation:";
 
+/// Scope prefix naming the GitHub App, by id, of a user access token.
+pub const USER_TO_SERVER_SCOPE: &str = "user-to-server:";
+
+/// Prefix of GitHub App user access tokens.
+pub const USER_TOKEN_PREFIX: &str = "ghu_";
+
 /// Scope prefix of one permission an installation token grants, as `permission:<name>:<access>`.
 pub const PERMISSION_SCOPE: &str = "permission:";
 
@@ -43,6 +49,14 @@ impl Caller {
         self.scopes
             .iter()
             .find_map(|scope| scope.strip_prefix(INSTALLATION_SCOPE))
+    }
+
+    /// The id of the GitHub App a user access token belongs to.
+    pub fn user_to_server_app(&self) -> Option<u64> {
+        self.scopes
+            .iter()
+            .find_map(|scope| scope.strip_prefix(USER_TO_SERVER_SCOPE))
+            .and_then(|id| id.parse().ok())
     }
 
     /// The access an installation token grants to `permission`.

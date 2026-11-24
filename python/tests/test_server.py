@@ -249,3 +249,47 @@ def test_org_plan_is_shown_to_owners_and_limits_private_repositories() -> None:
         assert json.loads(urllib.request.urlopen(get("/repos/org/project/rulesets")).read()) == []
         with pytest.raises(ValueError, match="unknown plan"):
             org.set_plan("platinum")
+
+
+def test_add_release_seeds_a_release_with_assets() -> None:
+    """Test that a seeded release is served by the releases API."""
+    server = Server()
+    admin = {"Authorization": f"token {server.admin_token}"}
+    repository = server.add_repository("admin", "tool", default_branch="main")
+    release_id = repository.add_release({
+        "tag_name": "v1",
+        "draft": True,
+        "assets": [{"name": "a.txt", "content_base64": "aGk="}],
+    })
+    request = urllib.request.Request(
+        f"{server.url}/repos/admin/tool/releases/{release_id}", headers=admin
+    )
+    release = json.loads(urllib.request.urlopen(request).read())
+    assert release["tag_name"] == "v1"
+    assert release["draft"] is True
+    assert release["assets"][0]["size"] == 2
+    with pytest.raises(ValueError, match="already exists"):
+        repository.add_release({"tag_name": "v1"})
+    server.stop()
+
+
+def test_app_credentials_installations_and_deliveries_are_seeded_through_models() -> None:
+    """Test that App tokens, OAuth apps, installations and deliveries need no HTTP state API."""
+    server = Server()
+    alice = server.add_user("alice")
+    repository = server.add_repository("alice", "tool", default_branch="main")
+    repository.add_installation(7, "read", 9)
+    server.add_oauth_app("client", "secret", 9)
+    token = alice.add_app_token(9)
+    assert token.startswith("ghu_")
+    request = urllib.request.Request(
+        f"{server.url}/user/installations", headers={"Authorization": f"token {token}"}
+    )
+    installations = json.loads(urllib.request.urlopen(request).read())["installations"]
+    assert [installation["id"] for installation in installations] == [7]
+    assert server.deliveries() == []
+    assert server.deliveries("push") == []
+    with pytest.raises(urllib.error.HTTPError) as missing:
+        urllib.request.urlopen(f"{server.url}/_ninot/faults")
+    assert missing.value.code == 404
+    server.stop()

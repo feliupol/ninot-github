@@ -8,10 +8,10 @@ mod seed_actions;
 /// A repository fixture handle. Repository-owned API state is seeded through this value.
 #[derive(Clone)]
 pub struct Repository {
-    app: Arc<App>,
-    owner: String,
-    name: String,
-    server_url: String,
+    pub(super) app: Arc<App>,
+    pub(super) owner: String,
+    pub(super) name: String,
+    pub(super) server_url: String,
 }
 
 /// An issue fixture handle, retaining its owning repository.
@@ -73,8 +73,8 @@ pub struct Project {
 /// A user fixture handle. User-owned API state is seeded through this value.
 #[derive(Clone)]
 pub struct User {
-    app: Arc<App>,
-    login: String,
+    pub(super) app: Arc<App>,
+    pub(super) login: String,
 }
 
 /// An organization fixture handle. Organization-owned API state is seeded through this value.
@@ -121,6 +121,11 @@ impl Server {
         }
     }
 
+    /// Registers the OAuth credentials of GitHub App `app_id`, which the web flow checks.
+    pub fn add_oauth_app(&self, client_id: &str, client_secret: &str, app_id: u64) {
+        lock(&self.app.state).add_oauth_app(client_id, client_secret, app_id);
+    }
+
     /// Adds an organization whose members administer its repositories, and returns a handle.
     pub fn add_org(&self, login: &str, members: &[&str]) -> Org {
         lock(&self.app.state).add_org(login, members);
@@ -156,40 +161,15 @@ impl Server {
         language: Option<String>,
         default_branch: &str,
     ) -> io::Result<Repository> {
-        let storage = {
-            let mut state = lock(&self.app.state);
-            let repo = state
-                .create_repo(owner, name, private, description.clone())
-                .map_err(|response| {
-                    io::Error::other(format!("cannot add repository: {}", response.status))
-                })?;
-            repo.git_dir
-                .clone()
-                .map(|directory| (directory, repo.default_branch.clone()))
-        };
-        if let Some((directory, branch)) = storage {
-            handlers::repos::init_storage(
-                &self.app.state,
-                owner,
-                name,
-                &directory,
-                &branch,
-                false,
-            )?;
-        }
-        lock(&self.app.state).set_repo_metadata(
+        self.app.add_repository(
+            self.url(),
             owner,
             name,
+            private,
             description,
             language,
             default_branch,
-        )?;
-        Ok(Repository {
-            app: self.app.clone(),
-            owner: owner.to_owned(),
-            name: name.to_owned(),
-            server_url: self.url().to_owned(),
-        })
+        )
     }
 
     /// Returns a handle for an existing repository.
@@ -209,6 +189,43 @@ impl Server {
     }
 }
 
+impl App {
+    /// Creates a repository and returns the handle that owns its fixture operations.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn add_repository(
+        self: &Arc<Self>,
+        server_url: &str,
+        owner: &str,
+        name: &str,
+        private: bool,
+        description: Option<String>,
+        language: Option<String>,
+        default_branch: &str,
+    ) -> io::Result<Repository> {
+        let storage = {
+            let mut state = lock(&self.state);
+            let repo = state
+                .create_repo(owner, name, private, description.clone())
+                .map_err(|response| {
+                    io::Error::other(format!("cannot add repository: {}", response.status))
+                })?;
+            repo.git_dir
+                .clone()
+                .map(|directory| (directory, repo.default_branch.clone()))
+        };
+        if let Some((directory, branch)) = storage {
+            handlers::repos::init_storage(&self.state, owner, name, &directory, &branch, false)?;
+        }
+        lock(&self.state).set_repo_metadata(owner, name, description, language, default_branch)?;
+        Ok(Repository {
+            app: self.clone(),
+            owner: owner.to_owned(),
+            name: name.to_owned(),
+            server_url: server_url.to_owned(),
+        })
+    }
+}
+
 impl User {
     /// User login.
     pub fn login(&self) -> &str {
@@ -218,6 +235,11 @@ impl User {
     /// Issues a token acting as this user.
     pub fn add_token(&self, scopes: &[&str]) -> String {
         lock(&self.app.state).add_token(&self.login, scopes)
+    }
+
+    /// Issues a GitHub App user access token of app `app_id`, acting as this user.
+    pub fn add_app_token(&self, app_id: u64) -> String {
+        lock(&self.app.state).add_user_to_server_token(&self.login, app_id)
     }
 
     /// Sets the display name returned by public user endpoints.
@@ -555,14 +577,126 @@ impl Repository {
 
     /// Seeds a GitHub App installation of `app_id` on this repository.
     pub fn add_app_installation(&self, installation_id: u64, app_id: u64) -> io::Result<()> {
+        self.add_app_installation_with_secrets_permission(installation_id, app_id, None)
+    }
+
+    /// Seeds an installation of `app_id` on this repository with an explicit repository
+    /// Actions secrets permission.
+    pub fn add_app_installation_with_secrets_permission(
+        &self,
+        installation_id: u64,
+        app_id: u64,
+        secrets_permission: Option<crate::fixtures::ActionsSecretsPermission>,
+    ) -> io::Result<()> {
         self.ensure_running()?;
-        lock(&self.app.state).add_app_installation(
+        lock(&self.app.state).insert_installation(
             &self.owner,
             &self.name,
             installation_id,
             app_id,
+            secrets_permission,
         );
         Ok(())
+    }
+
+    /// Seeds a release, with its assets, and returns its id.
+    pub fn add_release(&self, seed: crate::fixtures::ReleaseSeed) -> io::Result<u64> {
+        use base64::Engine as _;
+        use sha2::Digest as _;
+        self.ensure_running()?;
+        let invalid = |message: String| io::Error::new(io::ErrorKind::InvalidInput, message);
+        if seed.tag_name.is_empty() {
+            return Err(invalid("a release needs a tag_name".to_owned()));
+        }
+        let timestamp = |value: &Option<String>, kind: &str| {
+            value
+                .as_deref()
+                .map(|value| {
+                    crate::fixtures::parse_timestamp(value, kind)
+                        .map(|parsed| crate::time::format(&parsed))
+                })
+                .transpose()
+        };
+        let created_at =
+            timestamp(&seed.created_at, "release creation")?.unwrap_or_else(crate::time::now);
+        let published_at = timestamp(&seed.published_at, "release publication")?
+            .unwrap_or_else(|| created_at.clone());
+        let author = seed
+            .author
+            .clone()
+            .unwrap_or_else(|| ADMIN_LOGIN.to_owned());
+        let mut state = lock(&self.app.state);
+        if state.account(&author).is_none() {
+            return Err(not_found("release author does not exist"));
+        }
+        let repo = state
+            .account(&self.owner)
+            .and_then(|account| account.repo(&self.name))
+            .ok_or_else(|| not_found("repository does not exist"))?;
+        if repo
+            .releases
+            .iter()
+            .any(|release| release.tag_name == seed.tag_name)
+        {
+            return Err(invalid(format!("release {} already exists", seed.tag_name)));
+        }
+        let target = seed
+            .target_commitish
+            .clone()
+            .unwrap_or_else(|| repo.default_branch.clone());
+        if !seed.draft {
+            handlers::releases::ensure_tag(repo, &seed.tag_name, &target).map_err(|response| {
+                invalid(format!(
+                    "cannot tag {}: status {}",
+                    seed.tag_name, response.status
+                ))
+            })?;
+        }
+        let id = state.next_id();
+        let mut assets = Vec::new();
+        for asset in &seed.assets {
+            let data = base64::engine::general_purpose::STANDARD
+                .decode(&asset.content_base64)
+                .map_err(|error| invalid(format!("asset {} is not base64: {error}", asset.name)))?;
+            if assets
+                .iter()
+                .any(|existing: &crate::state::Asset| existing.name == asset.name)
+            {
+                return Err(invalid(format!("asset {} is listed twice", asset.name)));
+            }
+            assets.push(crate::state::Asset {
+                id: state.next_id(),
+                name: asset.name.clone(),
+                label: asset.label.clone(),
+                content_type: asset
+                    .content_type
+                    .clone()
+                    .unwrap_or_else(|| "application/octet-stream".to_owned()),
+                digest: format!("sha256:{:x}", sha2::Sha256::digest(&data)),
+                data,
+                uploader: author.clone(),
+                created_at: created_at.clone(),
+            });
+        }
+        state
+            .account_mut(&self.owner)
+            .and_then(|account| account.repo_mut(&self.name))
+            .expect("repository was found above")
+            .releases
+            .push(crate::state::Release {
+                id,
+                tag_name: seed.tag_name,
+                target_commitish: target,
+                name: seed.name,
+                body: seed.body,
+                draft: seed.draft,
+                prerelease: seed.prerelease,
+                author,
+                created_at,
+                published_at: (!seed.draft).then_some(published_at),
+                assets,
+            });
+        Ok(id)
     }
 
     /// Seeds the repository public key used to encrypt Actions secrets.

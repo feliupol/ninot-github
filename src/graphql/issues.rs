@@ -317,7 +317,9 @@ fn issue_parent<'a>(
 }
 
 fn issue_labels_field(env: &Env, parent: &Map, args: &Map) -> Result<Output, Error> {
-    let PageArgs { first, last, after } = read(args)?;
+    let PageArgs {
+        first, last, after, ..
+    } = read(args)?;
     let (state, owner, name, number) = issue_parent(env, parent)?;
     let account = state.account(&owner).ok_or_else(super::errors::missing)?;
     let repo = account.repo(&name).ok_or_else(super::errors::missing)?;
@@ -334,7 +336,12 @@ fn issue_labels_field(env: &Env, parent: &Map, args: &Map) -> Result<Output, Err
 }
 
 fn issue_comments_field(env: &Env, parent: &Map, args: &Map) -> Result<Output, Error> {
-    let PageArgs { first, last, after } = read(args)?;
+    let PageArgs {
+        first,
+        last,
+        after,
+        before,
+    } = read(args)?;
     let (state, owner, name, number) = issue_parent(env, parent)?;
     let account = state.account(&owner).ok_or_else(super::errors::missing)?;
     let repo = account.repo(&name).ok_or_else(super::errors::missing)?;
@@ -347,11 +354,15 @@ fn issue_comments_field(env: &Env, parent: &Map, args: &Map) -> Result<Output, E
         .iter()
         .map(|comment| comment_object(env, &state, account, repo, issue, comment))
         .collect();
-    Output::of(page(comments, first, last, after))
+    Output::of(super::page::page_before(
+        comments, first, last, after, before,
+    ))
 }
 
 fn issue_assignees_field(env: &Env, parent: &Map, args: &Map) -> Result<Output, Error> {
-    let PageArgs { first, last, after } = read(args)?;
+    let PageArgs {
+        first, last, after, ..
+    } = read(args)?;
     let (state, owner, name, number) = issue_parent(env, parent)?;
     let repo = super::read::repo(&state, &owner, &name).ok_or_else(super::errors::missing)?;
     let issue = repo
@@ -367,7 +378,9 @@ fn issue_assignees_field(env: &Env, parent: &Map, args: &Map) -> Result<Output, 
 }
 
 fn issue_linked_branches_field(env: &Env, parent: &Map, args: &Map) -> Result<Output, Error> {
-    let PageArgs { first, last, after } = read(args)?;
+    let PageArgs {
+        first, last, after, ..
+    } = read(args)?;
     let (state, owner, name, number) = issue_parent(env, parent)?;
     let account = state.account(&owner).ok_or_else(super::errors::missing)?;
     let repo = account.repo(&name).ok_or_else(super::errors::missing)?;

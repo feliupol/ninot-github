@@ -125,7 +125,7 @@ const REQUEST_OPERATIONS: [&str; 49] = [
 ];
 
 /// Supported REST operations whose JSON response models are used by handlers.
-const RESPONSE_OPERATIONS: [&str; 103] = [
+const RESPONSE_OPERATIONS: [&str; 104] = [
     "actions/create-or-update-repo-secret",
     "actions/create-workflow-dispatch",
     "actions/get-repo-public-key",
@@ -152,6 +152,7 @@ const RESPONSE_OPERATIONS: [&str; 103] = [
     "actions/delete-actions-cache-by-key",
     "apps/create-installation-access-token",
     "apps/get-repo-installation",
+    "apps/list-installations-for-authenticated-user",
     "checks/create",
     "checks/create-suite",
     "checks/get",
@@ -426,7 +427,7 @@ fn main() {
 
 /// Input objects the GraphQL resolvers deserialize their arguments into. Their Rust types, and
 /// those of every input object they reference, are generated into `graphql_types`.
-const GRAPHQL_INPUTS: [&str; 10] = [
+const GRAPHQL_INPUTS: [&str; 11] = [
     "AddCommentInput",
     "AddPullRequestReviewThreadReplyInput",
     "ConvertPullRequestToDraftInput",
@@ -437,6 +438,7 @@ const GRAPHQL_INPUTS: [&str; 10] = [
     "RepositoryOrder",
     "ResolveReviewThreadInput",
     "UpdateProjectV2ItemFieldValueInput",
+    "AddProjectV2ItemByIdInput",
 ];
 
 /// Rust types for every enum of GitHub's GraphQL schema and for [`GRAPHQL_INPUTS`], serialized

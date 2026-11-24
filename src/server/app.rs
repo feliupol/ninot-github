@@ -219,6 +219,18 @@ impl App {
                     None,
                 );
             }
+            Some(Fault::Respond(reply)) => {
+                let content_type = reply
+                    .content_type
+                    .as_deref()
+                    .unwrap_or("application/json; charset=utf-8");
+                let body = reply.body.unwrap_or_default().into_bytes();
+                let response = reply.headers.into_iter().fold(
+                    ApiResponse::bytes_raw(reply.status, content_type, body),
+                    |response, (name, value)| response.with_header(&name, value),
+                );
+                return into_response(response, None);
+            }
             Some(Fault::SecondaryRateLimit) => {
                 return into_response(
                     crate::errors::GithubError::SecondaryRateLimit
@@ -416,6 +428,16 @@ impl App {
             parts.uri.query(),
             &body,
             &web_url,
+        ) {
+            return into_response(response, None);
+        }
+        if let Some(response) = handlers::oauth::serve(
+            &self.state,
+            &parts.method,
+            &parts.headers,
+            full_path,
+            parts.uri.query(),
+            &body,
         ) {
             return into_response(response, None);
         }

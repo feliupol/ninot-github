@@ -153,7 +153,19 @@ fn page_reviews(env: &Env, parent: &Map, args: &Map) -> Result<Output, Error> {
 }
 
 fn page_comments(env: &Env, parent: &Map, args: &Map) -> Result<Output, Error> {
-    page_of(env, parent, args, |pull| pull.comments.nodes)
+    let PageArgs {
+        first,
+        last,
+        after,
+        before,
+    } = read(args)?;
+    Output::of(super::page::page_before(
+        owned_pull(env, parent)?.comments.nodes,
+        first,
+        last,
+        after,
+        before,
+    ))
 }
 
 fn page_labels(env: &Env, parent: &Map, args: &Map) -> Result<Output, Error> {
@@ -174,7 +186,9 @@ fn page_of<T: serde::Serialize>(
     args: &Map,
     pick: impl FnOnce(super::objects::PullRequest) -> Vec<T>,
 ) -> Result<Output, Error> {
-    let PageArgs { first, last, after } = read(args)?;
+    let PageArgs {
+        first, last, after, ..
+    } = read(args)?;
     Output::of(page_window(
         pick(owned_pull(env, parent)?),
         first,
@@ -258,7 +272,9 @@ struct OidParent {
 
 fn rollup_contexts(env: &Env, parent: &Map, args: &Map) -> Result<Output, Error> {
     let parent: RollupParent = read(parent)?;
-    let PageArgs { first, last, after } = read(args)?;
+    let PageArgs {
+        first, last, after, ..
+    } = read(args)?;
     let state = lock(&env.state);
     let repo = state
         .account(&parent.owner)
